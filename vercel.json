@@ -1,0 +1,20 @@
+{
+  "buildCommand": "cd autohvac-app && npm run build",
+  "devCommand": "cd autohvac-app && npm run dev", 
+  "installCommand": "cd autohvac-app && npm install",
+  "outputDirectory": "autohvac-app/.next",
+  "rewrites": [
+    {
+      "source": "/api/blueprint/:path*",
+      "destination": "https://your-backend-url.railway.app/api/blueprint/:path*"
+    },
+    {
+      "source": "/api/calculations/:path*",
+      "destination": "https://your-backend-url.railway.app/api/calculations/:path*"
+    },
+    {
+      "source": "/api/export/:path*", 
+      "destination": "https://your-backend-url.railway.app/api/export/:path*"
+    }
+  ]
+}
