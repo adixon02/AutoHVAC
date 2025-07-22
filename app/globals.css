@@ -1,0 +1,252 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 8 47% 95%;
+    --foreground: 215 25% 27%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-gradient-to-br from-primary-50 via-industrial-50 to-primary-100 text-industrial-900 font-sans antialiased;
+    min-height: 100vh;
+    background-attachment: fixed;
+  }
+
+  /* Premium scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-primary-200 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-primary-300;
+  }
+}
+
+@layer components {
+  /* Premium Button Styles */
+  .btn-primary {
+    @apply bg-gradient-primary text-white font-semibold py-4 px-8 rounded-2xl 
+           transition-all duration-300 shadow-medium hover:shadow-large 
+           hover:scale-105 active:scale-95 border border-primary-600/20
+           relative overflow-hidden group;
+  }
+  
+  .btn-primary::before {
+    @apply absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 
+           transition-transform duration-300;
+    content: '';
+  }
+
+  .btn-primary .btn-text {
+    @apply relative z-10;
+  }
+  
+  .btn-secondary {
+    @apply bg-white/80 backdrop-blur-xl hover:bg-white/90 text-industrial-700 
+           font-semibold py-4 px-8 rounded-2xl transition-all duration-300 
+           shadow-soft hover:shadow-medium border border-white/40
+           hover:scale-105 active:scale-95;
+  }
+
+  .btn-ghost {
+    @apply text-industrial-600 hover:text-primary-600 hover:bg-primary-50/50
+           font-medium py-3 px-6 rounded-xl transition-all duration-200
+           border border-transparent hover:border-primary-200;
+  }
+
+  /* Premium Input Styles */
+  .input-field {
+    @apply w-full px-6 py-4 bg-white/80 backdrop-blur-xl border border-white/40 
+           rounded-2xl focus:ring-2 focus:ring-primary-500/50 focus:border-primary-400
+           transition-all duration-300 shadow-soft focus:shadow-medium
+           text-industrial-900 placeholder:text-industrial-400
+           hover:bg-white/90 focus:bg-white/95;
+  }
+
+  .input-label {
+    @apply block text-sm font-semibold text-industrial-700 mb-3 tracking-wide;
+  }
+
+  .input-group {
+    @apply space-y-2;
+  }
+
+  /* Premium Card Styles */
+  .card {
+    @apply bg-white/70 backdrop-blur-xl rounded-3xl shadow-large p-8 
+           border border-white/40 transition-all duration-500 
+           hover:shadow-glow hover:bg-white/80;
+  }
+
+  .card-premium {
+    @apply bg-gradient-to-br from-white/80 to-white/60 backdrop-blur-2xl 
+           rounded-3xl shadow-large p-10 border border-white/50
+           transition-all duration-500 hover:shadow-glow-lg
+           hover:from-white/90 hover:to-white/70 relative overflow-hidden;
+  }
+
+  .card-premium::before {
+    @apply absolute inset-0 bg-gradient-to-br from-primary-500/5 to-accent-cyan/5 
+           opacity-0 hover:opacity-100 transition-opacity duration-500;
+    content: '';
+  }
+
+  .card-premium > * {
+    @apply relative z-10;
+  }
+
+  /* Progress Indicator Styles */
+  .progress-step {
+    @apply w-12 h-12 rounded-full flex items-center justify-center font-bold text-sm
+           transition-all duration-300 relative overflow-hidden;
+  }
+
+  .progress-step-active {
+    @apply bg-gradient-primary text-white shadow-glow animate-glow;
+  }
+
+  .progress-step-completed {
+    @apply bg-accent-emerald text-white shadow-medium;
+  }
+
+  .progress-step-pending {
+    @apply bg-white/80 text-industrial-500 border-2 border-industrial-200;
+  }
+
+  .progress-connector {
+    @apply h-2 mx-4 rounded-full transition-all duration-500;
+  }
+
+  .progress-connector-active {
+    @apply bg-gradient-to-r from-accent-emerald to-primary-500;
+  }
+
+  .progress-connector-pending {
+    @apply bg-industrial-200;
+  }
+
+  /* Form Section Styles */
+  .form-section {
+    @apply space-y-8;
+  }
+
+  .form-grid {
+    @apply grid grid-cols-1 md:grid-cols-2 gap-6;
+  }
+
+  .form-row {
+    @apply flex flex-col sm:flex-row gap-4;
+  }
+
+  /* Premium Select Styles */
+  .select-field {
+    @apply input-field appearance-none cursor-pointer pr-12 bg-no-repeat bg-right;
+  }
+
+  /* Premium Radio Button Styles */
+  .radio-group {
+    @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4;
+  }
+
+  .radio-option {
+    @apply relative p-6 bg-white/60 backdrop-blur-xl rounded-2xl border border-white/40
+           cursor-pointer transition-all duration-300 hover:bg-white/80
+           hover:shadow-medium group;
+  }
+
+  .radio-option input[type="radio"] {
+    @apply sr-only;
+  }
+
+  .radio-option input[type="radio"]:checked + .radio-content {
+    @apply bg-gradient-to-br from-primary-50 to-accent-cyan/10;
+  }
+
+  .radio-option input[type="radio"]:checked + .radio-content .radio-indicator {
+    @apply bg-gradient-primary text-white shadow-glow;
+  }
+
+  .radio-content {
+    @apply transition-all duration-300 rounded-xl p-1;
+  }
+
+  .radio-indicator {
+    @apply w-6 h-6 rounded-full border-2 border-industrial-300 bg-white
+           flex items-center justify-center text-xs font-bold
+           transition-all duration-300 mb-3;
+  }
+
+  .radio-title {
+    @apply font-semibold text-industrial-800 mb-2;
+  }
+
+  .radio-description {
+    @apply text-sm text-industrial-600;
+  }
+
+  /* Header Styles */
+  .page-header {
+    @apply text-4xl md:text-5xl font-bold bg-gradient-to-r from-industrial-900 
+           via-primary-700 to-accent-cyan bg-clip-text text-transparent
+           mb-4 tracking-tight;
+  }
+
+  .page-subtitle {
+    @apply text-lg md:text-xl text-industrial-600 mb-12 max-w-2xl;
+  }
+
+  /* Animation Classes */
+  .animate-fade-in-up {
+    animation: fadeInUp 0.6s ease-out forwards;
+  }
+
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Glass Effect Utilities */
+  .glass {
+    @apply bg-white/20 backdrop-blur-xl border border-white/30;
+  }
+
+  .glass-strong {
+    @apply bg-white/40 backdrop-blur-2xl border border-white/50;
+  }
+
+  /* Professional Status Indicators */
+  .status-online {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-medium
+           bg-accent-emerald/10 text-emerald-700 border border-accent-emerald/20;
+  }
+
+  .status-processing {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-medium
+           bg-primary-100/80 text-primary-700 border border-primary-200/50;
+  }
+
+  .status-warning {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-medium
+           bg-accent-orange/10 text-orange-700 border border-accent-orange/20;
+  }
+}
