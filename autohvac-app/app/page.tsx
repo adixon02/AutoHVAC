@@ -197,6 +197,7 @@ export default function Home() {
               )}
             </div>
           ))}
+        
         </div>
         <div className="flex justify-around mt-2 text-sm">
           {inputMethod === 'manual' ? (
