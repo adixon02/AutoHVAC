@@ -118,7 +118,7 @@ export default function Results({
       });
       
       // Footer
-      const pageCount = doc.internal.getNumberOfPages();
+      const pageCount = doc.internal.pages.length - 1; // -1 because first page is empty
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
         doc.setFontSize(8);
