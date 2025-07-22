@@ -1,3 +1,5 @@
+'use client';
+
 export default function TestCSS() {
   return (
     <div>
@@ -7,14 +9,7 @@ export default function TestCSS() {
       <div className="w-32 h-32 bg-green-500 mx-auto">
         Green square
       </div>
-      <style jsx>{`
-        .inline-test {
-          background-color: yellow;
-          color: purple;
-          padding: 20px;
-        }
-      `}</style>
-      <div className="inline-test">
+      <div style={{ backgroundColor: 'yellow', color: 'purple', padding: '20px' }}>
         This uses inline styles (should be yellow background, purple text)
       </div>
     </div>
