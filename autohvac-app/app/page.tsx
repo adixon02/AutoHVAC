@@ -80,7 +80,7 @@ export default function Home() {
     setInputMethod('manual');
   };
 
-  const handleBlueprintUpload = async (jobId: string, fileName: string) => {
+  const handleBlueprintUpload = async (jobId: string, fileNames: string[]) => {
     setBlueprintJobId(jobId);
     // Process blueprint analysis
     try {

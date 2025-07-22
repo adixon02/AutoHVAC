@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 
 interface BlueprintUploadProps {
-  onUploadComplete: (jobId: string, fileName: string) => void;
+  onUploadComplete: (jobId: string, fileNames: string[]) => void;
   onError: (error: string) => void;
 }
 
@@ -10,20 +10,24 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processingStatus, setProcessingStatus] = useState<string>('');
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
 
-    const file = acceptedFiles[0];
+    const allFiles = [...uploadedFiles, ...acceptedFiles];
+    setUploadedFiles(allFiles);
     setUploading(true);
     setUploadProgress(0);
-    setProcessingStatus('Uploading blueprint...');
+    setProcessingStatus(`Uploading ${allFiles.length} blueprint${allFiles.length > 1 ? 's' : ''}...`);
 
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      allFiles.forEach((file, index) => {
+        formData.append(`files`, file);
+      });
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/blueprint/upload`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/blueprint/upload-multiple`, {
         method: 'POST',
         body: formData,
       });
@@ -33,7 +37,7 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
       }
 
       const data = await response.json();
-      setProcessingStatus('Processing blueprint...');
+      setProcessingStatus(`Processing ${allFiles.length} blueprint${allFiles.length > 1 ? 's' : ''}...`);
       
       // Start polling for processing status
       const jobId = data.job_id;
@@ -44,8 +48,8 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
 
           if (statusData.status === 'completed') {
             clearInterval(pollInterval);
-            setProcessingStatus('Blueprint processed successfully!');
-            onUploadComplete(jobId, file.name);
+            setProcessingStatus(`${allFiles.length} blueprint${allFiles.length > 1 ? 's' : ''} processed successfully!`);
+            onUploadComplete(jobId, allFiles.map(f => f.name));
             setTimeout(() => {
               setUploading(false);
               setProcessingStatus('');
@@ -58,14 +62,16 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
           clearInterval(pollInterval);
           onError(err instanceof Error ? err.message : 'Processing failed');
           setUploading(false);
+          setUploadedFiles([]);
         }
       }, 2000);
 
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Upload failed');
       setUploading(false);
+      setUploadedFiles([]);
     }
-  }, [onUploadComplete, onError]);
+  }, [onUploadComplete, onError, uploadedFiles]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -76,7 +82,7 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
       'application/acad': ['.dwg'],
       'application/dxf': ['.dxf']
     },
-    maxFiles: 1,
+    multiple: true,
     disabled: uploading
   });
 
@@ -125,22 +131,81 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
         ) : (
           <>
             <p className="text-lg text-gray-600">
-              Drag & drop your blueprint here, or click to select
+              {uploadedFiles.length === 0 
+                ? 'Drag & drop your blueprints here, or click to select'
+                : `${uploadedFiles.length} file${uploadedFiles.length > 1 ? 's' : ''} selected - add more or click to process`
+              }
             </p>
             <p className="text-sm text-gray-500 mt-2">
-              Supports PDF, PNG, JPG, DWG, and DXF files
+              Supports PDF, PNG, JPG, DWG, and DXF files (multiple files allowed)
             </p>
           </>
         )}
       </div>
 
+      {/* File Preview Section */}
+      {uploadedFiles.length > 0 && !uploading && (
+        <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+          <h4 className="font-semibold text-gray-700 mb-3">Selected Files ({uploadedFiles.length}):</h4>
+          <div className="space-y-2">
+            {uploadedFiles.map((file, index) => (
+              <div key={index} className="flex items-center justify-between bg-white p-3 rounded border">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-blue-100 rounded flex items-center justify-center">
+                    <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900">{file.name}</p>
+                    <p className="text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    const newFiles = uploadedFiles.filter((_, i) => i !== index);
+                    setUploadedFiles(newFiles);
+                  }}
+                  className="text-red-500 hover:text-red-700 p-1"
+                  title="Remove file"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex justify-between items-center">
+            <button
+              onClick={() => setUploadedFiles([])}
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              Clear All
+            </button>
+            <button
+              onClick={() => {
+                if (uploadedFiles.length > 0) {
+                  onDrop([]);
+                }
+              }}
+              className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 transition-colors"
+            >
+              Process {uploadedFiles.length} File{uploadedFiles.length > 1 ? 's' : ''}
+            </button>
+          </div>
+        </div>
+      )}
+
       {!uploading && (
         <div className="mt-4 text-sm text-gray-600">
           <p className="font-semibold mb-2">Tips for best results:</p>
           <ul className="list-disc list-inside space-y-1">
+            <li>Upload all related blueprints (floor plans, elevations, details)</li>
             <li>Ensure blueprints are clear and readable</li>
-            <li>Include floor plan with room labels</li>
+            <li>Include room labels and dimensions when possible</li>
             <li>Higher resolution images work better</li>
+            <li>Multiple files will be analyzed together as one project</li>
             <li>Remove any sensitive information before uploading</li>
           </ul>
         </div>
