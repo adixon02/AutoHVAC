@@ -176,7 +176,7 @@ export default function Home() {
                 }`} />
               )}
             </div>
-          ))}
+          ))
             : ['project', 'blueprint', 'results'].map((step, index) => (
             <div key={step} className="flex items-center">
               <div
@@ -196,8 +196,8 @@ export default function Home() {
                 }`} />
               )}
             </div>
-          ))}
-        
+          ))
+          }
         </div>
         <div className="flex justify-around mt-2 text-sm">
           {inputMethod === 'manual' ? (
