@@ -14,7 +14,7 @@ export default function ProjectSetup({ onSubmit }: ProjectSetupProps) {
     projectType: 'residential',
     constructionType: 'new'
   });
-  const [inputMethod, setInputMethod] = useState<'manual' | 'blueprint'>('manual');
+  const [inputMethod, setInputMethod] = useState<'manual' | 'blueprint'>('blueprint');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -130,18 +130,6 @@ export default function ProjectSetup({ onSubmit }: ProjectSetupProps) {
             <button
               type="button"
               className={`p-4 rounded-lg border-2 transition-all ${
-                inputMethod === 'manual' 
-                  ? 'border-hvac-blue bg-hvac-light' 
-                  : 'border-gray-300 hover:border-gray-400'
-              }`}
-              onClick={() => setInputMethod('manual')}
-            >
-              <div className="font-semibold">Manual Input</div>
-              <div className="text-sm text-gray-600">Enter room details manually</div>
-            </button>
-            <button
-              type="button"
-              className={`p-4 rounded-lg border-2 transition-all ${
                 inputMethod === 'blueprint' 
                   ? 'border-hvac-blue bg-hvac-light' 
                   : 'border-gray-300 hover:border-gray-400'
@@ -151,12 +139,24 @@ export default function ProjectSetup({ onSubmit }: ProjectSetupProps) {
               <div className="font-semibold">Upload Blueprint</div>
               <div className="text-sm text-gray-600">AI-powered blueprint analysis</div>
             </button>
+            <button
+              type="button"
+              className={`p-4 rounded-lg border-2 transition-all ${
+                inputMethod === 'manual' 
+                  ? 'border-hvac-blue bg-hvac-light' 
+                  : 'border-gray-300 hover:border-gray-400'
+              }`}
+              onClick={() => setInputMethod('manual')}
+            >
+              <div className="font-semibold">Manual Input</div>
+              <div className="text-sm text-gray-600">Enter room details manually</div>
+            </button>
           </div>
         </div>
 
         <div className="flex justify-end pt-4">
           <button type="submit" className="btn-primary">
-            {inputMethod === 'manual' ? 'Continue to Building Details' : 'Continue to Blueprint Upload'}
+            {inputMethod === 'blueprint' ? 'Continue to Blueprint Upload' : 'Continue to Building Details'}
           </button>
         </div>
       </form>
