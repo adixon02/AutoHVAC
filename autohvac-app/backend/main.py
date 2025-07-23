@@ -127,7 +127,7 @@ async def upload_blueprint(
         output_generator = ProfessionalOutputGenerator()
         
         # Extract data from PDF
-        extraction_result = processor.process_blueprint(file_path)
+        extraction_result = processor.process_blueprint(Path(file_path))
         
         # Generate professional analysis
         professional_outputs = output_generator.generate_outputs(extraction_result, {

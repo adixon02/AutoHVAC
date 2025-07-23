@@ -29,6 +29,9 @@ wheels/
 .env.production.local
 backend/.env
 
+# Config files with secrets
+config.json
+
 # Next.js
 .next/
 out/
