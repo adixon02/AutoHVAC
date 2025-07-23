@@ -154,7 +154,13 @@ class ProfessionalOutputGenerator:
         logger.info("🧮 Calculating Manual J loads...")
         
         # Get climate zone for location using professional database
-        climate_zone = self.climate_db.get_climate_data(extraction.project_info.zip_code)
+        zip_code = extraction.project_info.zip_code or "99019"  # Fallback to Liberty Lake
+        climate_zone = self.climate_db.get_climate_data(zip_code)
+        
+        # Ensure climate_zone is a dictionary
+        if not isinstance(climate_zone, dict):
+            logger.error(f"Climate zone lookup returned non-dict: {type(climate_zone)} = {climate_zone}")
+            climate_zone = self.climate_db.get_climate_data("99019")  # Safe fallback
         
         room_loads = []
         total_cooling = 0
@@ -222,9 +228,15 @@ class ProfessionalOutputGenerator:
     def _calculate_room_load(self, room, extraction: ExtractionResult, climate_zone: Dict[str, Any]) -> Dict[str, Any]:
         """Calculate individual room load using Manual J methodology"""
         
-        # Temperature differences
-        summer_temp_diff = climate_zone['design_temperatures']['summer_db'] - 75
-        winter_temp_diff = 70 - climate_zone['design_temperatures']['winter_db']
+        # Temperature differences - with safety checks
+        if isinstance(climate_zone, dict) and 'design_temperatures' in climate_zone:
+            summer_temp_diff = climate_zone['design_temperatures']['summer_db'] - 75
+            winter_temp_diff = 70 - climate_zone['design_temperatures']['winter_db']
+        else:
+            logger.error(f"Invalid climate zone in room load calc: {type(climate_zone)}")
+            # Use safe defaults for Liberty Lake, WA
+            summer_temp_diff = 90 - 75  # 15°F
+            winter_temp_diff = 70 - 2   # 68°F
         
         # Wall loads - improved calculation based on building envelope only
         # Only calculate wall loads for rooms with actual exterior walls
@@ -404,7 +416,13 @@ class ProfessionalOutputGenerator:
         equipment_heating = round(heating_tons * 12000 * 1.10)  # 10% safety factor
         
         # Select equipment type based on climate
-        climate_zone_code = climate_zone.get('zone', '4A')
+        # Ensure we have a valid climate zone dictionary
+        if not isinstance(climate_zone, dict):
+            logger.error(f"Invalid climate zone data type: {type(climate_zone)}")
+            climate_zone_code = '4A'  # Safe default
+        else:
+            climate_zone_code = climate_zone.get('zone', '4A')
+            
         if climate_zone_code in ['6A', '6B', '7', '8']:
             equipment_type = "cold_climate_heat_pump"
             efficiency = {"seer": 20, "hspf": 10}

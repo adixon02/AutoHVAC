@@ -93,7 +93,22 @@ class ClimateDatabase:
         
         # 4. Fallback to regional default based on ZIP code patterns
         logger.warning(f"🌡️ Using regional fallback for unknown ZIP: {zip_code}")
-        return self._get_regional_fallback(zip_code)
+        result = self._get_regional_fallback(zip_code)
+        
+        # Final safety check - ensure we always return a dictionary
+        if not isinstance(result, dict):
+            logger.error(f"Regional fallback returned non-dict: {type(result)}")
+            return {
+                'zone': '4A',
+                'description': 'Emergency fallback',
+                'design_temperatures': {'summer_db': 90, 'winter_db': 20},
+                'humidity': {'summer': 50, 'winter': 60},
+                'county': 'Unknown',
+                'state': 'Unknown',
+                'source': 'Emergency_Fallback'
+            }
+        
+        return result
     
     def _fetch_from_nrel_api(self, zip_code: str) -> Optional[Dict[str, Any]]:
         """Fetch climate data from NREL API"""
