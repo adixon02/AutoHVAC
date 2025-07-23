@@ -1,0 +1,62 @@
+{
+  "project_info": {
+    "project_name": "BROWN\nRESIDENCE + ADU",
+    "address": "25196 WYVERN LANE, LIBERTY LAKE, WA 99019",
+    "owner": "JIMMY AND RACHEL BROWN",
+    "architect": "HOIST LLC",
+    "analysis_date": "2025-07-22T18:35:13.087065",
+    "analyst": "AutoHVAC Pro"
+  },
+  "hvac_design": {
+    "type": "zoned_ducted",
+    "system_type": "zoned_ducted",
+    "equipment": {
+      "type": "cold_climate_heat_pump",
+      "equipmentType": "cold_climate_heat_pump",
+      "capacity": {
+        "cooling": 110400,
+        "heating": 542520
+      },
+      "efficiency": {
+        "seer": 20,
+        "hspf": 10
+      },
+      "location": {
+        "x": 100,
+        "y": 100
+      }
+    },
+    "distribution": {
+      "type": "ducted",
+      "zones": 3,
+      "estimated_duct_length": 500
+    },
+    "ventilation": {
+      "type": "ERV",
+      "cfm": 130.35,
+      "efficiency": "80% sensible, 70% latent"
+    },
+    "cost_estimate": {
+      "equipment": 20000,
+      "installation": 24000,
+      "ductwork": 16000,
+      "permits": 500,
+      "total": 60500
+    }
+  },
+  "design_notes": [
+    "HVAC system designed per ACCA Manual J 8th Edition load calculations",
+    "Equipment sized for Cold - Dry climate zone 6B",
+    "High-efficiency cold_climate_heat_pump selected for optimal performance",
+    "Zoned system provides individual room temperature control",
+    "Zone dampers enable energy savings through selective conditioning",
+    "Equipment exceeds ENERGY STAR requirements",
+    "All ductwork to be insulated to R-8 minimum per IECC",
+    "ERV system provides code-required ventilation",
+    "Manual dampers included for system balancing",
+    "Equipment location allows for proper service access",
+    "Installation to comply with manufacturer specifications and local codes"
+  ],
+  "generated_by": "AutoHVAC Pro",
+  "generation_date": "2025-07-22T18:35:13.088921"
+}

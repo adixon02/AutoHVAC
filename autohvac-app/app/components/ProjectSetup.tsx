@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ProjectInfo } from '../lib/types';
+import { Card, FormField, Input, SelectionGrid, Button } from './ui';
 
 interface ProjectSetupProps {
   onSubmit: (data: ProjectInfo) => void;
@@ -22,144 +23,151 @@ export default function ProjectSetup({ onSubmit }: ProjectSetupProps) {
   };
 
   return (
-    <div className="card max-w-2xl mx-auto">
-      <h2 className="text-2xl font-bold mb-6 text-hvac-navy">Project Information</h2>
+    <Card className="max-w-2xl mx-auto animate-fade-in" padding="lg" hover={true}>
+      <div className="text-center mb-8">
+        <h2 className="text-3xl font-bold text-neutral-900 mb-3">Let's Get Started</h2>
+        <p className="text-neutral-600 text-lg">Tell us about your HVAC project so we can provide accurate load calculations</p>
+      </div>
       
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Project Name
-          </label>
-          <input
+      <form onSubmit={handleSubmit} className="space-y-8">
+        <FormField label="Project Name" required>
+          <Input
             type="text"
             required
-            className="input-field"
             value={formData.projectName}
             onChange={(e) => setFormData({ ...formData, projectName: e.target.value })}
-            placeholder="e.g., Smith Residence"
+            placeholder="e.g., Smith Residence HVAC Design"
+            leftIcon={
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+              </svg>
+            }
           />
-        </div>
+        </FormField>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            ZIP Code
-          </label>
-          <input
+        <FormField 
+          label="ZIP Code" 
+          required
+          helperText="We'll automatically determine your climate zone and local building requirements"
+        >
+          <Input
             type="text"
             required
             pattern="[0-9]{5}"
-            className="input-field"
             value={formData.zipCode}
             onChange={(e) => setFormData({ ...formData, zipCode: e.target.value })}
-            placeholder="12345"
+            placeholder="Enter 5-digit ZIP code"
+            leftIcon={
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            }
           />
-          <p className="mt-1 text-sm text-gray-600">
-            We'll use this to determine climate zone and local requirements
-          </p>
-        </div>
+        </FormField>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Project Type
-          </label>
-          <div className="grid grid-cols-2 gap-4">
-            <button
-              type="button"
-              className={`p-4 rounded-lg border-2 transition-all ${
-                formData.projectType === 'residential' 
-                  ? 'border-hvac-blue bg-hvac-light' 
-                  : 'border-gray-300 hover:border-gray-400'
-              }`}
-              onClick={() => setFormData({ ...formData, projectType: 'residential' })}
-            >
-              <div className="font-semibold">Residential</div>
-              <div className="text-sm text-gray-600">Single family homes</div>
-            </button>
-            <button
-              type="button"
-              className={`p-4 rounded-lg border-2 transition-all ${
-                formData.projectType === 'commercial' 
-                  ? 'border-hvac-blue bg-hvac-light' 
-                  : 'border-gray-300 hover:border-gray-400'
-              }`}
-              onClick={() => setFormData({ ...formData, projectType: 'commercial' })}
-            >
-              <div className="font-semibold">Commercial</div>
-              <div className="text-sm text-gray-600">Office & retail spaces</div>
-            </button>
-          </div>
-        </div>
+        <FormField label="Project Type">
+          <SelectionGrid
+            options={[
+              {
+                value: 'residential',
+                title: 'Residential',
+                description: 'Homes, condos, apartments',
+                icon: (
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                  </svg>
+                )
+              },
+              {
+                value: 'commercial',
+                title: 'Commercial',
+                description: 'Offices, retail, warehouses',
+                icon: (
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                )
+              }
+            ]}
+            selectedValue={formData.projectType}
+            onSelect={(value) => setFormData({ ...formData, projectType: value as 'residential' | 'commercial' })}
+          />
+        </FormField>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Construction Type
-          </label>
-          <div className="grid grid-cols-2 gap-4">
-            <button
-              type="button"
-              className={`p-4 rounded-lg border-2 transition-all ${
-                formData.constructionType === 'new' 
-                  ? 'border-hvac-blue bg-hvac-light' 
-                  : 'border-gray-300 hover:border-gray-400'
-              }`}
-              onClick={() => setFormData({ ...formData, constructionType: 'new' })}
-            >
-              <div className="font-semibold">New Construction</div>
-              <div className="text-sm text-gray-600">Building from scratch</div>
-            </button>
-            <button
-              type="button"
-              className={`p-4 rounded-lg border-2 transition-all ${
-                formData.constructionType === 'retrofit' 
-                  ? 'border-hvac-blue bg-hvac-light' 
-                  : 'border-gray-300 hover:border-gray-400'
-              }`}
-              onClick={() => setFormData({ ...formData, constructionType: 'retrofit' })}
-            >
-              <div className="font-semibold">Retrofit</div>
-              <div className="text-sm text-gray-600">Replacing existing system</div>
-            </button>
-          </div>
-        </div>
+        <FormField label="Construction Type">
+          <SelectionGrid
+            options={[
+              {
+                value: 'new',
+                title: 'New Construction',
+                description: 'Fresh build, modern codes',
+                icon: (
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4" />
+                  </svg>
+                )
+              },
+              {
+                value: 'retrofit',
+                title: 'Retrofit/Replacement',
+                description: 'Upgrading existing system',
+                icon: (
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                )
+              }
+            ]}
+            selectedValue={formData.constructionType}
+            onSelect={(value) => setFormData({ ...formData, constructionType: value as 'new' | 'retrofit' })}
+          />
+        </FormField>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Input Method
-          </label>
-          <div className="grid grid-cols-2 gap-4">
-            <button
-              type="button"
-              className={`p-4 rounded-lg border-2 transition-all ${
-                inputMethod === 'blueprint' 
-                  ? 'border-hvac-blue bg-hvac-light' 
-                  : 'border-gray-300 hover:border-gray-400'
-              }`}
-              onClick={() => setInputMethod('blueprint')}
-            >
-              <div className="font-semibold">Upload Blueprint</div>
-              <div className="text-sm text-gray-600">AI-powered blueprint analysis</div>
-            </button>
-            <button
-              type="button"
-              className={`p-4 rounded-lg border-2 transition-all ${
-                inputMethod === 'manual' 
-                  ? 'border-hvac-blue bg-hvac-light' 
-                  : 'border-gray-300 hover:border-gray-400'
-              }`}
-              onClick={() => setInputMethod('manual')}
-            >
-              <div className="font-semibold">Manual Input</div>
-              <div className="text-sm text-gray-600">Enter room details manually</div>
-            </button>
-          </div>
-        </div>
+        <FormField label="How would you like to input project details?">
+          <SelectionGrid
+            options={[
+              {
+                value: 'blueprint',
+                title: 'Upload Blueprint',
+                description: 'AI analyzes your plans automatically',
+                icon: (
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                )
+              },
+              {
+                value: 'manual',
+                title: 'Manual Entry',
+                description: 'Enter room details step-by-step',
+                icon: (
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                )
+              }
+            ]}
+            selectedValue={inputMethod}
+            onSelect={(value) => setInputMethod(value as 'manual' | 'blueprint')}
+          />
+        </FormField>
 
-        <div className="flex justify-end pt-4">
-          <button type="submit" className="btn-primary">
+        <div className="flex justify-center pt-6">
+          <Button 
+            type="submit" 
+            size="lg" 
+            fullWidth={true}
+            rightIcon={
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            }
+          >
             {inputMethod === 'blueprint' ? 'Continue to Blueprint Upload' : 'Continue to Building Details'}
-          </button>
+          </Button>
         </div>
       </form>
-    </div>
+    </Card>
   );
 }

@@ -5,7 +5,10 @@ from pydantic import BaseModel
 from pathlib import Path
 import uuid
 
-from processors.cad_exporter import CADExporter
+try:
+    from processors.cad_exporter import CADExporter
+except ImportError:
+    from processors.cad_exporter_simple import CADExporter
 
 router = APIRouter()
 

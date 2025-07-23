@@ -1,0 +1,64 @@
+{
+  "job_id": "203ca717-0290-4a72-bde5-8257581d2fb9",
+  "status": "completed",
+  "timestamp": "2025-07-22T20:22:11.707277",
+  "original_filename": "Permit Plans - 25196 Wyvern (6).pdf",
+  "completion_time": "2025-07-22T20:22:29.372182",
+  "analysis_summary": {
+    "project_name": "BROWN\nRESIDENCE + ADU",
+    "address": "25196 WYVERN LANE, LIBERTY LAKE, WA 99019",
+    "analysis_confidence": "100.0%",
+    "system_recommendation": "zoned_ducted",
+    "cooling_tons": 8.0,
+    "heating_tons": 41.1,
+    "estimated_cost": 60500,
+    "deliverables_generated": 5,
+    "files": [
+      "203ca717-0290-4a72-bde5-8257581d2fb9_Manual_J_Report.json",
+      "203ca717-0290-4a72-bde5-8257581d2fb9_HVAC_Design.json",
+      "203ca717-0290-4a72-bde5-8257581d2fb9_Executive_Summary.txt",
+      "203ca717-0290-4a72-bde5-8257581d2fb9_HVAC_Layout.dxf",
+      "203ca717-0290-4a72-bde5-8257581d2fb9_Layout.svg"
+    ],
+    "ready_for_permits": true,
+    "generated_by": "AutoHVAC Pro",
+    "generation_time": "2025-07-22T20:22:29.371963"
+  },
+  "project_info": {
+    "name": "BROWN\nRESIDENCE + ADU",
+    "address": "25196 WYVERN LANE, LIBERTY LAKE, WA 99019",
+    "confidence": "100.0%",
+    "system_type": "zoned_ducted",
+    "cost_estimate": 60500,
+    "ready_for_permits": true
+  },
+  "hvac_design": {
+    "cooling_tons": 8.0,
+    "heating_tons": 41.1,
+    "system_type": "zoned_ducted",
+    "estimated_cost": 60500
+  },
+  "deliverables": {
+    "files_generated": 5,
+    "file_list": [
+      "203ca717-0290-4a72-bde5-8257581d2fb9_Manual_J_Report.json",
+      "203ca717-0290-4a72-bde5-8257581d2fb9_HVAC_Design.json",
+      "203ca717-0290-4a72-bde5-8257581d2fb9_Executive_Summary.txt",
+      "203ca717-0290-4a72-bde5-8257581d2fb9_HVAC_Layout.dxf",
+      "203ca717-0290-4a72-bde5-8257581d2fb9_Layout.svg"
+    ],
+    "download_links": {
+      "manual_j": "/api/blueprint/download/203ca717-0290-4a72-bde5-8257581d2fb9/manual_j",
+      "hvac_design": "/api/blueprint/download/203ca717-0290-4a72-bde5-8257581d2fb9/hvac_design",
+      "executive_summary": "/api/blueprint/download/203ca717-0290-4a72-bde5-8257581d2fb9/executive_summary",
+      "cad_drawing": "/api/blueprint/download/203ca717-0290-4a72-bde5-8257581d2fb9/cad_drawing",
+      "web_layout": "/api/blueprint/download/203ca717-0290-4a72-bde5-8257581d2fb9/web_layout"
+    }
+  },
+  "processing_info": {
+    "generator_version": "professional_mvp_1.0",
+    "ai_cost": "$0.00",
+    "processing_time": "2-3 minutes",
+    "confidence_score": "100.0%"
+  }
+}

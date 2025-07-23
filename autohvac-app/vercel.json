@@ -1,4 +1,7 @@
-{
+1{
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "framework": "nextjs",
   "rewrites": [
     {
       "source": "/api/blueprint/:path*",

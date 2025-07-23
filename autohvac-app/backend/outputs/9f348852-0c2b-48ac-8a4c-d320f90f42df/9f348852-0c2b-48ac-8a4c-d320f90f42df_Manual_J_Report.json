@@ -1,0 +1,468 @@
+{
+  "project_info": {
+    "project_name": "BROWN\nRESIDENCE + ADU",
+    "address": "25196 WYVERN LANE, LIBERTY LAKE, WA 99019",
+    "owner": "JIMMY AND RACHEL BROWN",
+    "architect": "HOIST LLC",
+    "analysis_date": "2025-07-22T18:44:32.037467",
+    "analyst": "AutoHVAC Pro"
+  },
+  "building_characteristics": {
+    "total_area": 4345.0,
+    "stories": 3,
+    "construction_type": "new_construction",
+    "insulation": {
+      "walls": "R-3.0",
+      "ceiling": "R-60.0",
+      "foundation": "R-38.0",
+      "windows": "U-0.3"
+    }
+  },
+  "climate_data": {
+    "zone": "6B",
+    "description": "Cold - Dry",
+    "design_temperatures": {
+      "summer_dry": 85,
+      "winter_dry": 5
+    },
+    "humidity": {
+      "summer": 40,
+      "winter": 70
+    }
+  },
+  "load_calculation": {
+    "methodology": "Manual J (ACCA Standard) - 8th Edition",
+    "total_cooling_load": 96144,
+    "total_heating_load": 493101,
+    "cooling_tons": 8.0,
+    "heating_tons": 41.1,
+    "diversity_factors": {
+      "cooling": 0.85,
+      "heating": 0.9
+    },
+    "room_loads": [
+      {
+        "room_name": "Primary Bedroom",
+        "area": 200,
+        "cooling_load": 9587,
+        "heating_load": 47234,
+        "exterior_walls": 1,
+        "window_area": 30.0,
+        "breakdown": {
+          "wall_cooling": 339,
+          "ceiling_cooling": 43,
+          "window_cooling": 90,
+          "solar_gain": 1050,
+          "internal_gains": 860,
+          "infiltration_cooling": 6804,
+          "latent_load": 400,
+          "wall_heating": 2206,
+          "ceiling_heating": 217,
+          "window_heating": 585,
+          "infiltration_heating": 44226
+        }
+      },
+      {
+        "room_name": "Bedroom",
+        "area": 120,
+        "cooling_load": 6129,
+        "heating_load": 28595,
+        "exterior_walls": 1,
+        "window_area": 18.0,
+        "breakdown": {
+          "wall_cooling": 263,
+          "ceiling_cooling": 0,
+          "window_cooling": 54,
+          "solar_gain": 630,
+          "internal_gains": 700,
+          "infiltration_cooling": 4082,
+          "latent_load": 400,
+          "wall_heating": 1709,
+          "ceiling_heating": 0,
+          "window_heating": 351,
+          "infiltration_heating": 26536
+        }
+      },
+      {
+        "room_name": "Living",
+        "area": 300,
+        "cooling_load": 13362,
+        "heating_load": 69918,
+        "exterior_walls": 1,
+        "window_area": 45.0,
+        "breakdown": {
+          "wall_cooling": 416,
+          "ceiling_cooling": 0,
+          "window_cooling": 135,
+          "solar_gain": 1575,
+          "internal_gains": 830,
+          "infiltration_cooling": 10206,
+          "latent_load": 200,
+          "wall_heating": 2702,
+          "ceiling_heating": 0,
+          "window_heating": 878,
+          "infiltration_heating": 66339
+        }
+      },
+      {
+        "room_name": "Kit",
+        "area": 150,
+        "cooling_load": 6982,
+        "heating_load": 35519,
+        "exterior_walls": 1,
+        "window_area": 22.5,
+        "breakdown": {
+          "wall_cooling": 294,
+          "ceiling_cooling": 0,
+          "window_cooling": 68,
+          "solar_gain": 788,
+          "internal_gains": 530,
+          "infiltration_cooling": 5103,
+          "latent_load": 200,
+          "wall_heating": 1911,
+          "ceiling_heating": 0,
+          "window_heating": 439,
+          "infiltration_heating": 33170
+        }
+      },
+      {
+        "room_name": "Kitchen",
+        "area": 150,
+        "cooling_load": 6982,
+        "heating_load": 35519,
+        "exterior_walls": 1,
+        "window_area": 22.5,
+        "breakdown": {
+          "wall_cooling": 294,
+          "ceiling_cooling": 0,
+          "window_cooling": 68,
+          "solar_gain": 788,
+          "internal_gains": 530,
+          "infiltration_cooling": 5103,
+          "latent_load": 200,
+          "wall_heating": 1911,
+          "ceiling_heating": 0,
+          "window_heating": 439,
+          "infiltration_heating": 33170
+        }
+      },
+      {
+        "room_name": "Dr",
+        "area": 20.0,
+        "cooling_load": 1372,
+        "heating_load": 5179,
+        "exterior_walls": 1,
+        "window_area": 3.0,
+        "breakdown": {
+          "wall_cooling": 107,
+          "ceiling_cooling": 0,
+          "window_cooling": 9,
+          "solar_gain": 105,
+          "internal_gains": 270,
+          "infiltration_cooling": 680,
+          "latent_load": 200,
+          "wall_heating": 698,
+          "ceiling_heating": 0,
+          "window_heating": 58,
+          "infiltration_heating": 4423
+        }
+      },
+      {
+        "room_name": "Dining",
+        "area": 120,
+        "cooling_load": 5699,
+        "heating_load": 28595,
+        "exterior_walls": 1,
+        "window_area": 18.0,
+        "breakdown": {
+          "wall_cooling": 263,
+          "ceiling_cooling": 0,
+          "window_cooling": 54,
+          "solar_gain": 630,
+          "internal_gains": 470,
+          "infiltration_cooling": 4082,
+          "latent_load": 200,
+          "wall_heating": 1709,
+          "ceiling_heating": 0,
+          "window_heating": 351,
+          "infiltration_heating": 26536
+        }
+      },
+      {
+        "room_name": "Primary Bath",
+        "area": 80,
+        "cooling_load": 3982,
+        "heating_load": 19320,
+        "exterior_walls": 1,
+        "window_area": 12.0,
+        "breakdown": {
+          "wall_cooling": 215,
+          "ceiling_cooling": 0,
+          "window_cooling": 36,
+          "solar_gain": 420,
+          "internal_gains": 390,
+          "infiltration_cooling": 2722,
+          "latent_load": 200,
+          "wall_heating": 1395,
+          "ceiling_heating": 0,
+          "window_heating": 234,
+          "infiltration_heating": 17690
+        }
+      },
+      {
+        "room_name": "Bath",
+        "area": 50,
+        "cooling_load": 2686,
+        "heating_load": 12306,
+        "exterior_walls": 1,
+        "window_area": 7.5,
+        "breakdown": {
+          "wall_cooling": 170,
+          "ceiling_cooling": 0,
+          "window_cooling": 22,
+          "solar_gain": 262,
+          "internal_gains": 330,
+          "infiltration_cooling": 1701,
+          "latent_load": 200,
+          "wall_heating": 1103,
+          "ceiling_heating": 0,
+          "window_heating": 146,
+          "infiltration_heating": 11057
+        }
+      },
+      {
+        "room_name": "Laundry",
+        "area": 120,
+        "cooling_load": 5699,
+        "heating_load": 28595,
+        "exterior_walls": 1,
+        "window_area": 18.0,
+        "breakdown": {
+          "wall_cooling": 263,
+          "ceiling_cooling": 0,
+          "window_cooling": 54,
+          "solar_gain": 630,
+          "internal_gains": 470,
+          "infiltration_cooling": 4082,
+          "latent_load": 200,
+          "wall_heating": 1709,
+          "ceiling_heating": 0,
+          "window_heating": 351,
+          "infiltration_heating": 26536
+        }
+      },
+      {
+        "room_name": "Garage",
+        "area": 731.0,
+        "cooling_load": 9473,
+        "heating_load": 33600,
+        "exterior_walls": 1,
+        "window_area": 109.6,
+        "breakdown": {
+          "wall_cooling": 649,
+          "ceiling_cooling": 0,
+          "window_cooling": 329,
+          "solar_gain": 3838,
+          "internal_gains": 1692,
+          "infiltration_cooling": 24869,
+          "latent_load": 200,
+          "wall_heating": 4218,
+          "ceiling_heating": 0,
+          "window_heating": 2138,
+          "infiltration_heating": 161646
+        }
+      },
+      {
+        "room_name": "Office",
+        "area": 100,
+        "cooling_load": 4842,
+        "heating_load": 23966,
+        "exterior_walls": 1,
+        "window_area": 15.0,
+        "breakdown": {
+          "wall_cooling": 240,
+          "ceiling_cooling": 0,
+          "window_cooling": 45,
+          "solar_gain": 525,
+          "internal_gains": 430,
+          "infiltration_cooling": 3402,
+          "latent_load": 200,
+          "wall_heating": 1560,
+          "ceiling_heating": 0,
+          "window_heating": 292,
+          "infiltration_heating": 22113
+        }
+      },
+      {
+        "room_name": "Closet",
+        "area": 20,
+        "cooling_load": 1372,
+        "heating_load": 5179,
+        "exterior_walls": 1,
+        "window_area": 3.0,
+        "breakdown": {
+          "wall_cooling": 107,
+          "ceiling_cooling": 0,
+          "window_cooling": 9,
+          "solar_gain": 105,
+          "internal_gains": 270,
+          "infiltration_cooling": 680,
+          "latent_load": 200,
+          "wall_heating": 698,
+          "ceiling_heating": 0,
+          "window_heating": 58,
+          "infiltration_heating": 4423
+        }
+      },
+      {
+        "room_name": "Pantry",
+        "area": 25,
+        "cooling_load": 1115,
+        "heating_load": 4467,
+        "exterior_walls": 1,
+        "window_area": 3.8,
+        "breakdown": {
+          "wall_cooling": 120,
+          "ceiling_cooling": 0,
+          "window_cooling": 11,
+          "solar_gain": 131,
+          "internal_gains": 280,
+          "infiltration_cooling": 851,
+          "latent_load": 200,
+          "wall_heating": 780,
+          "ceiling_heating": 0,
+          "window_heating": 73,
+          "infiltration_heating": 5528
+        }
+      },
+      {
+        "room_name": "Storage",
+        "area": 30,
+        "cooling_load": 1269,
+        "heating_load": 5303,
+        "exterior_walls": 1,
+        "window_area": 4.5,
+        "breakdown": {
+          "wall_cooling": 131,
+          "ceiling_cooling": 0,
+          "window_cooling": 13,
+          "solar_gain": 158,
+          "internal_gains": 290,
+          "infiltration_cooling": 1021,
+          "latent_load": 200,
+          "wall_heating": 854,
+          "ceiling_heating": 0,
+          "window_heating": 88,
+          "infiltration_heating": 6634
+        }
+      },
+      {
+        "room_name": "Vestibule",
+        "area": 30,
+        "cooling_load": 1813,
+        "heating_load": 7576,
+        "exterior_walls": 1,
+        "window_area": 4.5,
+        "breakdown": {
+          "wall_cooling": 131,
+          "ceiling_cooling": 0,
+          "window_cooling": 13,
+          "solar_gain": 158,
+          "internal_gains": 290,
+          "infiltration_cooling": 1021,
+          "latent_load": 200,
+          "wall_heating": 854,
+          "ceiling_heating": 0,
+          "window_heating": 88,
+          "infiltration_heating": 6634
+        }
+      },
+      {
+        "room_name": "Entry",
+        "area": 40,
+        "cooling_load": 2251,
+        "heating_load": 9949,
+        "exterior_walls": 1,
+        "window_area": 6.0,
+        "breakdown": {
+          "wall_cooling": 152,
+          "ceiling_cooling": 0,
+          "window_cooling": 18,
+          "solar_gain": 210,
+          "internal_gains": 310,
+          "infiltration_cooling": 1361,
+          "latent_load": 200,
+          "wall_heating": 987,
+          "ceiling_heating": 0,
+          "window_heating": 117,
+          "infiltration_heating": 8845
+        }
+      },
+      {
+        "room_name": "Mechanical",
+        "area": 50,
+        "cooling_load": 2686,
+        "heating_load": 12306,
+        "exterior_walls": 1,
+        "window_area": 7.5,
+        "breakdown": {
+          "wall_cooling": 170,
+          "ceiling_cooling": 0,
+          "window_cooling": 22,
+          "solar_gain": 262,
+          "internal_gains": 330,
+          "infiltration_cooling": 1701,
+          "latent_load": 200,
+          "wall_heating": 1103,
+          "ceiling_heating": 0,
+          "window_heating": 146,
+          "infiltration_heating": 11057
+        }
+      },
+      {
+        "room_name": "Mech",
+        "area": 50,
+        "cooling_load": 2686,
+        "heating_load": 12306,
+        "exterior_walls": 1,
+        "window_area": 7.5,
+        "breakdown": {
+          "wall_cooling": 170,
+          "ceiling_cooling": 0,
+          "window_cooling": 22,
+          "solar_gain": 262,
+          "internal_gains": 330,
+          "infiltration_cooling": 1701,
+          "latent_load": 200,
+          "wall_heating": 1103,
+          "ceiling_heating": 0,
+          "window_heating": 146,
+          "infiltration_heating": 11057
+        }
+      },
+      {
+        "room_name": "Attic",
+        "area": 528.0,
+        "cooling_load": 23124,
+        "heating_load": 122458,
+        "exterior_walls": 1,
+        "window_area": 79.2,
+        "breakdown": {
+          "wall_cooling": 551,
+          "ceiling_cooling": 114,
+          "window_cooling": 238,
+          "solar_gain": 2772,
+          "internal_gains": 1286,
+          "infiltration_cooling": 17963,
+          "latent_load": 200,
+          "wall_heating": 3585,
+          "ceiling_heating": 572,
+          "window_heating": 1544,
+          "infiltration_heating": 116757
+        }
+      }
+    ],
+    "sensible_cooling": 72108,
+    "latent_cooling": 24036
+  }
+}
