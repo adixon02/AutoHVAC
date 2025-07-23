@@ -279,7 +279,7 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
           <ul className="list-disc list-inside space-y-1">
             <li>Upload all related blueprints (floor plans, elevations, details)</li>
             <li>Maximum file size: 100MB per file</li>
-            <li>Large files (>10MB) may take 3-5 minutes to upload</li>
+            <li>Large files (&gt;10MB) may take 3-5 minutes to upload</li>
             <li>Ensure blueprints are clear and readable</li>
             <li>Include room labels and dimensions when possible</li>
             <li>Higher resolution images work better</li>
