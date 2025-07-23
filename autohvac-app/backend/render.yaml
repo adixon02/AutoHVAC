@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: free
     buildCommand: chmod +x build.sh && ./build.sh
-    startCommand: python minimal_cors_test.py
+    startCommand: python main.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
