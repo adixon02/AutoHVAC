@@ -5,7 +5,9 @@
       "Bash(npm run dev:*)",
       "Bash(npm install:*)",
       "Bash(pkill:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(npm run build:*)",
+      "Bash(pip3 install:*)"
     ],
     "deny": []
   }

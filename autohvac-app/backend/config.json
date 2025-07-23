@@ -1,10 +1,4 @@
 {
-  "openai_api_key": "REPLACE_WITH_ENV_VAR_OPENAI_API_KEY",
-  "ai_gap_filling": {
-    "enabled": true,
-    "max_cost_per_blueprint": 0.50,
-    "confidence_threshold": 0.90
-  },
   "output_settings": {
     "company_name": "AutoHVAC Pro",
     "logo_path": "",

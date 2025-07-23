@@ -17,7 +17,6 @@ import sys
 sys.path.append('autohvac-app/backend')
 
 from enhanced_blueprint_processor import ExtractionResult, EnhancedBlueprintProcessor
-from ai_gap_filler import AIGapFiller
 from processors.cad_exporter import CADExporter
 from dataclasses import asdict
 
@@ -51,11 +50,6 @@ class ProfessionalOutputGenerator:
             "company_name": "AutoHVAC Pro",
             "company_tagline": "Professional HVAC Analysis & Design",
             "logo_path": "",
-            "ai_gap_filling": {
-                "enabled": True,
-                "max_cost_per_blueprint": 0.50,
-                "confidence_threshold": 0.90
-            },
             "output_settings": {
                 "include_calculations": True,
                 "include_cad_export": True,
@@ -92,13 +86,6 @@ class ProfessionalOutputGenerator:
         """Initialize processing components"""
         self.blueprint_processor = EnhancedBlueprintProcessor()
         
-        # Pass API key to AI gap filler if available
-        api_key = self.config.get('openai_api_key', '')
-        if self.config['ai_gap_filling']['enabled'] and api_key:
-            self.ai_gap_filler = AIGapFiller(api_key=api_key)
-        else:
-            self.ai_gap_filler = AIGapFiller() if self.config['ai_gap_filling']['enabled'] else None
-            
         self.cad_exporter = CADExporter()
     
     async def generate_complete_analysis(self, blueprint_path: Path, output_dir: Optional[Path] = None) -> Dict[str, Any]:
@@ -118,23 +105,18 @@ class ProfessionalOutputGenerator:
         # Step 1: Extract blueprint data
         extraction_result = self.blueprint_processor.process_blueprint(blueprint_path)
         
-        # Step 2: Fill gaps with AI if needed
-        if (self.ai_gap_filler and 
-            extraction_result.overall_confidence < self.config['ai_gap_filling']['confidence_threshold']):
-            extraction_result = self.ai_gap_filler.fill_gaps(extraction_result, blueprint_path)
-        
-        # Step 3: Calculate Manual J loads
+        # Step 2: Calculate Manual J loads
         manual_j_data = self._calculate_manual_j(extraction_result)
         
-        # Step 4: Design HVAC system
+        # Step 3: Design HVAC system
         hvac_design = self._design_hvac_system(manual_j_data, extraction_result)
         
-        # Step 5: Generate all deliverables
+        # Step 4: Generate all deliverables
         deliverables = await self._generate_deliverables(
             extraction_result, manual_j_data, hvac_design, output_dir, project_name
         )
         
-        # Step 6: Create summary package
+        # Step 5: Create summary package
         summary = self._create_project_summary(extraction_result, manual_j_data, hvac_design, deliverables)
         
         logger.info(f"✅ Analysis complete! {len(deliverables)} files generated")
@@ -595,36 +577,23 @@ www.autohvac.pro
         Synchronous wrapper for generate_complete_analysis - for API compatibility
         """
         try:
-            # Create a temporary file path for the extraction result if needed
-            temp_blueprint_path = Path("temp_blueprint.pdf")  # This won't be used for actual file operations
+            logger.info("🔧 Processing extraction result...")
             
-            logger.info("🔧 Processing extraction result with AI gap filling...")
+            # Step 1: Calculate Manual J loads
+            manual_j_data = self._calculate_manual_j(extraction_result)
             
-            # Step 1: Fill gaps with AI if needed and configuration allows
-            processed_extraction = extraction_result
-            if (self.ai_gap_filler and 
-                extraction_result.overall_confidence < self.config['ai_gap_filling']['confidence_threshold']):
-                logger.info(f"🤖 AI gap filling activated (confidence: {extraction_result.overall_confidence:.1%})")
-                processed_extraction = self.ai_gap_filler.fill_gaps(extraction_result, temp_blueprint_path)
-            else:
-                logger.info(f"✅ High confidence extraction ({extraction_result.overall_confidence:.1%}) - skipping AI gap filling")
-            
-            # Step 2: Calculate Manual J loads
-            manual_j_data = self._calculate_manual_j(processed_extraction)
-            
-            # Step 3: Design HVAC system
-            hvac_design = self._design_hvac_system(manual_j_data, processed_extraction)
+            # Step 2: Design HVAC system
+            hvac_design = self._design_hvac_system(manual_j_data, extraction_result)
             
             return {
-                'extraction_result': processed_extraction,
+                'extraction_result': extraction_result,
                 'manual_j_calculation': manual_j_data,
                 'hvac_system_design': hvac_design,
                 'professional_deliverables': {
                     'manual_j_report': manual_j_data,
                     'hvac_design': hvac_design,
-                    'executive_summary': self._generate_executive_summary(processed_extraction, manual_j_data, hvac_design),
-                    'analysis_confidence': processed_extraction.overall_confidence,
-                    'ai_gap_filling_used': processed_extraction.overall_confidence != extraction_result.overall_confidence
+                    'executive_summary': self._generate_executive_summary(extraction_result, manual_j_data, hvac_design),
+                    'analysis_confidence': extraction_result.overall_confidence
                 }
             }
             

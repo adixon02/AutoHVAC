@@ -1,13 +1,7 @@
 {
-  "openai_api_key": "sk-your-openai-api-key-here",
   "company_name": "AutoHVAC Pro",
   "company_tagline": "Professional HVAC Load Calculations & System Design",
   "logo_path": "",
-  "ai_gap_filling": {
-    "enabled": true,
-    "max_cost_per_blueprint": 0.50,
-    "confidence_threshold": 0.90
-  },
   "output_settings": {
     "include_calculations": true,
     "include_cad_export": true,
