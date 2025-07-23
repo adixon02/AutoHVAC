@@ -15,6 +15,11 @@ from pathlib import Path
 from datetime import datetime
 import logging
 import sys
+from dataclasses import asdict
+
+# Basic logging setup first
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Add root directory to path to import our processors
 # This handles both local development and Render deployment paths
@@ -25,20 +30,25 @@ sys.path.insert(0, str(root_dir))
 try:
     from enhanced_blueprint_processor import EnhancedBlueprintProcessor as BlueprintProcessor
     from professional_output_generator import ProfessionalOutputGenerator
-except ImportError:
+    logger.info("✅ Successfully imported core modules")
+except ImportError as e:
+    logger.error(f"❌ Import error: {e}")
     # Fallback for deployment environments where files might be in different locations
     import os
     for possible_path in [current_dir, root_dir, Path("/app")]:
+        logger.info(f"🔍 Checking path: {possible_path}")
         if (possible_path / "enhanced_blueprint_processor.py").exists():
             sys.path.insert(0, str(possible_path))
+            logger.info(f"✅ Added path: {possible_path}")
             break
     
-    from enhanced_blueprint_processor import EnhancedBlueprintProcessor as BlueprintProcessor
-    from professional_output_generator import ProfessionalOutputGenerator
-
-# Basic logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+    try:
+        from enhanced_blueprint_processor import EnhancedBlueprintProcessor as BlueprintProcessor
+        from professional_output_generator import ProfessionalOutputGenerator
+        logger.info("✅ Successfully imported core modules (fallback)")
+    except ImportError as e2:
+        logger.error(f"❌ Critical import failure: {e2}")
+        raise
 
 app = FastAPI(
     title="AutoHVAC Backend API",
@@ -150,7 +160,7 @@ async def upload_blueprint(
                 "project_type": project_type,
                 "construction_type": construction_type
             },
-            "extraction_result": extraction_result,
+            "extraction_result": asdict(extraction_result),
             "professional_outputs": professional_outputs
         }
     except Exception as e:
@@ -176,10 +186,16 @@ async def upload_blueprint(
             "error_type": type(e).__name__
         }
     
-    # Save processing result
+    # Save processing result with error handling
     result_file = PROCESSED_DIR / f"{job_id}.json"
-    with open(result_file, "w") as f:
-        json.dump(result, f, indent=2)
+    try:
+        with open(result_file, "w") as f:
+            json.dump(result, f, indent=2)
+        logger.info(f"✅ Saved processing result: {result_file}")
+    except Exception as json_error:
+        logger.error(f"❌ Failed to save JSON result: {json_error}")
+        # Still try to return the result even if saving fails
+        pass
     
     logger.info(f"File uploaded successfully: {file.filename}, job_id: {job_id}")
     return result
@@ -284,10 +300,19 @@ async def get_analysis_results(job_id: str) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
-    logger.info(f"Starting AutoHVAC Backend API on port {port}")
-    uvicorn.run(
-        "main:app", 
-        host="0.0.0.0", 
-        port=port,
-        timeout_keep_alive=30
-    )
+    logger.info(f"🚀 Starting AutoHVAC Backend API on port {port}")
+    logger.info(f"📁 Working directory: {Path.cwd()}")
+    logger.info(f"🐍 Python path: {sys.path[:3]}...")  # Show first 3 paths
+    logger.info(f"📂 Upload dir: {UPLOAD_DIR.absolute()}")
+    logger.info(f"📂 Processed dir: {PROCESSED_DIR.absolute()}")
+    
+    try:
+        uvicorn.run(
+            "main:app", 
+            host="0.0.0.0", 
+            port=port,
+            timeout_keep_alive=30
+        )
+    except Exception as e:
+        logger.error(f"❌ Failed to start server: {e}")
+        raise

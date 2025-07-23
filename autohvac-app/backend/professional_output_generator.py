@@ -13,8 +13,7 @@ from typing import Dict, Any, List, Optional
 import logging
 import sys
 
-# Add backend modules
-sys.path.append('autohvac-app/backend')
+# Import modules (using relative imports when possible)
 
 from enhanced_blueprint_processor import ExtractionResult, EnhancedBlueprintProcessor
 from processors.cad_exporter import CADExporter
@@ -88,7 +87,7 @@ class ProfessionalOutputGenerator:
         
         self.cad_exporter = CADExporter()
     
-    async def generate_complete_analysis(self, blueprint_path: Path, output_dir: Optional[Path] = None) -> Dict[str, Any]:
+    def generate_complete_analysis(self, blueprint_path: Path, output_dir: Optional[Path] = None) -> Dict[str, Any]:
         """
         Main function: Generate complete professional analysis package
         """
@@ -112,7 +111,7 @@ class ProfessionalOutputGenerator:
         hvac_design = self._design_hvac_system(manual_j_data, extraction_result)
         
         # Step 4: Generate all deliverables
-        deliverables = await self._generate_deliverables(
+        deliverables = self._generate_deliverables(
             extraction_result, manual_j_data, hvac_design, output_dir, project_name
         )
         
@@ -386,7 +385,7 @@ class ProfessionalOutputGenerator:
             "total": total_cost
         }
     
-    async def _generate_deliverables(self, extraction: ExtractionResult, manual_j: Dict[str, Any], 
+    def _generate_deliverables(self, extraction: ExtractionResult, manual_j: Dict[str, Any], 
                                    hvac_design: Dict[str, Any], output_dir: Path, project_name: str) -> List[str]:
         """Generate all professional deliverables"""
         
@@ -430,7 +429,7 @@ class ProfessionalOutputGenerator:
             try:
                 # Convert Room objects to dictionaries for CAD export
                 rooms_data = [asdict(room) for room in extraction.rooms]
-                await self.cad_exporter.export_dxf(
+                self.cad_exporter.export_dxf(
                     blueprint_data={"rooms": rooms_data},
                     hvac_layout={"systems": [hvac_design]},
                     output_path=dxf_path,
@@ -447,7 +446,7 @@ class ProfessionalOutputGenerator:
         try:
             # Convert Room objects to dictionaries for SVG export
             rooms_data = [asdict(room) for room in extraction.rooms]
-            await self.cad_exporter.export_svg(
+            self.cad_exporter.export_svg(
                 blueprint_data={"rooms": rooms_data},
                 output_path=svg_path,
                 layers=["hvac", "equipment", "labels"]

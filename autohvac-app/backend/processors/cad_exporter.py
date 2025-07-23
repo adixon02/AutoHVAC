@@ -19,7 +19,7 @@ class CADExporter:
             "labels": {"color": 7, "lineweight": 13}  # White
         }
     
-    async def export_dxf(
+    def export_dxf(
         self,
         blueprint_data: Dict[str, Any],
         hvac_layout: Dict[str, Any] = None,
@@ -37,7 +37,7 @@ class CADExporter:
         
         # Set up layers
         for layer_name, config in self.layer_config.items():
-            if layer_name in layers:
+            if layers is None or layer_name in layers:
                 doc.layers.add(
                     name=layer_name.upper(),
                     color=config["color"],
@@ -444,7 +444,7 @@ class CADExporter:
                         align=ezdxf.enums.TextEntityAlignment.MIDDLE_CENTER
                     )
     
-    async def export_svg(
+    def export_svg(
         self,
         blueprint_data: Dict[str, Any],
         output_path: Path,
