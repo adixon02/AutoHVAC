@@ -5,7 +5,7 @@ import { ProjectInfo } from '../lib/types';
 interface BlueprintUploadProps {
   onUploadComplete: (jobId: string, fileNames: string[]) => void;
   onError: (error: string) => void;
-  projectInfo?: ProjectInfo;
+  projectInfo?: ProjectInfo | null;
 }
 
 export default function BlueprintUpload({ onUploadComplete, onError, projectInfo }: BlueprintUploadProps) {
