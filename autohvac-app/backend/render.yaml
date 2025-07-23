@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: free
     buildCommand: chmod +x build.sh && ./build.sh
-    startCommand: python start_server.py
+    startCommand: python test_minimal.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
