@@ -52,19 +52,26 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
         singleFormData.append('construction_type', projectInfo.constructionType);
       }
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/blueprint/upload`, {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      console.log('🚀 Uploading to:', `${apiUrl}/api/blueprint/upload`);
+      
+      const response = await fetch(`${apiUrl}/api/blueprint/upload`, {
         method: 'POST',
         body: singleFormData,
       });
 
       if (!response.ok) {
-        throw new Error(`Upload failed: ${response.statusText}`);
+        const errorText = await response.text();
+        console.error('❌ Upload failed:', response.status, response.statusText, errorText);
+        throw new Error(`Upload failed: ${response.statusText} - ${errorText}`);
       }
 
       const data = await response.json();
+      console.log('✅ Upload successful, job ID:', data.job_id);
       setProcessingStatus(`Generating professional HVAC analysis...`);
       setCurrentFileName(file.name);
       setIsAnalyzing(true);
+      console.log('🔄 Showing analyzing screen for:', file.name);
       
       // Start polling for processing status
       const jobId = data.job_id;
