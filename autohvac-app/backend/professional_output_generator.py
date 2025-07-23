@@ -407,7 +407,7 @@ class ProfessionalOutputGenerator:
         cooling_tons = manual_j_data['load_calculation']['cooling_tons']
         heating_tons = manual_j_data['load_calculation']['heating_tons']
         total_area = manual_j_data['building_characteristics']['total_area']
-        climate_zone = manual_j_data['climate_data']['zone']
+        climate_zone = manual_j_data['climate_data']
         
         # Improved system selection logic based on industry standards
         logger.info(f"System selection: {total_area} sq ft, {len(extraction.rooms)} rooms, {cooling_tons} tons cooling")
