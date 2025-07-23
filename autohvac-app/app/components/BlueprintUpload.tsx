@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { ProjectInfo } from '../lib/types';
+import BlueprintAnalyzing from './BlueprintAnalyzing';
 
 interface BlueprintUploadProps {
   onUploadComplete: (jobId: string, fileNames: string[]) => void;
@@ -13,6 +14,8 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processingStatus, setProcessingStatus] = useState<string>('');
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [currentFileName, setCurrentFileName] = useState<string>('');
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     // If no new files and no existing files, return early
@@ -60,6 +63,8 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
 
       const data = await response.json();
       setProcessingStatus(`Generating professional HVAC analysis...`);
+      setCurrentFileName(file.name);
+      setIsAnalyzing(true);
       
       // Start polling for processing status
       const jobId = data.job_id;
@@ -74,6 +79,7 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
             onUploadComplete(jobId, [file.name]);
             setTimeout(() => {
               setUploading(false);
+              setIsAnalyzing(false);
               setProcessingStatus('');
             }, 2000);
           } else if (statusData.status === 'error') {
@@ -87,6 +93,7 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
           clearInterval(pollInterval);
           onError(err instanceof Error ? err.message : 'Processing failed');
           setUploading(false);
+          setIsAnalyzing(false);
           setUploadedFiles([]);
         }
       }, 3000);
@@ -94,6 +101,7 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Upload failed');
       setUploading(false);
+      setIsAnalyzing(false);
       setUploadedFiles([]);
     }
   }, [onUploadComplete, onError, uploadedFiles]);
@@ -111,6 +119,17 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
     multiple: true,
     disabled: uploading
   });
+
+  // Show analyzing screen during processing
+  if (isAnalyzing) {
+    return (
+      <BlueprintAnalyzing 
+        processingStatus={processingStatus}
+        fileName={currentFileName}
+        onComplete={() => setIsAnalyzing(false)}
+      />
+    );
+  }
 
   return (
     <div className="w-full">
