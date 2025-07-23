@@ -55,6 +55,11 @@ app.include_router(climate_router, prefix="/api/climate", tags=["climate"])
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
+@app.get("/health")
+async def health_check():
+    """Simple health check endpoint"""
+    return {"status": "healthy", "service": "AutoHVAC Backend", "version": "2.0.0"}
+
 @app.get("/")
 async def root():
     logger.info("Root endpoint accessed")
