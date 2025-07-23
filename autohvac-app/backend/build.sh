@@ -15,7 +15,7 @@ pip install --upgrade pip
 
 # Install Python dependencies
 echo "Installing Python dependencies..."
-pip install -r requirements.minimal.txt
+pip install -r requirements.txt
 
 # Create necessary directories
 echo "Creating necessary directories..."

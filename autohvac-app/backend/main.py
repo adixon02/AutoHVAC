@@ -5,6 +5,7 @@ import uvicorn
 from typing import List, Dict, Any
 import os
 from pathlib import Path
+from datetime import datetime
 
 # Import our enhanced core systems
 from core.logging_config import setup_logging, get_logger
@@ -55,11 +56,6 @@ app.include_router(climate_router, prefix="/api/climate", tags=["climate"])
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-@app.get("/health")
-async def health_check():
-    """Simple health check endpoint"""
-    return {"status": "healthy", "service": "AutoHVAC Backend", "version": "2.0.0"}
-
 @app.get("/")
 async def root():
     logger.info("Root endpoint accessed")
@@ -90,9 +86,9 @@ async def health_check():
     logger.debug("Health check endpoint accessed")
     return {
         "status": "healthy", 
-        "service": "autohvac-backend",
+        "service": "AutoHVAC Backend",
         "version": "2.0.0",
-        "timestamp": "2024-01-01T00:00:00Z"  # This would be dynamic in production
+        "timestamp": datetime.now().isoformat()
     }
 
 if __name__ == "__main__":
