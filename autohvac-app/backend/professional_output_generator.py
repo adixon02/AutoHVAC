@@ -16,13 +16,14 @@ import sys
 # Add backend modules
 sys.path.append('autohvac-app/backend')
 
-from enhanced_blueprint_processor import ExtractionResult, EnhancedBlueprintProcessor
+from core.data_models import ExtractionResult
+from core.blueprint_processor import BlueprintProcessor
 try:
     from ai_gap_filler import AIGapFiller
 except ImportError:
     AIGapFiller = None
 from processors.cad_exporter import CADExporter
-from climate_database import ClimateDatabase
+from services.climate_service import ClimateService
 from dataclasses import asdict
 
 logger = logging.getLogger(__name__)
@@ -86,12 +87,12 @@ class ProfessionalOutputGenerator:
     
     def setup_components(self):
         """Initialize processing components"""
-        self.blueprint_processor = EnhancedBlueprintProcessor()
+        self.blueprint_processor = BlueprintProcessor()
         
-        # Initialize climate database
-        self.climate_db = ClimateDatabase()
-        stats = self.climate_db.get_coverage_stats()
-        logger.info(f"Climate database initialized with {stats.get('total_zip_codes', 0)} ZIP codes")
+        # Initialize climate service
+        self.climate_db = ClimateService()
+        # Note: ClimateService doesn't have get_coverage_stats, so we'll skip that for now
+        logger.info("Climate service initialized")
         
         # Pass API key to AI gap filler if available
         api_key = self.config.get('openai_api_key', '')

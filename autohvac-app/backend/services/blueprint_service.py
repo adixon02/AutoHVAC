@@ -14,9 +14,9 @@ import shutil
 import uuid
 from dataclasses import asdict
 
-from ..core.blueprint_processor import get_processor
-from ..core.data_models import ExtractionResult, ProcessingStatus
-from ..professional_output_generator import ProfessionalOutputGenerator
+from core.blueprint_processor import get_processor
+from core.data_models import ExtractionResult, ProcessingStatus
+from professional_output_generator import ProfessionalOutputGenerator
 
 logger = logging.getLogger(__name__)
 

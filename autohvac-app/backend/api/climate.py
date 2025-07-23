@@ -4,12 +4,12 @@ import sys
 import os
 
 # Import enhanced core systems
-from ..core.logging_config import get_logger, performance_timer
-from ..core.error_handling import (
+from core.logging_config import get_logger, performance_timer
+from core.error_handling import (
     AutoHVACException, AutoHVACErrors, 
     validate_zip_code, handle_database_error
 )
-from ..services.climate_service import get_climate_service
+from services.climate_service import get_climate_service
 
 logger = get_logger(__name__)
 climate_service = get_climate_service()
