@@ -24,14 +24,16 @@ class AIGapFiller:
     
     def __init__(self, api_key: Optional[str] = None):
         if api_key:
+            # Initialize with explicit parameters to avoid any proxy issues
             self.client = OpenAI(api_key=api_key)
         else:
             # Load from environment or config
             try:
                 api_key = self._load_api_key()
+                # Initialize with explicit parameters to avoid any proxy issues
                 self.client = OpenAI(api_key=api_key)
-            except:
-                logger.warning("OpenAI API key not configured. AI gap filling disabled.")
+            except Exception as e:
+                logger.warning(f"OpenAI API key not configured: {e}. AI gap filling disabled.")
                 self.enabled = False
                 return
         
