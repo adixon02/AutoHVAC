@@ -195,9 +195,8 @@ async def get_processing_status(job_id: str) -> Dict[str, Any]:
     with open(processed_file, "r") as f:
         result = json.load(f)
     
-    # Mock completion after status check
-    result["status"] = "completed"
-    result["message"] = "Analysis complete!"
+    # Return actual status instead of forcing "completed"
+    # Keep the original status from the processing result
     
     return result
 
