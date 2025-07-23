@@ -22,6 +22,7 @@ try:
 except ImportError:
     AIGapFiller = None
 from processors.cad_exporter import CADExporter
+from climate_database import ClimateDatabase
 from dataclasses import asdict
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,10 @@ class ProfessionalOutputGenerator:
         """Initialize processing components"""
         self.blueprint_processor = EnhancedBlueprintProcessor()
         
+        # Initialize climate database
+        self.climate_db = ClimateDatabase()
+        logger.info(f"Climate database initialized with {len(self.climate_db.data)} ZIP codes")
+        
         # Pass API key to AI gap filler if available
         api_key = self.config.get('openai_api_key', '')
         if self.config['ai_gap_filling']['enabled'] and api_key and AIGapFiller:
@@ -148,8 +153,8 @@ class ProfessionalOutputGenerator:
         
         logger.info("🧮 Calculating Manual J loads...")
         
-        # Get climate zone for location
-        climate_zone = self._get_climate_zone(extraction.project_info.zip_code)
+        # Get climate zone for location using professional database
+        climate_zone = self.climate_db.get_climate_data(extraction.project_info.zip_code)
         
         room_loads = []
         total_cooling = 0
@@ -218,8 +223,8 @@ class ProfessionalOutputGenerator:
         """Calculate individual room load using Manual J methodology"""
         
         # Temperature differences
-        summer_temp_diff = climate_zone['design_temperatures']['summer_dry'] - 75
-        winter_temp_diff = 70 - climate_zone['design_temperatures']['winter_dry']
+        summer_temp_diff = climate_zone['design_temperatures']['summer_db'] - 75
+        winter_temp_diff = 70 - climate_zone['design_temperatures']['winter_db']
         
         # Wall loads - improved calculation based on building envelope only
         # Only calculate wall loads for rooms with actual exterior walls
@@ -364,38 +369,6 @@ class ProfessionalOutputGenerator:
             }
         }
     
-    def _get_climate_zone(self, zip_code: str) -> Dict[str, Any]:
-        """Get climate zone data for location"""
-        
-        logger.info(f"🌡️ Looking up climate zone for ZIP code: {zip_code}")
-        
-        # Climate zone mapping (simplified for MVP)
-        climate_zones = {
-            # Washington State
-            '99019': {  # Liberty Lake, WA
-                'zone': '6B',
-                'description': 'Cold - Dry',
-                'design_temperatures': {'summer_dry': 90, 'winter_dry': 2},
-                'humidity': {'summer': 40, 'winter': 70}
-            },
-            '98188': {  # SeaTac, WA  
-                'zone': '4C',
-                'description': 'Mixed-Marine',
-                'design_temperatures': {'summer_dry': 83, 'winter_dry': 28},
-                'humidity': {'summer': 55, 'winter': 75}
-            }
-        }
-        
-        # Default to zone 4A if not found
-        result = climate_zones.get(zip_code, {
-            'zone': '4A',
-            'description': 'Mixed-Humid',
-            'design_temperatures': {'summer_dry': 90, 'winter_dry': 20},
-            'humidity': {'summer': 65, 'winter': 60}
-        })
-        
-        logger.info(f"🌡️ Climate zone result: {result}")
-        return result
     
     def _design_hvac_system(self, manual_j_data: Dict[str, Any], extraction: ExtractionResult) -> Dict[str, Any]:
         """Design optimal HVAC system based on load calculations"""
@@ -431,7 +404,8 @@ class ProfessionalOutputGenerator:
         equipment_heating = round(heating_tons * 12000 * 1.10)  # 10% safety factor
         
         # Select equipment type based on climate
-        if climate_zone in ['6A', '6B', '7', '8']:
+        climate_zone_code = climate_zone.get('zone', '4A')
+        if climate_zone_code in ['6A', '6B', '7', '8']:
             equipment_type = "cold_climate_heat_pump"
             efficiency = {"seer": 20, "hspf": 10}
         else:
