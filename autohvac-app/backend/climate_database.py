@@ -50,8 +50,13 @@ class ClimateDatabase:
                    f"({stats['climate_coverage_pct']:.1f}% coverage)")
     
     def _init_connection(self):
-        """Initialize SQLite database connection"""
+        """Initialize SQLite database connection with JSON fallback"""
         try:
+            if not self.db_path.exists():
+                logger.warning(f"SQLite database not found at {self.db_path}, falling back to JSON")
+                self._fallback_to_json()
+                return
+                
             self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
             self.connection.row_factory = sqlite3.Row  # Enable dict-like access
             
@@ -60,12 +65,31 @@ class ClimateDatabase:
             count = cursor.fetchone()['count']
             
             if count == 0:
-                logger.error(f"Database at {self.db_path} is empty. Run create_zip_database.py first.")
-                raise Exception("Empty database")
+                logger.warning("SQLite database is empty, falling back to JSON")
+                self._fallback_to_json()
+                return
                 
         except Exception as e:
-            logger.error(f"Database connection failed: {e}")
-            raise
+            logger.warning(f"SQLite database connection failed: {e}, falling back to JSON")
+            self._fallback_to_json()
+    
+    def _fallback_to_json(self):
+        """Fallback to JSON file if SQLite database is not available"""
+        json_path = Path(__file__).parent / "climate_zones.json"
+        self.connection = None
+        self.json_data = {}
+        
+        if json_path.exists():
+            try:
+                import json
+                with open(json_path, 'r') as f:
+                    self.json_data = json.load(f)
+                logger.info(f"Using JSON fallback with {len(self.json_data)} ZIP codes")
+            except Exception as e:
+                logger.error(f"Failed to load JSON fallback: {e}")
+                self.json_data = {}
+        else:
+            logger.warning("No JSON fallback file found")
     
     def get_climate_data(self, zip_code: str) -> Dict[str, Any]:
         """
@@ -80,10 +104,11 @@ class ClimateDatabase:
             logger.warning(f"Invalid ZIP code format: {zip_code}")
             return self._get_regional_fallback(zip_code)
         
-        # 1. Try local SQLite database first (comprehensive coverage)
+        # 1. Try local database first (SQLite or JSON)
         local_data = self._get_from_local_db(zip_code)
         if local_data:
-            logger.info(f"🌡️ Climate data from SQLite DB: {zip_code} -> Zone {local_data.get('zone', 'N/A')}")
+            db_type = "SQLite" if self.connection else "JSON"
+            logger.info(f"🌡️ Climate data from {db_type} DB: {zip_code} -> Zone {local_data.get('zone', 'N/A')}")
             return local_data
         
         # 2. Check API cache for recent external lookups
@@ -107,7 +132,14 @@ class ClimateDatabase:
         return self._get_regional_fallback(zip_code)
     
     def _get_from_local_db(self, zip_code: str) -> Optional[Dict[str, Any]]:
-        """Get climate data from local SQLite database"""
+        """Get climate data from local database (SQLite or JSON)"""
+        if self.connection:
+            return self._get_from_sqlite(zip_code)
+        else:
+            return self._get_from_json(zip_code)
+    
+    def _get_from_sqlite(self, zip_code: str) -> Optional[Dict[str, Any]]:
+        """Get climate data from SQLite database"""  
         try:
             # First try to get ZIP with complete climate data
             query = """
@@ -187,6 +219,27 @@ class ClimateDatabase:
         
         return None
     
+    def _get_from_json(self, zip_code: str) -> Optional[Dict[str, Any]]:
+        """Get climate data from JSON fallback"""
+        if not hasattr(self, 'json_data') or not self.json_data:
+            return None
+            
+        if zip_code in self.json_data:
+            data = self.json_data[zip_code]
+            return {
+                'zone': data.get('zone'),
+                'description': data.get('description'),
+                'design_temperatures': data.get('design_temperatures', {}),
+                'humidity': data.get('humidity', {}),
+                'county': data.get('county', 'Unknown'),
+                'state': data.get('state', 'Unknown'),
+                'city': data.get('city'),
+                'source': data.get('source', 'JSON_fallback'),
+                'confidence_score': 1.0
+            }
+        
+        return None
+    
     def _cbecs_to_ashrae(self, cbecs_zone: str) -> str:
         """Convert CBECS climate zone to approximate ASHRAE zone"""
         if not cbecs_zone:
@@ -224,6 +277,9 @@ class ClimateDatabase:
     
     def _get_from_api_cache(self, zip_code: str) -> Optional[Dict[str, Any]]:
         """Get cached API response from database"""
+        if not self.connection:
+            return None  # No API cache in JSON fallback mode
+            
         try:
             cursor = self.connection.execute("""
             SELECT response_data, last_updated 
@@ -244,6 +300,9 @@ class ClimateDatabase:
     
     def _save_to_api_cache(self, zip_code: str, data: Dict[str, Any]):
         """Save API response to database cache"""
+        if not self.connection:
+            return  # No API cache in JSON fallback mode
+            
         try:
             import json
             self.connection.execute("""
@@ -433,6 +492,13 @@ class ClimateDatabase:
     
     def get_coverage_stats(self) -> Dict[str, Any]:
         """Get comprehensive database coverage statistics"""
+        if self.connection:
+            return self._get_sqlite_stats()
+        else:
+            return self._get_json_stats()
+    
+    def _get_sqlite_stats(self) -> Dict[str, Any]:
+        """Get coverage statistics from SQLite database"""
         try:
             stats = {}
             
@@ -476,11 +542,29 @@ class ClimateDatabase:
             return stats
             
         except Exception as e:
-            logger.error(f"Error getting coverage stats: {e}")
+            logger.error(f"Error getting SQLite coverage stats: {e}")
             return {'error': str(e)}
+    
+    def _get_json_stats(self) -> Dict[str, Any]:
+        """Get coverage statistics from JSON fallback"""
+        json_count = len(self.json_data) if hasattr(self, 'json_data') else 0
+        return {
+            'total_zip_codes': json_count,
+            'zip_codes_with_climate': json_count,
+            'climate_coverage_pct': 100.0 if json_count > 0 else 0,
+            'climate_data_by_source': {'JSON_fallback': json_count} if json_count > 0 else {},
+            'top_states_coverage': []
+        }
     
     def search_zip_codes(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Search ZIP codes by city, state, or ZIP code"""
+        if self.connection:
+            return self._search_sqlite(query, limit)
+        else:
+            return self._search_json(query, limit)
+    
+    def _search_sqlite(self, query: str, limit: int) -> List[Dict[str, Any]]:
+        """Search SQLite database"""
         try:
             # Search by ZIP code, city, or state
             search_query = f"%{query}%"
@@ -502,8 +586,34 @@ class ClimateDatabase:
             return [dict(row) for row in cursor.fetchall()]
             
         except Exception as e:
-            logger.error(f"Search error: {e}")
+            logger.error(f"SQLite search error: {e}")
             return []
+    
+    def _search_json(self, query: str, limit: int) -> List[Dict[str, Any]]:
+        """Search JSON fallback data (basic ZIP code matching only)"""
+        if not hasattr(self, 'json_data') or not self.json_data:
+            return []
+        
+        results = []
+        query_lower = query.lower()
+        
+        for zip_code, data in self.json_data.items():
+            if (query_lower in zip_code.lower() or 
+                query_lower in data.get('city', '').lower() or
+                query_lower in data.get('state', '').lower()):
+                
+                results.append({
+                    'zip_code': zip_code,
+                    'city': data.get('city', 'Unknown'),
+                    'state_abbr': data.get('state', 'Unknown'),
+                    'county': data.get('county', 'Unknown'),
+                    'climate_zone': data.get('zone')
+                })
+                
+                if len(results) >= limit:
+                    break
+        
+        return results
     
     def add_zip_codes(self, new_data: Dict[str, Dict[str, Any]]):
         """Add new ZIP codes to the database (legacy compatibility)"""

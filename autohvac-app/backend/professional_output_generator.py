@@ -90,7 +90,8 @@ class ProfessionalOutputGenerator:
         
         # Initialize climate database
         self.climate_db = ClimateDatabase()
-        logger.info(f"Climate database initialized with {len(self.climate_db.data)} ZIP codes")
+        stats = self.climate_db.get_coverage_stats()
+        logger.info(f"Climate database initialized with {stats.get('total_zip_codes', 0)} ZIP codes")
         
         # Pass API key to AI gap filler if available
         api_key = self.config.get('openai_api_key', '')
