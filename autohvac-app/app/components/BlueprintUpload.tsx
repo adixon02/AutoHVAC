@@ -4,7 +4,7 @@ import { ProjectInfo } from '../lib/types';
 import BlueprintAnalyzing from './BlueprintAnalyzing';
 
 interface BlueprintUploadProps {
-  onUploadComplete: (jobId: string, fileNames: string[]) => void;
+  onUploadComplete: (jobId: string, fileNames: string[], resultsData?: any) => void;
   onError: (error: string) => void;
   projectInfo?: ProjectInfo | null;
 }
@@ -109,7 +109,19 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
       
       // Start polling for processing status
       const jobId = data.job_id;
+      const startTime = Date.now();
+      const POLLING_TIMEOUT = 10 * 60 * 1000; // 10 minutes timeout
+      
       const pollInterval = setInterval(async () => {
+        // Check for timeout
+        if (Date.now() - startTime > POLLING_TIMEOUT) {
+          clearInterval(pollInterval);
+          onError('Analysis timeout. Large blueprints may take longer than expected. Please try again or contact support.');
+          setUploading(false);
+          setIsAnalyzing(false);
+          setUploadedFiles([]);
+          return;
+        }
         try {
           const statusResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/blueprint/status/${jobId}`);
           const statusData = await statusResponse.json();
@@ -117,12 +129,30 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
           if (statusData.status === 'completed') {
             clearInterval(pollInterval);
             setProcessingStatus(`Professional analysis complete! 🎉`);
-            onUploadComplete(jobId, [file.name]);
-            setTimeout(() => {
-              setUploading(false);
-              setIsAnalyzing(false);
-              setProcessingStatus('');
-            }, 2000);
+            
+            // Fetch the actual results to ensure they're ready
+            try {
+              const resultsResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/blueprint/results/${jobId}`);
+              if (!resultsResponse.ok) {
+                throw new Error(`Results not ready: ${resultsResponse.status}`);
+              }
+              
+              const resultsData = await resultsResponse.json();
+              console.log('✅ Results confirmed ready:', resultsData);
+              
+              // Pass the results data directly to avoid race condition
+              onUploadComplete(jobId, [file.name], resultsData);
+              
+              setTimeout(() => {
+                setUploading(false);
+                setIsAnalyzing(false);
+                setProcessingStatus('');
+              }, 1000);
+            } catch (resultsError) {
+              console.error('❌ Results not ready yet, continuing to poll:', resultsError);
+              // Continue polling - results might not be ready yet
+              setProcessingStatus('Finalizing analysis results...');
+            }
           } else if (statusData.status === 'error') {
             clearInterval(pollInterval);
             throw new Error(statusData.error || 'Processing failed');

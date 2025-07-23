@@ -44,7 +44,7 @@ interface AppActions {
   clearCalculations: () => void;
   
   // Blueprint Actions
-  handleBlueprintUpload: (jobId: string, fileNames: string[]) => Promise<void>;
+  handleBlueprintUpload: (jobId: string, fileNames: string[], preloadedData?: any) => Promise<void>;
   handleBlueprintError: (error: string) => void;
   clearBlueprintData: () => void;
   
@@ -179,8 +179,8 @@ export const useAppStore = create<AppStore>()(
         },
         
         // Blueprint Actions
-        handleBlueprintUpload: async (jobId: string, fileNames: string[]) => {
-          console.log('🎯 handleBlueprintUpload called with jobId:', jobId, 'files:', fileNames);
+        handleBlueprintUpload: async (jobId: string, fileNames: string[], preloadedData?: any) => {
+          console.log('🎯 handleBlueprintUpload called with jobId:', jobId, 'files:', fileNames, 'preloaded:', !!preloadedData);
           
           set({ 
             blueprintJobId: jobId,
@@ -189,15 +189,23 @@ export const useAppStore = create<AppStore>()(
           }, false, 'handleBlueprintUpload:start');
           
           try {
-            console.log('📡 Fetching results from:', `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/blueprint/results/${jobId}`);
+            let data = preloadedData;
             
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/blueprint/results/${jobId}`);
-            
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            // Only fetch from API if we don't have preloaded data
+            if (!data) {
+              console.log('📡 Fetching results from:', `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/blueprint/results/${jobId}`);
+              
+              const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/blueprint/results/${jobId}`);
+              
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              }
+              
+              data = await response.json();
+            } else {
+              console.log('📦 Using preloaded analysis data');
             }
             
-            const data = await response.json();
             console.log('📊 Professional analysis data received:', data);
             
             if (data.status === 'completed') {

@@ -63,8 +63,8 @@ export default function Home() {
     }
   };
 
-  const handleBlueprintUploadWrapper = async (jobId: string, fileNames: string[]) => {
-    await handleBlueprintUpload(jobId, fileNames);
+  const handleBlueprintUploadWrapper = async (jobId: string, fileNames: string[], resultsData?: any) => {
+    await handleBlueprintUpload(jobId, fileNames, resultsData);
   };
 
   const handleStartOver = () => {

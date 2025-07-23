@@ -50,7 +50,12 @@ export default function BlueprintAnalyzing({ processingStatus, fileName, onCompl
       setProgress(100);
       setCompletedSteps(analysisSteps.map((_, idx) => idx));
       setCurrentStep(analysisSteps.length - 1);
-      setTimeout(() => onComplete?.(), 1500);
+      setTimeout(() => onComplete?.(), 2000);
+    } else if (processingStatus.includes('Finalizing')) {
+      // If we're finalizing, show that we're on the last step
+      setProgress(95);
+      setCompletedSteps(analysisSteps.slice(0, -1).map((_, idx) => idx));
+      setCurrentStep(analysisSteps.length - 1);
     }
   }, [processingStatus, onComplete]);
 
