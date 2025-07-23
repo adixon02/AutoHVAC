@@ -155,21 +155,25 @@ async def upload_blueprint(
         }
     except Exception as e:
         logger.error(f"Blueprint processing failed: {e}")
-        # Fallback to basic result without analysis
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        
+        # Return error status instead of hiding the failure
         result = {
             "job_id": job_id,
             "filename": file.filename,
             "file_size": len(content),
             "upload_time": timestamp,
-            "status": "processing",
-            "message": "Blueprint uploaded successfully. Analysis started.",
+            "status": "failed",
+            "message": f"Blueprint processing failed: {str(e)}",
             "project_info": {
                 "zip_code": zip_code,
                 "project_name": project_name,
                 "project_type": project_type,
                 "construction_type": construction_type
             },
-            "error": str(e)
+            "error": str(e),
+            "error_type": type(e).__name__
         }
     
     # Save processing result
@@ -242,31 +246,42 @@ async def get_analysis_results(job_id: str) -> Dict[str, Any]:
             }
         }
     else:
-        # Fallback for cases where processing failed
-        return {
-            **base_result,
-            "status": "completed", 
-            "analysis": {
-                "project_info": base_result.get("project_info", {}),
-                "building_chars": {
-                    "total_area": 0,
-                    "stories": 1
-                },
-                "rooms": [],
-                "manual_j": {
-                    "cooling_tons": 0,
-                    "heating_tons": 0,
-                    "total_cooling_btuh": 0,
-                    "total_heating_btuh": 0
-                },
-                "hvac_design": {
-                    "system_type": "TBD",
-                    "equipment_type": "TBD", 
-                    "efficiency": {}
-                },
-                "error": base_result.get("error", "Analysis not available - processing may have failed")
+        # Check if processing actually failed based on status
+        actual_status = base_result.get("status", "failed")
+        if actual_status == "failed":
+            # Return error status to frontend
+            return {
+                **base_result,
+                "status": "failed",
+                "error_message": base_result.get("message", "Blueprint processing failed"),
+                "error_details": base_result.get("error", "Unknown error occurred")
             }
-        }
+        else:
+            # Fallback for cases where processing was incomplete
+            return {
+                **base_result,
+                "status": "completed", 
+                "analysis": {
+                    "project_info": base_result.get("project_info", {}),
+                    "building_chars": {
+                        "total_area": 0,
+                        "stories": 1
+                    },
+                    "rooms": [],
+                    "manual_j": {
+                        "cooling_tons": 0,
+                        "heating_tons": 0,
+                        "total_cooling_btuh": 0,
+                        "total_heating_btuh": 0
+                    },
+                    "hvac_design": {
+                        "system_type": "TBD",
+                        "equipment_type": "TBD", 
+                        "efficiency": {}
+                    },
+                    "warning": "Analysis incomplete - partial data available"
+                }
+            }
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))

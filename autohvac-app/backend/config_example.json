@@ -1,0 +1,31 @@
+{
+  "openai_api_key": "sk-your-openai-api-key-here",
+  "company_name": "AutoHVAC Pro",
+  "company_tagline": "Professional HVAC Load Calculations & System Design",
+  "logo_path": "",
+  "ai_gap_filling": {
+    "enabled": true,
+    "max_cost_per_blueprint": 0.50,
+    "confidence_threshold": 0.90
+  },
+  "output_settings": {
+    "include_calculations": true,
+    "include_cad_export": true,
+    "default_efficiency": {
+      "seer": 16,
+      "hspf": 9.5,
+      "afue": 92
+    }
+  },
+  "pricing": {
+    "equipment_cost_per_ton": 2500,
+    "installation_cost_per_ton": 3500,
+    "ductwork_cost_per_room": 750,
+    "permit_fee": 250
+  },
+  "climate_defaults": {
+    "design_temp_cooling": 95,
+    "design_temp_heating": 10,
+    "humidity": 50
+  }
+}
