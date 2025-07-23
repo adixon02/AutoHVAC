@@ -9,6 +9,7 @@ from pathlib import Path
 from api.blueprint import router as blueprint_router
 from api.calculations import router as calculations_router
 from api.export import router as export_router
+from api.climate import router as climate_router
 
 app = FastAPI(
     title="AutoHVAC Backend API",
@@ -29,6 +30,7 @@ app.add_middleware(
 app.include_router(blueprint_router, prefix="/api/blueprint", tags=["blueprint"])
 app.include_router(calculations_router, prefix="/api/calculations", tags=["calculations"])
 app.include_router(export_router, prefix="/api/export", tags=["export"])
+app.include_router(climate_router, prefix="/api/climate", tags=["climate"])
 
 # Create upload directory
 UPLOAD_DIR = Path("uploads")
@@ -43,6 +45,7 @@ async def root():
             "blueprint": "/api/blueprint",
             "calculations": "/api/calculations",
             "export": "/api/export",
+            "climate": "/api/climate",
             "docs": "/docs"
         }
     }

@@ -8,7 +8,7 @@ import Results from './components/Results';
 import BlueprintUpload from './components/BlueprintUpload';
 import ProfessionalResults from './components/ProfessionalResults';
 import { ProjectInfo, BuildingInfo, Room, LoadCalculation, SystemRecommendation } from './lib/types';
-import { getClimateZone, defaultClimateZone } from './lib/climateData';
+import { getClimateZone, getClimateZoneSync, defaultClimateZone } from './lib/climateData';
 import { calculateTotalLoad } from './lib/manualJ';
 import { generateSystemRecommendations } from './lib/systemRecommendations';
 
@@ -41,12 +41,17 @@ export default function Home() {
     setCurrentStep('rooms');
   };
 
-  const handleRoomsSubmit = (roomData: Room[]) => {
+  const handleRoomsSubmit = async (roomData: Room[]) => {
     setRooms(roomData);
     
     // Perform calculations
     if (projectInfo && buildingInfo) {
-      const climate = getClimateZone(projectInfo.zipCode) || defaultClimateZone;
+      // Try to get climate data from API, fallback to sync version
+      let climate = await getClimateZone(projectInfo.zipCode);
+      if (!climate) {
+        climate = getClimateZoneSync(projectInfo.zipCode) || defaultClimateZone;
+      }
+      
       const loadCalc = calculateTotalLoad(roomData, buildingInfo, climate);
       setLoadCalculation(loadCalc);
       
@@ -213,6 +218,7 @@ export default function Home() {
             <BlueprintUpload 
               onUploadComplete={handleBlueprintUpload}
               onError={handleBlueprintError}
+              projectInfo={projectInfo}
             />
             <div className="mt-6 flex justify-between">
               <button

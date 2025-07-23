@@ -1,5 +1,5 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
-from typing import Dict, Any, List
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Form
+from typing import Dict, Any, List, Optional
 import uuid
 from pathlib import Path
 import shutil
@@ -28,12 +28,17 @@ professional_generator = ProfessionalOutputGenerator()
 
 @router.post("/upload")
 async def upload_blueprint(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = BackgroundTasks()
+    zip_code: Optional[str] = Form(None),
+    project_name: Optional[str] = Form(None),
+    project_type: Optional[str] = Form(None),
+    construction_type: Optional[str] = Form(None)
 ) -> Dict[str, Any]:
     """
     Upload a blueprint PDF file and generate professional HVAC analysis
     Returns a job ID for tracking processing status
+    Now accepts project info from form including ZIP code
     """
     # Validate file type - we focus on PDFs for MVP
     allowed_extensions = {".pdf"}
@@ -54,8 +59,22 @@ async def upload_blueprint(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
-    # Add background processing task
-    background_tasks.add_task(process_blueprint_professional, job_id, file_path, file.filename)
+    # Create project info dict
+    project_info = {
+        "zip_code": zip_code,
+        "project_name": project_name,
+        "project_type": project_type,
+        "construction_type": construction_type
+    }
+    
+    # Add background processing task with project info
+    background_tasks.add_task(
+        process_blueprint_professional, 
+        job_id, 
+        file_path, 
+        file.filename,
+        project_info
+    )
     
     return {
         "job_id": job_id,
@@ -145,9 +164,15 @@ async def download_deliverable(job_id: str, file_type: str):
         media_type='application/octet-stream'
     )
 
-async def process_blueprint_professional(job_id: str, file_path: Path, original_filename: str):
+async def process_blueprint_professional(
+    job_id: str, 
+    file_path: Path, 
+    original_filename: str,
+    project_info: Dict[str, Any]
+):
     """
     Background task to process blueprint using our professional output generator
+    Now accepts project info including ZIP code from the form
     """
     result = {
         "job_id": job_id,
@@ -163,7 +188,9 @@ async def process_blueprint_professional(job_id: str, file_path: Path, original_
         
         summary = await professional_generator.generate_complete_analysis(
             blueprint_path=file_path,
-            output_dir=job_output_dir
+            output_dir=job_output_dir,
+            zip_code=project_info.get("zip_code"),
+            project_name=project_info.get("project_name")
         )
         
         # Prepare result with all the professional data

@@ -103,9 +103,16 @@ class ProfessionalOutputGenerator:
             
         self.cad_exporter = CADExporter()
     
-    async def generate_complete_analysis(self, blueprint_path: Path, output_dir: Optional[Path] = None) -> Dict[str, Any]:
+    async def generate_complete_analysis(
+        self, 
+        blueprint_path: Path, 
+        output_dir: Optional[Path] = None,
+        zip_code: Optional[str] = None,
+        project_name: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Main function: Generate complete professional analysis package
+        Now accepts ZIP code from form to ensure accurate climate data
         """
         if output_dir is None:
             output_dir = Path.cwd()
@@ -119,6 +126,15 @@ class ProfessionalOutputGenerator:
         
         # Step 1: Extract blueprint data
         extraction_result = self.blueprint_processor.process_blueprint(blueprint_path)
+        
+        # Override extracted ZIP code with form-provided ZIP code if available
+        if zip_code:
+            logger.info(f"📍 Using ZIP code from form: {zip_code} (overriding blueprint extraction)")
+            extraction_result.project_info.zip_code = zip_code
+        
+        # Override project name if provided
+        if project_name:
+            extraction_result.project_info.project_name = project_name
         
         # Step 2: Fill gaps with AI if needed
         if (self.ai_gap_filler and 

@@ -1,6 +1,7 @@
 import { ClimateZone } from './types';
+import { getClimateZoneFromAPI } from './climateApi';
 
-// Sample climate zones for major US cities - MVP data
+// Sample climate zones for major US cities - MVP fallback data
 export const climateZones: ClimateZone[] = [
   // Hot-Humid
   {
@@ -78,7 +79,7 @@ export const climateZones: ClimateZone[] = [
     designTemperatures: { summerDry: 91, winterDry: 2 },
     humidity: { summer: 35, winter: 45 }
   },
-  // Marine
+  // Marine - Pacific Northwest
   {
     zipCode: '98101',
     zone: '4C',
@@ -86,6 +87,14 @@ export const climateZones: ClimateZone[] = [
     coolingDegreeDays: 200,
     designTemperatures: { summerDry: 83, winterDry: 28 },
     humidity: { summer: 55, winter: 75 }
+  },
+  {
+    zipCode: '98188',
+    zone: '5B',
+    heatingDegreeDays: 5200,
+    coolingDegreeDays: 300,
+    designTemperatures: { summerDry: 85, winterDry: 25 },
+    humidity: { summer: 60, winter: 80 }
   },
   {
     zipCode: '94102',
@@ -106,8 +115,24 @@ export const climateZones: ClimateZone[] = [
   }
 ];
 
-export function getClimateZone(zipCode: string): ClimateZone | undefined {
-  // For MVP, just check first 3 digits of ZIP
+export async function getClimateZone(zipCode: string): Promise<ClimateZone | undefined> {
+  // First, try to get data from our comprehensive API
+  try {
+    const apiData = await getClimateZoneFromAPI(zipCode);
+    if (apiData) {
+      return apiData;
+    }
+  } catch (error) {
+    console.warn('Climate API unavailable, falling back to local data');
+  }
+  
+  // Fallback to local data - check first 3 digits of ZIP
+  const zip3 = zipCode.substring(0, 3);
+  return climateZones.find(zone => zone.zipCode.startsWith(zip3));
+}
+
+// Synchronous version for immediate UI feedback (uses only local data)
+export function getClimateZoneSync(zipCode: string): ClimateZone | undefined {
   const zip3 = zipCode.substring(0, 3);
   return climateZones.find(zone => zone.zipCode.startsWith(zip3));
 }

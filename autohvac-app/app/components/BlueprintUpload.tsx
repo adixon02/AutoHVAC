@@ -1,12 +1,14 @@
 import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { ProjectInfo } from '../lib/types';
 
 interface BlueprintUploadProps {
   onUploadComplete: (jobId: string, fileNames: string[]) => void;
   onError: (error: string) => void;
+  projectInfo?: ProjectInfo;
 }
 
-export default function BlueprintUpload({ onUploadComplete, onError }: BlueprintUploadProps) {
+export default function BlueprintUpload({ onUploadComplete, onError, projectInfo }: BlueprintUploadProps) {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processingStatus, setProcessingStatus] = useState<string>('');
@@ -38,6 +40,14 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
       const file = allFiles[0];
       const singleFormData = new FormData();
       singleFormData.append('file', file);
+      
+      // Include project info if available
+      if (projectInfo) {
+        singleFormData.append('zip_code', projectInfo.zipCode);
+        singleFormData.append('project_name', projectInfo.projectName);
+        singleFormData.append('project_type', projectInfo.projectType);
+        singleFormData.append('construction_type', projectInfo.constructionType);
+      }
 
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/blueprint/upload`, {
         method: 'POST',
