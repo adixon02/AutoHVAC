@@ -42,7 +42,6 @@ export default function Results({
       yPos += 10;
       doc.text(`Location: ${projectInfo.zipCode} (Climate Zone ${climate.zone})`, 20, yPos);
       yPos += 10;
-      doc.text(`Type: ${projectInfo.projectType} - ${projectInfo.constructionType}`, 20, yPos);
       yPos += 20;
       
       // Building Info

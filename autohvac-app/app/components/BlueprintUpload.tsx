@@ -60,8 +60,6 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
       if (projectInfo) {
         singleFormData.append('zip_code', projectInfo.zipCode);
         singleFormData.append('project_name', projectInfo.projectName);
-        singleFormData.append('project_type', projectInfo.projectType);
-        singleFormData.append('construction_type', projectInfo.constructionType);
       }
 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';

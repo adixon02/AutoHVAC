@@ -1,8 +1,6 @@
 export interface ProjectInfo {
   zipCode: string;
   projectName: string;
-  projectType: 'residential' | 'commercial';
-  constructionType: 'new' | 'retrofit';
   inputMethod?: 'manual' | 'blueprint';
 }
 
