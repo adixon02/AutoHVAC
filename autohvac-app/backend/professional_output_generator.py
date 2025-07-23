@@ -16,14 +16,9 @@ import sys
 # Add backend modules
 sys.path.append('autohvac-app/backend')
 
-from core.data_models import ExtractionResult
-from core.blueprint_processor import BlueprintProcessor
-try:
-    from ai_gap_filler import AIGapFiller
-except ImportError:
-    AIGapFiller = None
+from enhanced_blueprint_processor import ExtractionResult, EnhancedBlueprintProcessor
+from ai_gap_filler import AIGapFiller
 from processors.cad_exporter import CADExporter
-from services.climate_service import ClimateService
 from dataclasses import asdict
 
 logger = logging.getLogger(__name__)
@@ -87,34 +82,20 @@ class ProfessionalOutputGenerator:
     
     def setup_components(self):
         """Initialize processing components"""
-        self.blueprint_processor = BlueprintProcessor()
-        
-        # Initialize climate service
-        self.climate_db = ClimateService()
-        # Note: ClimateService doesn't have get_coverage_stats, so we'll skip that for now
-        logger.info("Climate service initialized")
+        self.blueprint_processor = EnhancedBlueprintProcessor()
         
         # Pass API key to AI gap filler if available
         api_key = self.config.get('openai_api_key', '')
-        if self.config['ai_gap_filling']['enabled'] and api_key and AIGapFiller:
+        if self.config['ai_gap_filling']['enabled'] and api_key:
             self.ai_gap_filler = AIGapFiller(api_key=api_key)
-        elif self.config['ai_gap_filling']['enabled'] and AIGapFiller:
-            self.ai_gap_filler = AIGapFiller()
         else:
-            self.ai_gap_filler = None
+            self.ai_gap_filler = AIGapFiller() if self.config['ai_gap_filling']['enabled'] else None
             
         self.cad_exporter = CADExporter()
     
-    async def generate_complete_analysis(
-        self, 
-        blueprint_path: Path, 
-        output_dir: Optional[Path] = None,
-        zip_code: Optional[str] = None,
-        project_name: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def generate_complete_analysis(self, blueprint_path: Path, output_dir: Optional[Path] = None) -> Dict[str, Any]:
         """
         Main function: Generate complete professional analysis package
-        Now accepts ZIP code from form to ensure accurate climate data
         """
         if output_dir is None:
             output_dir = Path.cwd()
@@ -129,22 +110,13 @@ class ProfessionalOutputGenerator:
         # Step 1: Extract blueprint data
         extraction_result = self.blueprint_processor.process_blueprint(blueprint_path)
         
-        # Override extracted ZIP code with form-provided ZIP code if available
-        if zip_code:
-            logger.info(f"📍 Using ZIP code from form: {zip_code} (overriding blueprint extraction)")
-            extraction_result.project_info.zip_code = zip_code
-        
-        # Override project name if provided
-        if project_name:
-            extraction_result.project_info.project_name = project_name
-        
         # Step 2: Fill gaps with AI if needed
         if (self.ai_gap_filler and 
             extraction_result.overall_confidence < self.config['ai_gap_filling']['confidence_threshold']):
             extraction_result = self.ai_gap_filler.fill_gaps(extraction_result, blueprint_path)
         
         # Step 3: Calculate Manual J loads
-        manual_j_data = await self._calculate_manual_j(extraction_result)
+        manual_j_data = self._calculate_manual_j(extraction_result)
         
         # Step 4: Design HVAC system
         hvac_design = self._design_hvac_system(manual_j_data, extraction_result)
@@ -154,68 +126,20 @@ class ProfessionalOutputGenerator:
             extraction_result, manual_j_data, hvac_design, output_dir, project_name
         )
         
-        # Step 6: Create summary package with data quality warnings
+        # Step 6: Create summary package
         summary = self._create_project_summary(extraction_result, manual_j_data, hvac_design, deliverables)
         
-        # Add data quality warnings
-        summary["data_warnings"] = self._generate_data_warnings(extraction_result)
-        
         logger.info(f"✅ Analysis complete! {len(deliverables)} files generated")
-        if summary["data_warnings"]:
-            logger.warning(f"⚠️ {len(summary['data_warnings'])} data quality warnings generated")
         
         return summary
     
-    async def _calculate_manual_j(self, extraction: ExtractionResult) -> Dict[str, Any]:
+    def _calculate_manual_j(self, extraction: ExtractionResult) -> Dict[str, Any]:
         """Calculate ACCA-compliant Manual J load calculations"""
         
         logger.info("🧮 Calculating Manual J loads...")
         
-        # Get climate zone for location using professional database
-        zip_code = extraction.project_info.zip_code or "99019"  # Fallback to Liberty Lake
-        climate_data = await self.climate_db.get_climate_data(zip_code)
-        
-        # Convert ClimateData object to dictionary if needed
-        if hasattr(climate_data, 'to_dict'):
-            climate_zone = climate_data.to_dict()
-        elif isinstance(climate_data, dict):
-            climate_zone = climate_data
-        else:
-            climate_zone = None
-        
-        # Ensure climate_zone is a dictionary
-        if not isinstance(climate_zone, dict) or climate_zone is None:
-            logger.error(f"Climate zone lookup returned non-dict: {type(climate_zone)} = {climate_zone}")
-            fallback_data = await self.climate_db.get_climate_data("99019")  # Safe fallback
-            
-            # Convert fallback data to dict
-            if hasattr(fallback_data, 'to_dict'):
-                climate_zone = fallback_data.to_dict()
-            elif isinstance(fallback_data, dict):
-                climate_zone = fallback_data
-            else:
-                climate_zone = None
-            
-            # If even the fallback fails, use default values
-            if not isinstance(climate_zone, dict) or climate_zone is None:
-                logger.warning("Using default climate data - database lookup failed")
-                climate_zone = {
-                    "zip_code": zip_code,
-                    "zone": "4A",
-                    "heating_degree_days": 6000,
-                    "cooling_degree_days": 800,
-                    "design_temperatures": {
-                        "summer_db": 95.0,
-                        "winter_db": 0.0
-                    },
-                    "humidity": {
-                        "summer": 50.0,
-                        "winter": 30.0
-                    },
-                    "county": "Default County",
-                    "state": "WA",
-                    "description": "Mixed-Humid (Default Location)"
-                }
+        # Get climate zone for location
+        climate_zone = self._get_climate_zone(extraction.project_info.zip_code)
         
         room_loads = []
         total_cooling = 0
@@ -232,14 +156,6 @@ class ProfessionalOutputGenerator:
         diversified_cooling = total_cooling * 0.85
         diversified_heating = total_heating * 0.90
         
-        # Calculate conditioned area only (exclude garage, attic, etc.)
-        conditioned_area = 0
-        for room_load in room_loads:
-            if room_load['cooling_load'] > 0 or room_load['heating_load'] > 0:
-                conditioned_area += room_load['area']
-        
-        logger.info(f"📐 Building area calculation: Total extracted={extraction.building_chars.total_area:.0f} sq ft, Conditioned={conditioned_area:.0f} sq ft")
-        
         manual_j_data = {
             "project_info": {
                 "project_name": extraction.project_info.project_name,
@@ -250,8 +166,7 @@ class ProfessionalOutputGenerator:
                 "analyst": self.config["company_name"]
             },
             "building_characteristics": {
-                "total_area": conditioned_area,  # Use conditioned area only
-                "total_extracted_area": extraction.building_chars.total_area,  # Keep original for reference
+                "total_area": extraction.building_chars.total_area,
                 "stories": extraction.building_chars.stories,
                 "construction_type": extraction.building_chars.construction_type,
                 "insulation": {
@@ -283,65 +198,24 @@ class ProfessionalOutputGenerator:
     def _calculate_room_load(self, room, extraction: ExtractionResult, climate_zone: Dict[str, Any]) -> Dict[str, Any]:
         """Calculate individual room load using Manual J methodology"""
         
-        # Temperature differences - with safety checks
-        if isinstance(climate_zone, dict) and 'design_temperatures' in climate_zone:
-            summer_temp_diff = climate_zone['design_temperatures']['summer_db'] - 75
-            winter_temp_diff = 70 - climate_zone['design_temperatures']['winter_db']
-        else:
-            logger.error(f"Invalid climate zone in room load calc: {type(climate_zone)}")
-            # Use safe defaults for Liberty Lake, WA
-            summer_temp_diff = 90 - 75  # 15°F
-            winter_temp_diff = 70 - 2   # 68°F
+        # Temperature differences
+        summer_temp_diff = climate_zone['design_temperatures']['summer_dry'] - 75
+        winter_temp_diff = 70 - climate_zone['design_temperatures']['winter_dry']
         
-        # Wall loads - improved calculation based on building envelope only
-        # Only calculate wall loads for rooms with actual exterior walls
-        if room.exterior_walls > 0:
-            # Estimate exterior wall length based on room geometry
-            # Assume rectangular room, estimate exterior wall length more conservatively
-            room_perimeter = 4 * (room.area ** 0.5)  # Perimeter for square room
-            # Only count the portion that's actually exterior (typically 1-2 walls)
-            exterior_wall_length = room_perimeter * min(room.exterior_walls / 4.0, 0.75)  # Cap at 75% of perimeter
-            wall_area = exterior_wall_length * room.ceiling_height
-        else:
-            # Interior rooms have no exterior wall load
-            wall_area = 0
-            
-        # Check for missing insulation data
-        if wall_area > 0 and extraction.insulation.wall_r_value <= 0:
-            logger.warning(f"Missing wall R-value data for {room.name} - using minimum code R-13")
-            wall_r_value = 13.0  # Minimum code requirement as fallback
-        else:
-            wall_r_value = extraction.insulation.wall_r_value
-            
-        wall_cooling = (wall_area * summer_temp_diff) / wall_r_value if wall_area > 0 and wall_r_value > 0 else 0
-        wall_heating = (wall_area * winter_temp_diff) / wall_r_value if wall_area > 0 and wall_r_value > 0 else 0
+        # Wall loads
+        wall_area = room.exterior_walls * room.ceiling_height * (room.area ** 0.5) * 0.8
+        wall_cooling = (wall_area * summer_temp_diff) / extraction.insulation.wall_r_value
+        wall_heating = (wall_area * winter_temp_diff) / extraction.insulation.wall_r_value
         
         # Ceiling loads (if top floor)
         ceiling_area = room.area if room.floor_type == 'upper' else 0
+        ceiling_cooling = (ceiling_area * summer_temp_diff * 1.3) / extraction.insulation.ceiling_r_value
+        ceiling_heating = (ceiling_area * winter_temp_diff) / extraction.insulation.ceiling_r_value
         
-        # Check for missing ceiling insulation data
-        if ceiling_area > 0 and extraction.insulation.ceiling_r_value <= 0:
-            logger.warning(f"Missing ceiling R-value data for {room.name} - using minimum code R-30")
-            ceiling_r_value = 30.0  # Minimum code requirement as fallback
-        else:
-            ceiling_r_value = extraction.insulation.ceiling_r_value
-            
-        ceiling_cooling = (ceiling_area * summer_temp_diff * 1.3) / ceiling_r_value if ceiling_area > 0 and ceiling_r_value > 0 else 0
-        ceiling_heating = (ceiling_area * winter_temp_diff) / ceiling_r_value if ceiling_area > 0 and ceiling_r_value > 0 else 0
-        
-        # Window loads - only for rooms with exterior walls
-        if room.exterior_walls > 0 and room.window_area > 0:
-            window_area = room.window_area
-        elif room.exterior_walls > 0:
-            # Conservative estimate: 10% of exterior wall area (not total room area)
-            # Standard windows are typically 15-20% of wall area, using 10% for conservative estimate
-            window_area = wall_area * 0.10
-        else:
-            # Interior rooms have no windows
-            window_area = 0
-            
-        window_cooling = window_area * extraction.insulation.window_u_value * summer_temp_diff if window_area > 0 else 0
-        window_heating = window_area * extraction.insulation.window_u_value * winter_temp_diff if window_area > 0 else 0
+        # Window loads
+        window_area = room.window_area if room.window_area > 0 else room.area * 0.15 * room.exterior_walls
+        window_cooling = window_area * extraction.insulation.window_u_value * summer_temp_diff
+        window_heating = window_area * extraction.insulation.window_u_value * winter_temp_diff
         
         # Solar gain
         solar_gain = window_area * 35  # BTU/hr per sq ft
@@ -350,69 +224,26 @@ class ProfessionalOutputGenerator:
         occupancy = 2 if 'bedroom' in room.name.lower() else 1
         internal_gains = occupancy * 230 + room.area * 2
         
-        # Infiltration - only for rooms with exterior exposure
-        if room.exterior_walls > 0:
-            room_volume = room.area * room.ceiling_height
-            # Reduced ACH for modern construction - major fix for inflated loads
-            infiltration_rate = 0.10  # Much lower for tight modern construction
-            infiltration_cooling = room_volume * infiltration_rate * 1.08 * summer_temp_diff
-            infiltration_heating = room_volume * infiltration_rate * 1.08 * winter_temp_diff
-            
-            logger.info(f"    💨 Infiltration calc: Volume={room_volume:.0f} ft³, ACH={infiltration_rate}, Temp diff winter={winter_temp_diff}°F")
-        else:
-            # Interior rooms have no infiltration load
-            infiltration_cooling = 0
-            infiltration_heating = 0
+        # Infiltration
+        room_volume = room.area * room.ceiling_height
+        infiltration_cooling = room_volume * 0.35 * 1.08 * summer_temp_diff
+        infiltration_heating = room_volume * 0.35 * 1.08 * winter_temp_diff
         
         # Latent load
         latent_load = occupancy * 200
-        
-        # Debug logging for load calculation components
-        logger.info(f"  🏠 Room: {room.name} ({room.area} sq ft)")
-        logger.info(f"    📏 Room area: {room.area} sq ft, Ceiling height: {room.ceiling_height} ft")
-        logger.info(f"    🌡️  Temperature diffs - Summer: {summer_temp_diff}°F, Winter: {winter_temp_diff}°F")
-        logger.info(f"    🧱 Insulation R-values - Wall: R-{wall_r_value} {'(fallback)' if wall_r_value != extraction.insulation.wall_r_value else ''}, Ceiling: R-{ceiling_r_value} {'(fallback)' if ceiling_r_value != extraction.insulation.ceiling_r_value else ''}, Window U: {extraction.insulation.window_u_value}")
-        logger.info(f"    🧱 Wall area: {wall_area:.1f} sq ft (exterior_walls: {room.exterior_walls})")
-        logger.info(f"    🧱 Wall loads - Cooling: {wall_cooling:.0f} BTU/hr, Heating: {wall_heating:.0f} BTU/hr")
-        logger.info(f"    🏠 Ceiling area: {ceiling_area:.1f} sq ft ({room.floor_type})")
-        logger.info(f"    🏠 Ceiling loads - Cooling: {ceiling_cooling:.0f} BTU/hr, Heating: {ceiling_heating:.0f} BTU/hr")
-        logger.info(f"    🪟 Window area: {window_area:.1f} sq ft (actual: {room.window_area})")
-        logger.info(f"    🪟 Window loads - Cooling: {window_cooling:.0f} BTU/hr, Heating: {window_heating:.0f} BTU/hr")
-        logger.info(f"    ☀️ Solar gain: {solar_gain:.0f} BTU/hr")
-        logger.info(f"    👥 Internal gains: {internal_gains:.0f} BTU/hr (occupancy: {occupancy})")
-        logger.info(f"    💨 Infiltration - Cooling: {infiltration_cooling:.0f} BTU/hr, Heating: {infiltration_heating:.0f} BTU/hr")
-        logger.info(f"    💧 Latent load: {latent_load:.0f} BTU/hr")
         
         # Total loads
         cooling_load = (wall_cooling + ceiling_cooling + window_cooling + 
                        solar_gain + internal_gains + infiltration_cooling + latent_load)
         heating_load = (wall_heating + ceiling_heating + window_heating + infiltration_heating)
         
-        # Apply room-specific factors - MAJOR FIX for inflated loads
-        factor_applied = ""
-        if 'attic' in room.name.lower() or 'crawl' in room.name.lower():
-            # Attics and crawl spaces are typically unconditioned - exclude from load calculations
-            cooling_load = 0
-            heating_load = 0
-            factor_applied = " (unconditioned space - excluded from loads)"
-        elif 'garage' in room.name.lower():
-            # Garages are typically unconditioned - exclude from load calculations
-            cooling_load = 0
-            heating_load = 0
-            factor_applied = " (unconditioned garage - excluded from loads)"
+        # Apply room-specific factors
+        if 'garage' in room.name.lower():
+            cooling_load *= 0.3
+            heating_load *= 0.2
         elif 'storage' in room.name.lower() or 'pantry' in room.name.lower():
-            # Storage areas get reduced conditioning
             cooling_load *= 0.7
             heating_load *= 0.7
-            factor_applied = " (storage factors: 0.7 both)"
-        elif 'mechanical' in room.name.lower() or 'mech' in room.name.lower():
-            # Mechanical rooms typically unconditioned or minimally conditioned
-            cooling_load *= 0.3
-            heating_load *= 0.3
-            factor_applied = " (mechanical room factors: 0.3 both)"
-        
-        logger.info(f"    ✅ Final room loads{factor_applied} - Cooling: {cooling_load:.0f} BTU/hr, Heating: {heating_load:.0f} BTU/hr")
-        logger.info(f"    ─────────────────────────────────────────")
         
         return {
             "room_name": room.name,
@@ -436,6 +267,33 @@ class ProfessionalOutputGenerator:
             }
         }
     
+    def _get_climate_zone(self, zip_code: str) -> Dict[str, Any]:
+        """Get climate zone data for location"""
+        
+        # Climate zone mapping (simplified for MVP)
+        climate_zones = {
+            # Washington State
+            '99019': {  # Liberty Lake, WA
+                'zone': '6B',
+                'description': 'Cold - Dry',
+                'design_temperatures': {'summer_dry': 90, 'winter_dry': 2},
+                'humidity': {'summer': 40, 'winter': 70}
+            },
+            '98188': {  # SeaTac, WA  
+                'zone': '4C',
+                'description': 'Mixed-Marine',
+                'design_temperatures': {'summer_dry': 83, 'winter_dry': 28},
+                'humidity': {'summer': 55, 'winter': 75}
+            }
+        }
+        
+        # Default to zone 4A if not found
+        return climate_zones.get(zip_code, {
+            'zone': '4A',
+            'description': 'Mixed-Humid',
+            'design_temperatures': {'summer_dry': 90, 'winter_dry': 20},
+            'humidity': {'summer': 65, 'winter': 60}
+        })
     
     def _design_hvac_system(self, manual_j_data: Dict[str, Any], extraction: ExtractionResult) -> Dict[str, Any]:
         """Design optimal HVAC system based on load calculations"""
@@ -445,40 +303,22 @@ class ProfessionalOutputGenerator:
         cooling_tons = manual_j_data['load_calculation']['cooling_tons']
         heating_tons = manual_j_data['load_calculation']['heating_tons']
         total_area = manual_j_data['building_characteristics']['total_area']
-        climate_zone = manual_j_data['climate_data']
+        climate_zone = manual_j_data['climate_data']['zone']
         
-        # Improved system selection logic based on industry standards
-        logger.info(f"System selection: {total_area} sq ft, {len(extraction.rooms)} rooms, {cooling_tons} tons cooling")
-        
+        # System selection logic
         if total_area > 3000 and len(extraction.rooms) > 8:
             system_type = "zoned_ducted"
-            logger.info("Selected zoned_ducted: Large home with many rooms")
-        elif cooling_tons > 4 or total_area > 2500:
+        elif cooling_tons > 3:
             system_type = "ducted"
-            logger.info("Selected ducted: High load or large area")
-        elif len(extraction.rooms) > 6:
-            system_type = "ducted"
-            logger.info("Selected ducted: Many rooms benefit from central system")
-        elif cooling_tons <= 2 and len(extraction.rooms) <= 4:
-            system_type = "ductless"
-            logger.info("Selected ductless: Small home, low load")
         else:
-            system_type = "ducted"
-            logger.info("Selected ducted: Default for moderate size homes")
+            system_type = "ductless"
         
         # Equipment sizing with safety factors
         equipment_cooling = round(cooling_tons * 12000 * 1.15)  # 15% safety factor
         equipment_heating = round(heating_tons * 12000 * 1.10)  # 10% safety factor
         
         # Select equipment type based on climate
-        # Ensure we have a valid climate zone dictionary
-        if not isinstance(climate_zone, dict):
-            logger.error(f"Invalid climate zone data type: {type(climate_zone)}")
-            climate_zone_code = '4A'  # Safe default
-        else:
-            climate_zone_code = climate_zone.get('zone', '4A')
-            
-        if climate_zone_code in ['6A', '6B', '7', '8']:
+        if climate_zone in ['6A', '6B', '7', '8']:
             equipment_type = "cold_climate_heat_pump"
             efficiency = {"seer": 20, "hspf": 10}
         else:
@@ -619,7 +459,7 @@ class ProfessionalOutputGenerator:
         
         notes = [
             f"HVAC system designed per ACCA Manual J 8th Edition load calculations",
-            f"Equipment sized for {manual_j['climate_data'].get('description', 'Unknown Location')} climate zone {manual_j['climate_data']['zone']}",
+            f"Equipment sized for {manual_j['climate_data']['description']} climate zone {manual_j['climate_data']['zone']}",
             f"High-efficiency {hvac_design['equipment']['type']} selected for optimal performance",
         ]
         
@@ -661,7 +501,7 @@ BUILDING CHARACTERISTICS
 • Total Area: {manual_j['building_characteristics']['total_area']:,.0f} sq ft
 • Stories: {manual_j['building_characteristics']['stories']}
 • Construction: {manual_j['building_characteristics']['construction_type']}
-• Climate Zone: {manual_j['climate_data']['zone']} ({manual_j['climate_data'].get('description', 'Unknown Location')})
+• Climate Zone: {manual_j['climate_data']['zone']} ({manual_j['climate_data']['description']})
 • Insulation: {manual_j['building_characteristics']['insulation']['walls']} walls, {manual_j['building_characteristics']['insulation']['ceiling']} ceiling
 
 LOAD CALCULATION (Manual J)
@@ -726,34 +566,6 @@ www.autohvac.pro
             "generated_by": self.config['company_name'],
             "generation_time": datetime.now().isoformat()
         }
-    
-    def _generate_data_warnings(self, extraction: ExtractionResult) -> List[str]:
-        """Generate warnings about missing or assumed data"""
-        warnings = []
-        
-        # Check for missing insulation data
-        if extraction.insulation.wall_r_value <= 0:
-            warnings.append("Wall R-value not found in blueprints - using minimum code R-13")
-        if extraction.insulation.ceiling_r_value <= 0:
-            warnings.append("Ceiling R-value not found in blueprints - using minimum code R-30")
-        if extraction.insulation.foundation_r_value <= 0:
-            warnings.append("Foundation R-value not found in blueprints - using minimum code R-10")
-            
-        # Check for missing project info
-        if not extraction.project_info.address:
-            warnings.append("Property address not found in blueprints")
-        if not extraction.project_info.zip_code:
-            warnings.append("ZIP code not found - using default climate data")
-            
-        # Check for assumed building characteristics
-        if extraction.building_chars.total_area <= 0:
-            warnings.append("Total building area not found - calculated from room areas")
-            
-        # Check for limited room data
-        if len(extraction.rooms) < 3:
-            warnings.append("Limited room data found - load calculations may be incomplete")
-            
-        return warnings
 
 # Example usage and testing
 async def main():

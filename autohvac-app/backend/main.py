@@ -16,10 +16,25 @@ from datetime import datetime
 import logging
 import sys
 
-# Add parent directory to path to import our processors
-sys.path.append(str(Path(__file__).parent.parent))
-from enhanced_blueprint_processor import BlueprintProcessor
-from professional_output_generator import ProfessionalOutputGenerator
+# Add root directory to path to import our processors
+# This handles both local development and Render deployment paths
+current_dir = Path(__file__).parent
+root_dir = current_dir.parent
+sys.path.insert(0, str(root_dir))
+
+try:
+    from enhanced_blueprint_processor import BlueprintProcessor
+    from professional_output_generator import ProfessionalOutputGenerator
+except ImportError:
+    # Fallback for deployment environments where files might be in different locations
+    import os
+    for possible_path in [current_dir, root_dir, Path("/app")]:
+        if (possible_path / "enhanced_blueprint_processor.py").exists():
+            sys.path.insert(0, str(possible_path))
+            break
+    
+    from enhanced_blueprint_processor import BlueprintProcessor
+    from professional_output_generator import ProfessionalOutputGenerator
 
 # Basic logging
 logging.basicConfig(level=logging.INFO)

@@ -68,7 +68,7 @@ class AIGapFiller:
             logger.warning("AI gap filling disabled - returning original results")
             return extraction_result
         
-        if extraction_result.overall_confidence >= 0.85:
+        if extraction_result.overall_confidence >= 0.90:
             logger.info(f"High confidence extraction ({extraction_result.overall_confidence:.1%}) - skipping AI")
             return extraction_result
         
@@ -113,23 +113,17 @@ class AIGapFiller:
             return  # Already have address
         
         prompt = f"""
-        You are analyzing a blueprint to extract the property address.
+        Extract the property address from this blueprint.
         
-        Current known information:
-        - Project: {result.project_info.project_name or 'Unknown'}
-        - City: {result.project_info.city or 'Unknown'}
-        - State: {result.project_info.state or 'Unknown'}
-        - ZIP: {result.project_info.zip_code or 'Unknown'}
+        Current data:
+        - Project: {result.project_info.project_name}
+        - City: {result.project_info.city}
+        - State: {result.project_info.state}
+        - ZIP: {result.project_info.zip_code}
         
-        Find the complete street address including house number and street name.
-        Look for patterns like:
-        - "25196 WYVERN LANE"
-        - "1234 Main Street"
-        - "ADDRESS: [address]"
-        - "SITE: [address]"
-        
-        Return ONLY the street address in format: "[NUMBER] [STREET NAME]"
-        If no address found, respond: "NOT_FOUND"
+        Look for the street address (number + street name).
+        Respond with ONLY the street address, nothing else.
+        If not found, respond with "NOT_FOUND".
         """
         
         response = self._call_ai_with_text(prompt, result.raw_data['combined_text'][:5000])
@@ -146,21 +140,16 @@ class AIGapFiller:
             return
         
         prompt = f"""
-        Find the ZIP code for this property in the blueprint.
+        Extract the ZIP code from this blueprint.
         
-        Known location details:
-        - Address: {result.project_info.address or 'Unknown'}
-        - City: {result.project_info.city or 'Unknown'}
-        - State: {result.project_info.state or 'Unknown'}
+        Current data:
+        - Address: {result.project_info.address}
+        - City: {result.project_info.city}
+        - State: {result.project_info.state}
         
-        Look for a 5-digit ZIP code near address information.
-        Common patterns:
-        - "City, State ZIP"
-        - "ZIP: [code]"
-        - Address lines ending with ZIP codes
-        
-        Return ONLY the 5-digit ZIP code.
-        If not found, respond: "NOT_FOUND"
+        Look for a 5-digit ZIP code.
+        Respond with ONLY the ZIP code, nothing else.
+        If not found, respond with "NOT_FOUND".
         """
         
         response = self._call_ai_with_text(prompt, result.raw_data['combined_text'][:3000])
@@ -202,24 +191,18 @@ class AIGapFiller:
             return
         
         prompt = f"""
-        Extract building area measurements from this blueprint.
+        Extract building area information from this blueprint.
         
-        I need to find square footage information. Look for patterns like:
-        - "TOTAL: 2,500 SF" or "TOTAL AREA: 2500 SQ FT"
-        - "MAIN LEVEL: 1,200 SF" or "FIRST FLOOR: 1200 SF"
-        - "UPPER LEVEL: 800 SF" or "SECOND FLOOR: 800 SF"
-        - "ADU: 500 SF" or "ACCESSORY DWELLING: 500 SF"
-        - "GARAGE: 400 SF"
-        - "BASEMENT: 600 SF"
+        Look for area statements like:
+        - "Total: 2500 SF"
+        - "Main Level: 1200 SF"
+        - "Upper Level: 800 SF"
+        - "ADU: 500 SF"
         
-        Current building info:
-        - Stories: {result.building_chars.stories}
-        - Construction: {result.building_chars.construction_type}
+        Respond with a JSON object like:
+        {"total": 2500, "main": 1200, "upper": 800, "adu": 500}
         
-        Return a JSON object with any areas you find:
-        {{"total": 2500, "main": 1200, "upper": 800, "adu": 500, "garage": 400}}
-        
-        Only include areas you can clearly identify. If no areas found, respond: "NOT_FOUND"
+        If not found, respond with "NOT_FOUND".
         """
         
         response = self._call_ai_with_text(prompt, result.raw_data['combined_text'][:4000])
@@ -338,8 +321,8 @@ class AIGapFiller:
             response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=messages,
-                max_tokens=150,  # Slightly higher for better extraction
-                temperature=0.1,   # Very low but not zero for flexibility
+                max_tokens=100,  # Keep responses short to minimize cost
+                temperature=0,   # Deterministic responses
             )
             
             # Track usage and cost
