@@ -23,7 +23,7 @@ root_dir = current_dir.parent
 sys.path.insert(0, str(root_dir))
 
 try:
-    from enhanced_blueprint_processor import BlueprintProcessor
+    from enhanced_blueprint_processor import EnhancedBlueprintProcessor as BlueprintProcessor
     from professional_output_generator import ProfessionalOutputGenerator
 except ImportError:
     # Fallback for deployment environments where files might be in different locations
@@ -33,7 +33,7 @@ except ImportError:
             sys.path.insert(0, str(possible_path))
             break
     
-    from enhanced_blueprint_processor import BlueprintProcessor
+    from enhanced_blueprint_processor import EnhancedBlueprintProcessor as BlueprintProcessor
     from professional_output_generator import ProfessionalOutputGenerator
 
 # Basic logging
