@@ -35,8 +35,15 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Temporarily allow all origins to debug
     allow_credentials=False,  # Must be False when allow_origins=["*"]
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],
+    allow_headers=[
+        "Accept",
+        "Accept-Language", 
+        "Content-Language",
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+    ],
 )
 
 # Setup comprehensive error handling
