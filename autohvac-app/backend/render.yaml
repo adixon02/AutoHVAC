@@ -1,11 +1,16 @@
 services:
   - type: web
     name: autohvac-backend
-    env: python
-    buildCommand: ./build.sh
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    runtime: python
+    plan: free
+    buildCommand: chmod +x build.sh && ./build.sh
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: ALLOWED_ORIGINS
         value: https://auto-hvac.vercel.app
+      - key: LOG_LEVEL
+        value: INFO
+      - key: PORT
+        generateValue: true
