@@ -17,7 +17,10 @@ import sys
 sys.path.append('autohvac-app/backend')
 
 from enhanced_blueprint_processor import ExtractionResult, EnhancedBlueprintProcessor
-from ai_gap_filler import AIGapFiller
+try:
+    from ai_gap_filler import AIGapFiller
+except ImportError:
+    AIGapFiller = None
 from processors.cad_exporter import CADExporter
 from dataclasses import asdict
 
@@ -86,10 +89,12 @@ class ProfessionalOutputGenerator:
         
         # Pass API key to AI gap filler if available
         api_key = self.config.get('openai_api_key', '')
-        if self.config['ai_gap_filling']['enabled'] and api_key:
+        if self.config['ai_gap_filling']['enabled'] and api_key and AIGapFiller:
             self.ai_gap_filler = AIGapFiller(api_key=api_key)
+        elif self.config['ai_gap_filling']['enabled'] and AIGapFiller:
+            self.ai_gap_filler = AIGapFiller()
         else:
-            self.ai_gap_filler = AIGapFiller() if self.config['ai_gap_filling']['enabled'] else None
+            self.ai_gap_filler = None
             
         self.cad_exporter = CADExporter()
     
