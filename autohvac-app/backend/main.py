@@ -30,13 +30,7 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Setup comprehensive error handling
-setup_error_handlers(app)
-
-# Setup middleware stack
-setup_middleware(app)
-
-# Configure CORS for Next.js frontend - Allow all origins for debugging
+# Configure CORS FIRST (before other middleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Temporarily allow all origins to debug
@@ -44,6 +38,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Setup comprehensive error handling
+setup_error_handlers(app)
+
+# Setup middleware stack (after CORS)
+setup_middleware(app)
 
 # Include routers - v2 for new optimized endpoints, v1 for backward compatibility
 app.include_router(blueprint_router_v2, prefix="/api/v2/blueprint", tags=["blueprint-v2"])
