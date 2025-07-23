@@ -3,7 +3,7 @@
 import { ProjectInfo, BuildingInfo, Room, LoadCalculation, SystemRecommendation } from '../lib/types';
 import { btuToTons } from '../lib/manualJ';
 import { getSystemTypeDescription, formatEfficiency } from '../lib/systemRecommendations';
-import { getClimateZone, defaultClimateZone } from '../lib/climateData';
+import { getClimateZoneSync, defaultClimateZone } from '../lib/climateData';
 import HVACLayoutViewer from './HVACLayoutViewer';
 
 interface ResultsProps {
@@ -23,7 +23,7 @@ export default function Results({
   recommendations,
   onStartOver
 }: ResultsProps) {
-  const climate = getClimateZone(projectInfo.zipCode) || defaultClimateZone;
+  const climate = getClimateZoneSync(projectInfo.zipCode) || defaultClimateZone;
   
   const handleDownloadPDF = async () => {
     try {
