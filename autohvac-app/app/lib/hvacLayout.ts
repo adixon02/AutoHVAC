@@ -249,9 +249,9 @@ export class HVACLayoutGenerator {
     return { x: 0, y: 0, floor: 'main' };
   }
 
-  private findOutdoorUnitLocation(): { x: number; y: number } {
+  private findOutdoorUnitLocation(): { x: number; y: number; floor: string } {
     // Prefer side or back of house, away from windows
-    return { x: -10, y: 0 }; // Simplified - would need actual building layout
+    return { x: -10, y: 0, floor: 'main' }; // Simplified - would need actual building layout
   }
 
   private designDuctwork(rooms: Room[], equipmentLocation: { x: number; y: number; floor: string }): {
