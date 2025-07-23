@@ -49,25 +49,25 @@ class CADExporter:
         
         # Draw walls if available
         if "walls" in layers and "data" in blueprint_data:
-            await self._draw_walls(msp, blueprint_data["data"], scale)
+            self._draw_walls(msp, blueprint_data["data"], scale)
         
         # Draw HVAC components
         if "hvac" in layers:
             if hvac_layout:
-                await self._draw_hvac_systems(msp, hvac_layout, scale)
+                self._draw_hvac_systems(msp, hvac_layout, scale)
             elif "data" in blueprint_data:
-                await self._draw_hvac_layout(msp, blueprint_data["data"], scale)
+                self._draw_hvac_layout(msp, blueprint_data["data"], scale)
         
         # Add dimensions
         if "dimensions" in layers and "data" in blueprint_data:
-            await self._add_dimensions(msp, blueprint_data["data"], scale)
+            self._add_dimensions(msp, blueprint_data["data"], scale)
         
         # Add labels
         if "labels" in layers:
             if "rooms" in blueprint_data:
-                await self._add_room_labels(msp, blueprint_data["rooms"], scale)
+                self._add_room_labels(msp, blueprint_data["rooms"], scale)
             elif "data" in blueprint_data:
-                await self._add_labels(msp, blueprint_data["data"], scale)
+                self._add_labels(msp, blueprint_data["data"], scale)
         
         # Save document
         if output_path:
@@ -75,7 +75,7 @@ class CADExporter:
         
         return doc
     
-    async def _draw_hvac_systems(self, msp, hvac_layout: Dict[str, Any], scale: float):
+    def _draw_hvac_systems(self, msp, hvac_layout: Dict[str, Any], scale: float):
         """
         Draw complete HVAC systems from layout data
         """
@@ -84,11 +84,11 @@ class CADExporter:
             
         for system in hvac_layout["systems"]:
             if system["type"] == "ducted":
-                await self._draw_ducted_system(msp, system, scale)
+                self._draw_ducted_system(msp, system, scale)
             elif system["type"] == "ductless":
-                await self._draw_ductless_system(msp, system, scale)
+                self._draw_ductless_system(msp, system, scale)
     
-    async def _draw_ducted_system(self, msp, system: Dict[str, Any], scale: float):
+    def _draw_ducted_system(self, msp, system: Dict[str, Any], scale: float):
         """
         Draw ducted HVAC system with equipment, trunk, and branches
         """
@@ -192,7 +192,7 @@ class CADExporter:
                     dxfattribs={"layer": "LABELS", "height": 8 * scale}
                 ).set_placement((ret_x + width/2, ret_y + height/2))
     
-    async def _draw_ductless_system(self, msp, system: Dict[str, Any], scale: float):
+    def _draw_ductless_system(self, msp, system: Dict[str, Any], scale: float):
         """
         Draw ductless HVAC system with outdoor unit, indoor units, and linesets
         """
@@ -285,7 +285,7 @@ class CADExporter:
                         dxfattribs={"layer": "LABELS", "height": 3 * scale}
                     ).set_placement((mid_x, mid_y + 3 * scale))
     
-    async def _draw_walls(self, msp, data: Dict[str, Any], scale: float):
+    def _draw_walls(self, msp, data: Dict[str, Any], scale: float):
         """
         Draw walls in modelspace
         """
@@ -314,7 +314,7 @@ class CADExporter:
                     # This would draw actual room boundaries
                     pass
     
-    async def _draw_hvac_layout(self, msp, data: Dict[str, Any], scale: float):
+    def _draw_hvac_layout(self, msp, data: Dict[str, Any], scale: float):
         """
         Draw HVAC equipment and ductwork
         """
@@ -379,7 +379,7 @@ class CADExporter:
                     dxfattribs={"layer": "HVAC"}
                 )
     
-    async def _add_dimensions(self, msp, data: Dict[str, Any], scale: float):
+    def _add_dimensions(self, msp, data: Dict[str, Any], scale: float):
         """
         Add dimension annotations
         """
@@ -406,7 +406,7 @@ class CADExporter:
                     dxfattribs={"layer": "DIMENSIONS"}
                 )
     
-    async def _add_room_labels(self, msp, rooms: List[Dict[str, Any]], scale: float):
+    def _add_room_labels(self, msp, rooms: List[Dict[str, Any]], scale: float):
         """
         Add room labels from parsed room data
         """
@@ -425,7 +425,7 @@ class CADExporter:
                     }
                 ).set_placement((x, y))
     
-    async def _add_labels(self, msp, data: Dict[str, Any], scale: float):
+    def _add_labels(self, msp, data: Dict[str, Any], scale: float):
         """
         Add room labels and annotations
         """
