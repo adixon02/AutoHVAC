@@ -31,31 +31,35 @@ const CEILING_R_VALUES = {
 export function calculateLoadForRoom(
   room: Room,
   building: BuildingInfo,
-  climate: ClimateZone
+  climate: ClimateZone,
+  actualRValues?: { wall: number; ceiling: number; foundation: number }
 ): { coolingLoad: number; heatingLoad: number } {
   // Temperature differences
   const summerTempDiff = climate.designTemperatures.summerDry - 75; // Indoor setpoint 75°F
   const winterTempDiff = 70 - climate.designTemperatures.winterDry; // Indoor setpoint 70°F
 
-  // Wall heat transfer
-  const wallArea = room.exteriorWalls * room.ceilingHeight * 10; // Assume 10ft wall sections
-  const wallRValue = WALL_R_VALUES[building.insulationQuality];
+  // Use actual R-values from blueprint if available, otherwise defaults
+  const wallRValue = actualRValues?.wall || WALL_R_VALUES[building.insulationQuality];
+  const ceilingRValue = actualRValues?.ceiling || CEILING_R_VALUES[building.insulationQuality];
+
+  // Wall heat transfer - more accurate area calculation
+  const wallArea = room.exteriorWalls * room.ceilingHeight * Math.sqrt(room.area); // Estimate perimeter from area
   const wallCoolingLoad = (wallArea * summerTempDiff) / wallRValue;
   const wallHeatingLoad = (wallArea * winterTempDiff) / wallRValue;
 
   // Ceiling heat transfer
   const ceilingArea = room.area;
-  const ceilingRValue = CEILING_R_VALUES[building.insulationQuality];
   const ceilingCoolingLoad = (ceilingArea * summerTempDiff * 1.2) / ceilingRValue; // 1.2 factor for roof
   const ceilingHeatingLoad = (ceilingArea * winterTempDiff) / ceilingRValue;
 
-  // Window heat transfer
+  // Window heat transfer - use actual window area if provided
   const windowUValue = WINDOW_U_VALUES[building.windowType];
-  const windowCoolingLoad = room.windowArea * windowUValue * summerTempDiff;
-  const windowHeatingLoad = room.windowArea * windowUValue * winterTempDiff;
+  const actualWindowArea = room.windowArea || (room.area * 0.15); // Default 15% window-to-floor ratio
+  const windowCoolingLoad = actualWindowArea * windowUValue * summerTempDiff;
+  const windowHeatingLoad = actualWindowArea * windowUValue * winterTempDiff;
 
-  // Solar gain (simplified)
-  const solarGain = room.windowArea * 40; // 40 BTU/hr per sq ft average
+  // Solar gain (simplified) - use actual window area
+  const solarGain = actualWindowArea * 40; // 40 BTU/hr per sq ft average
 
   // Internal gains (people, equipment)
   const internalGains = room.occupancy * 230 + room.area * 1.5; // People + equipment
@@ -94,10 +98,11 @@ export function calculateLoadForRoom(
 export function calculateTotalLoad(
   rooms: Room[],
   building: BuildingInfo,
-  climate: ClimateZone
+  climate: ClimateZone,
+  actualRValues?: { wall: number; ceiling: number; foundation: number }
 ): LoadCalculation {
   const roomLoads = rooms.map(room => {
-    const loads = calculateLoadForRoom(room, building, climate);
+    const loads = calculateLoadForRoom(room, building, climate, actualRValues);
     return {
       roomId: room.id,
       coolingLoad: loads.coolingLoad,

@@ -47,7 +47,7 @@ export interface SystemRecommendation {
     seer: number;
     hspf: number;
   };
-  tier: 'economy' | 'standard' | 'premium';
+  tier: 'economy' | 'standard' | 'premium' | 'ultra-premium';
   estimatedCost: {
     equipment: number;
     installation: number;

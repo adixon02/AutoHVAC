@@ -13,10 +13,17 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    if (acceptedFiles.length === 0) return;
+    // If no new files and no existing files, return early
+    if (acceptedFiles.length === 0 && uploadedFiles.length === 0) return;
 
-    const allFiles = [...uploadedFiles, ...acceptedFiles];
-    setUploadedFiles(allFiles);
+    // Use existing files if no new files provided (for "Process Files" button)
+    const allFiles = acceptedFiles.length > 0 ? [...uploadedFiles, ...acceptedFiles] : uploadedFiles;
+    
+    // Only update uploaded files state if we have new files
+    if (acceptedFiles.length > 0) {
+      setUploadedFiles(allFiles);
+    }
+    
     setUploading(true);
     setUploadProgress(0);
     setProcessingStatus(`Uploading ${allFiles.length} blueprint${allFiles.length > 1 ? 's' : ''}...`);
@@ -27,9 +34,14 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
         formData.append(`files`, file);
       });
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/blueprint/upload-multiple`, {
+      // For MVP, we'll process one file at a time
+      const file = allFiles[0];
+      const singleFormData = new FormData();
+      singleFormData.append('file', file);
+
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/blueprint/upload`, {
         method: 'POST',
-        body: formData,
+        body: singleFormData,
       });
 
       if (!response.ok) {
@@ -37,19 +49,19 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
       }
 
       const data = await response.json();
-      setProcessingStatus(`Processing ${allFiles.length} blueprint${allFiles.length > 1 ? 's' : ''}...`);
+      setProcessingStatus(`Generating professional HVAC analysis...`);
       
       // Start polling for processing status
       const jobId = data.job_id;
       const pollInterval = setInterval(async () => {
         try {
-          const statusResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/blueprint/status/${jobId}`);
+          const statusResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/blueprint/status/${jobId}`);
           const statusData = await statusResponse.json();
 
           if (statusData.status === 'completed') {
             clearInterval(pollInterval);
-            setProcessingStatus(`${allFiles.length} blueprint${allFiles.length > 1 ? 's' : ''} processed successfully!`);
-            onUploadComplete(jobId, allFiles.map(f => f.name));
+            setProcessingStatus(`Professional analysis complete! 🎉`);
+            onUploadComplete(jobId, [file.name]);
             setTimeout(() => {
               setUploading(false);
               setProcessingStatus('');
@@ -57,6 +69,9 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
           } else if (statusData.status === 'error') {
             clearInterval(pollInterval);
             throw new Error(statusData.error || 'Processing failed');
+          } else {
+            // Update progress message
+            setProcessingStatus(statusData.message || 'Processing blueprint...');
           }
         } catch (err) {
           clearInterval(pollInterval);
@@ -64,7 +79,7 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
           setUploading(false);
           setUploadedFiles([]);
         }
-      }, 2000);
+      }, 3000);
 
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Upload failed');
@@ -73,14 +88,15 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
     }
   }, [onUploadComplete, onError, uploadedFiles]);
 
+  const processFiles = useCallback(async () => {
+    if (uploadedFiles.length === 0) return;
+    await onDrop([]);
+  }, [uploadedFiles, onDrop]);
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      'application/pdf': ['.pdf'],
-      'image/png': ['.png'],
-      'image/jpeg': ['.jpg', '.jpeg'],
-      'application/acad': ['.dwg'],
-      'application/dxf': ['.dxf']
+      'application/pdf': ['.pdf']
     },
     multiple: true,
     disabled: uploading
@@ -137,7 +153,7 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
               }
             </p>
             <p className="text-sm text-gray-500 mt-2">
-              Supports PDF, PNG, JPG, DWG, and DXF files (multiple files allowed)
+              Supports PDF blueprint files - Professional HVAC analysis in 2-3 minutes
             </p>
           </>
         )}
@@ -184,12 +200,9 @@ export default function BlueprintUpload({ onUploadComplete, onError }: Blueprint
               Clear All
             </button>
             <button
-              onClick={() => {
-                if (uploadedFiles.length > 0) {
-                  onDrop([]);
-                }
-              }}
-              className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 transition-colors"
+              onClick={processFiles}
+              disabled={uploadedFiles.length === 0}
+              className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
               Process {uploadedFiles.length} File{uploadedFiles.length > 1 ? 's' : ''}
             </button>

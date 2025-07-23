@@ -4,6 +4,7 @@ import { ProjectInfo, BuildingInfo, Room, LoadCalculation, SystemRecommendation 
 import { btuToTons } from '../lib/manualJ';
 import { getSystemTypeDescription, formatEfficiency } from '../lib/systemRecommendations';
 import { getClimateZone, defaultClimateZone } from '../lib/climateData';
+import HVACLayoutViewer from './HVACLayoutViewer';
 
 interface ResultsProps {
   projectInfo: ProjectInfo;
@@ -150,6 +151,13 @@ export default function Results({
         </div>
       </div>
 
+      {/* HVAC Layout */}
+      <HVACLayoutViewer 
+        rooms={rooms}
+        loadCalculation={loadCalculation}
+        recommendations={recommendations}
+      />
+
       {/* Load Summary */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="card bg-blue-50 border-blue-200">
@@ -232,7 +240,9 @@ export default function Results({
                   Recommended
                 </div>
               )}
-              <h4 className="text-lg font-semibold capitalize mb-2">{rec.tier} Option</h4>
+              <h4 className="text-lg font-semibold mb-2">
+                {rec.tier === 'ultra-premium' ? 'Ultra Premium' : rec.tier.charAt(0).toUpperCase() + rec.tier.slice(1)} Option
+              </h4>
               <p className="text-sm text-gray-600 mb-4">
                 {getSystemTypeDescription(rec.systemType)}
               </p>

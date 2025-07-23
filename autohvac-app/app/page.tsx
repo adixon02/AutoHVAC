@@ -6,6 +6,7 @@ import BuildingInput from './components/BuildingInput';
 import RoomInput from './components/RoomInput';
 import Results from './components/Results';
 import BlueprintUpload from './components/BlueprintUpload';
+import ProfessionalResults from './components/ProfessionalResults';
 import { ProjectInfo, BuildingInfo, Room, LoadCalculation, SystemRecommendation } from './lib/types';
 import { getClimateZone, defaultClimateZone } from './lib/climateData';
 import { calculateTotalLoad } from './lib/manualJ';
@@ -22,6 +23,7 @@ export default function Home() {
   const [recommendations, setRecommendations] = useState<SystemRecommendation[]>([]);
   const [blueprintJobId, setBlueprintJobId] = useState<string | null>(null);
   const [inputMethod, setInputMethod] = useState<'manual' | 'blueprint'>('manual');
+  const [professionalAnalysis, setProfessionalAnalysis] = useState<any>(null);
 
   const handleProjectSubmit = (data: ProjectInfo) => {
     setProjectInfo(data);
@@ -78,71 +80,40 @@ export default function Home() {
     setRecommendations([]);
     setBlueprintJobId(null);
     setInputMethod('manual');
+    setProfessionalAnalysis(null);
   };
 
   const handleBlueprintUpload = async (jobId: string, fileNames: string[]) => {
+    console.log('🎯 handleBlueprintUpload called with jobId:', jobId, 'files:', fileNames);
     setBlueprintJobId(jobId);
-    // Process blueprint analysis
+    
+    // This function is called when processing is COMPLETE
+    // So we can immediately get the results
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/blueprint/analyze/${jobId}`);
-      const data = await response.json();
+      console.log('📡 Fetching results from:', `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/blueprint/results/${jobId}`);
       
-      // Convert blueprint data to rooms
-      if (data.data && data.data.rooms) {
-        const processedRooms: Room[] = data.data.rooms.map((room: any, index: number) => ({
-          id: `room-${index}`,
-          name: room.name,
-          area: room.area,
-          ceilingHeight: 9, // Default, could be extracted from blueprint
-          windowArea: room.features?.windows ? room.features.windows * 15 : 20,
-          exteriorWalls: room.features?.exterior_walls || 0,
-          occupancy: room.type === 'bedroom' ? 2 : 4
-        }));
-        
-        setRooms(processedRooms);
-        
-        // Set building info from blueprint
-        setBuildingInfo({
-          squareFootage: data.data.total_area,
-          stories: 1, // Would need to be extracted
-          ceilingHeight: 9,
-          foundationType: 'slab',
-          insulationQuality: 'average',
-          windowType: 'double',
-          windowArea: processedRooms.reduce((sum, room) => sum + room.windowArea, 0),
-          orientation: 'north'
-        });
-        
-        // Calculate loads
-        const climate = getClimateZone(projectInfo!.zipCode) || defaultClimateZone;
-        const loadCalc = calculateTotalLoad(processedRooms, {
-          squareFootage: data.data.total_area,
-          stories: 1,
-          ceilingHeight: 9,
-          foundationType: 'slab',
-          insulationQuality: 'average',
-          windowType: 'double',
-          windowArea: processedRooms.reduce((sum, room) => sum + room.windowArea, 0),
-          orientation: 'north'
-        }, climate);
-        setLoadCalculation(loadCalc);
-        
-        const systemRecs = generateSystemRecommendations(loadCalc, {
-          squareFootage: data.data.total_area,
-          stories: 1,
-          ceilingHeight: 9,
-          foundationType: 'slab',
-          insulationQuality: 'average',
-          windowType: 'double',
-          windowArea: processedRooms.reduce((sum, room) => sum + room.windowArea, 0),
-          orientation: 'north'
-        });
-        setRecommendations(systemRecs);
-        
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/blueprint/results/${jobId}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      console.log('📊 Professional analysis data received:', data);
+      
+      if (data.status === 'completed') {
+        console.log('✅ Analysis completed successfully! Moving to results...');
+        // Move to results step and show professional analysis
         setCurrentStep('results');
+        setProfessionalAnalysis(data);
+      } else {
+        // If somehow not complete, show an error
+        console.log('❌ Unexpected status:', data.status, data);
+        handleBlueprintError(`Analysis status: ${data.status}. Expected 'completed'.`);
       }
     } catch (error) {
-      console.error('Failed to analyze blueprint:', error);
+      console.error('❌ Failed to get analysis results:', error);
+      handleBlueprintError(`API Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -253,15 +224,22 @@ export default function Home() {
             </div>
           </div>
         )}
-        {currentStep === 'results' && loadCalculation && (
-          <Results 
-            projectInfo={projectInfo!}
-            buildingInfo={buildingInfo!}
-            rooms={rooms}
-            loadCalculation={loadCalculation}
-            recommendations={recommendations}
-            onStartOver={handleStartOver}
-          />
+        {currentStep === 'results' && (
+          professionalAnalysis ? (
+            <ProfessionalResults 
+              analysisData={professionalAnalysis}
+              onStartOver={handleStartOver}
+            />
+          ) : loadCalculation ? (
+            <Results 
+              projectInfo={projectInfo!}
+              buildingInfo={buildingInfo!}
+              rooms={rooms}
+              loadCalculation={loadCalculation}
+              recommendations={recommendations}
+              onStartOver={handleStartOver}
+            />
+          ) : null
         )}
       </div>
     </div>

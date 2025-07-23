@@ -75,7 +75,7 @@ export function generateSystemRecommendations(
         seer: 30, // EER equivalent
         hspf: 4.0 // COP equivalent
       },
-      tier: 'premium',
+      tier: 'ultra-premium',
       estimatedCost: {
         equipment: Math.round(coolingTons * 3500),
         installation: Math.round(coolingTons * 4500),
