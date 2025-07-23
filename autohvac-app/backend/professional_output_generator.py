@@ -166,6 +166,14 @@ class ProfessionalOutputGenerator:
         diversified_cooling = total_cooling * 0.85
         diversified_heating = total_heating * 0.90
         
+        # Calculate conditioned area only (exclude garage, attic, etc.)
+        conditioned_area = 0
+        for room_load in room_loads:
+            if room_load['cooling_load'] > 0 or room_load['heating_load'] > 0:
+                conditioned_area += room_load['area']
+        
+        logger.info(f"📐 Building area calculation: Total extracted={extraction.building_chars.total_area:.0f} sq ft, Conditioned={conditioned_area:.0f} sq ft")
+        
         manual_j_data = {
             "project_info": {
                 "project_name": extraction.project_info.project_name,
@@ -176,7 +184,8 @@ class ProfessionalOutputGenerator:
                 "analyst": self.config["company_name"]
             },
             "building_characteristics": {
-                "total_area": extraction.building_chars.total_area,
+                "total_area": conditioned_area,  # Use conditioned area only
+                "total_extracted_area": extraction.building_chars.total_area,  # Keep original for reference
                 "stories": extraction.building_chars.stories,
                 "construction_type": extraction.building_chars.construction_type,
                 "insulation": {
@@ -272,10 +281,12 @@ class ProfessionalOutputGenerator:
         # Infiltration - only for rooms with exterior exposure
         if room.exterior_walls > 0:
             room_volume = room.area * room.ceiling_height
-            # Use 0.20 ACH for modern construction with good air sealing (down from 0.35)
-            infiltration_rate = 0.20  # Air changes per hour - appropriate for modern homes
+            # Reduced ACH for modern construction - major fix for inflated loads
+            infiltration_rate = 0.10  # Much lower for tight modern construction
             infiltration_cooling = room_volume * infiltration_rate * 1.08 * summer_temp_diff
             infiltration_heating = room_volume * infiltration_rate * 1.08 * winter_temp_diff
+            
+            logger.info(f"    💨 Infiltration calc: Volume={room_volume:.0f} ft³, ACH={infiltration_rate}, Temp diff winter={winter_temp_diff}°F")
         else:
             # Interior rooms have no infiltration load
             infiltration_cooling = 0
@@ -305,7 +316,7 @@ class ProfessionalOutputGenerator:
                        solar_gain + internal_gains + infiltration_cooling + latent_load)
         heating_load = (wall_heating + ceiling_heating + window_heating + infiltration_heating)
         
-        # Apply room-specific factors
+        # Apply room-specific factors - MAJOR FIX for inflated loads
         factor_applied = ""
         if 'attic' in room.name.lower() or 'crawl' in room.name.lower():
             # Attics and crawl spaces are typically unconditioned - exclude from load calculations
@@ -313,13 +324,20 @@ class ProfessionalOutputGenerator:
             heating_load = 0
             factor_applied = " (unconditioned space - excluded from loads)"
         elif 'garage' in room.name.lower():
-            cooling_load *= 0.3
-            heating_load *= 0.2
-            factor_applied = " (garage factors: 0.3 cooling, 0.2 heating)"
+            # Garages are typically unconditioned - exclude from load calculations
+            cooling_load = 0
+            heating_load = 0
+            factor_applied = " (unconditioned garage - excluded from loads)"
         elif 'storage' in room.name.lower() or 'pantry' in room.name.lower():
+            # Storage areas get reduced conditioning
             cooling_load *= 0.7
             heating_load *= 0.7
             factor_applied = " (storage factors: 0.7 both)"
+        elif 'mechanical' in room.name.lower() or 'mech' in room.name.lower():
+            # Mechanical rooms typically unconditioned or minimally conditioned
+            cooling_load *= 0.3
+            heating_load *= 0.3
+            factor_applied = " (mechanical room factors: 0.3 both)"
         
         logger.info(f"    ✅ Final room loads{factor_applied} - Cooling: {cooling_load:.0f} BTU/hr, Heating: {heating_load:.0f} BTU/hr")
         logger.info(f"    ─────────────────────────────────────────")
@@ -349,6 +367,8 @@ class ProfessionalOutputGenerator:
     def _get_climate_zone(self, zip_code: str) -> Dict[str, Any]:
         """Get climate zone data for location"""
         
+        logger.info(f"🌡️ Looking up climate zone for ZIP code: {zip_code}")
+        
         # Climate zone mapping (simplified for MVP)
         climate_zones = {
             # Washington State
@@ -367,12 +387,15 @@ class ProfessionalOutputGenerator:
         }
         
         # Default to zone 4A if not found
-        return climate_zones.get(zip_code, {
+        result = climate_zones.get(zip_code, {
             'zone': '4A',
             'description': 'Mixed-Humid',
             'design_temperatures': {'summer_dry': 90, 'winter_dry': 20},
             'humidity': {'summer': 65, 'winter': 60}
         })
+        
+        logger.info(f"🌡️ Climate zone result: {result}")
+        return result
     
     def _design_hvac_system(self, manual_j_data: Dict[str, Any], extraction: ExtractionResult) -> Dict[str, Any]:
         """Design optimal HVAC system based on load calculations"""

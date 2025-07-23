@@ -127,17 +127,17 @@ class EnhancedBlueprintProcessor:
         ]
         
         # R-value patterns (ordered by context specificity)
-        # Note: Patterns exclude density references like "R-3.1/INCH"
+        # Enhanced to exclude ALL density references and fractional inch patterns
         self.r_value_patterns = [
-            r'WALL.*?R[:\-\s]*(\d+(?:\.\d+)?)(?!/INCH|PER\s+INCH|\s*\/\s*IN)',
-            r'CEILING.*?R[:\-\s]*(\d+(?:\.\d+)?)(?!/INCH|PER\s+INCH|\s*\/\s*IN)',
-            r'ROOF.*?R[:\-\s]*(\d+(?:\.\d+)?)(?!/INCH|PER\s+INCH|\s*\/\s*IN)',
-            r'FOUNDATION.*?R[:\-\s]*(\d+(?:\.\d+)?)(?!/INCH|PER\s+INCH|\s*\/\s*IN)',
-            r'FLOOR.*?R[:\-\s]*(\d+(?:\.\d+)?)(?!/INCH|PER\s+INCH|\s*\/\s*IN)',
-            r'WINDOW.*?R[:\-\s]*(\d+(?:\.\d+)?)(?!/INCH|PER\s+INCH|\s*\/\s*IN)',
-            r'DOOR.*?R[:\-\s]*(\d+(?:\.\d+)?)(?!/INCH|PER\s+INCH|\s*\/\s*IN)',
-            # Generic R-value pattern - excludes density references
-            r'R[:\-\s]*(\d+(?:\.\d+)?)(?![/\\\s]*INCH|PER\s+INCH|\s*\/\s*IN)'
+            r'WALL.*?R[:\-\s]*(\d+(?:\.\d+)?)(?!\s*[\./]\s*(?:INCH|IN\b|LB|FT|SQ))',
+            r'CEILING.*?R[:\-\s]*(\d+(?:\.\d+)?)(?!\s*[\./]\s*(?:INCH|IN\b|LB|FT|SQ))',
+            r'ROOF.*?R[:\-\s]*(\d+(?:\.\d+)?)(?!\s*[\./]\s*(?:INCH|IN\b|LB|FT|SQ))',
+            r'FOUNDATION.*?R[:\-\s]*(\d+(?:\.\d+)?)(?!\s*[\./]\s*(?:INCH|IN\b|LB|FT|SQ))',
+            r'FLOOR.*?R[:\-\s]*(\d+(?:\.\d+)?)(?!\s*[\./]\s*(?:INCH|IN\b|LB|FT|SQ))',
+            r'WINDOW.*?R[:\-\s]*(\d+(?:\.\d+)?)(?!\s*[\./]\s*(?:INCH|IN\b|LB|FT|SQ))',
+            r'DOOR.*?R[:\-\s]*(\d+(?:\.\d+)?)(?!\s*[\./]\s*(?:INCH|IN\b|LB|FT|SQ))',
+            # Generic R-value pattern - much more restrictive
+            r'(?<![\d.])\bR[:\-\s]*(\d+(?:\.\d+)?)\b(?!\s*[\./]\s*(?:INCH|IN\b|LB|FT|SQ|PER))'
         ]
         
         # Room patterns (comprehensive list)
@@ -579,9 +579,10 @@ class EnhancedBlueprintProcessor:
                     
                     # Categorize by context
                     if 'WALL' in pattern:
-                        # Walls should be at least R-5, typically R-13 to R-25+
-                        if r_value >= 5:
+                        # Walls should be at least R-10 for modern construction, typically R-13 to R-25+
+                        if r_value >= 10:
                             r_values_found['wall'] = r_value
+                            logger.info(f"Found wall R-value: R-{r_value} from pattern: {pattern[:50]}...")
                     elif 'CEILING' in pattern or 'ROOF' in pattern:
                         # Ceilings should be at least R-15, typically R-30 to R-60+
                         if r_value >= 15:
