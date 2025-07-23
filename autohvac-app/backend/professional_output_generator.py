@@ -131,10 +131,15 @@ class ProfessionalOutputGenerator:
             extraction_result, manual_j_data, hvac_design, output_dir, project_name
         )
         
-        # Step 6: Create summary package
+        # Step 6: Create summary package with data quality warnings
         summary = self._create_project_summary(extraction_result, manual_j_data, hvac_design, deliverables)
         
+        # Add data quality warnings
+        summary["data_warnings"] = self._generate_data_warnings(extraction_result)
+        
         logger.info(f"✅ Analysis complete! {len(deliverables)} files generated")
+        if summary["data_warnings"]:
+            logger.warning(f"⚠️ {len(summary['data_warnings'])} data quality warnings generated")
         
         return summary
     
@@ -220,13 +225,28 @@ class ProfessionalOutputGenerator:
             # Interior rooms have no exterior wall load
             wall_area = 0
             
-        wall_cooling = (wall_area * summer_temp_diff) / extraction.insulation.wall_r_value if wall_area > 0 else 0
-        wall_heating = (wall_area * winter_temp_diff) / extraction.insulation.wall_r_value if wall_area > 0 else 0
+        # Check for missing insulation data
+        if wall_area > 0 and extraction.insulation.wall_r_value <= 0:
+            logger.warning(f"Missing wall R-value data for {room.name} - using minimum code R-13")
+            wall_r_value = 13.0  # Minimum code requirement as fallback
+        else:
+            wall_r_value = extraction.insulation.wall_r_value
+            
+        wall_cooling = (wall_area * summer_temp_diff) / wall_r_value if wall_area > 0 and wall_r_value > 0 else 0
+        wall_heating = (wall_area * winter_temp_diff) / wall_r_value if wall_area > 0 and wall_r_value > 0 else 0
         
         # Ceiling loads (if top floor)
         ceiling_area = room.area if room.floor_type == 'upper' else 0
-        ceiling_cooling = (ceiling_area * summer_temp_diff * 1.3) / extraction.insulation.ceiling_r_value
-        ceiling_heating = (ceiling_area * winter_temp_diff) / extraction.insulation.ceiling_r_value
+        
+        # Check for missing ceiling insulation data
+        if ceiling_area > 0 and extraction.insulation.ceiling_r_value <= 0:
+            logger.warning(f"Missing ceiling R-value data for {room.name} - using minimum code R-30")
+            ceiling_r_value = 30.0  # Minimum code requirement as fallback
+        else:
+            ceiling_r_value = extraction.insulation.ceiling_r_value
+            
+        ceiling_cooling = (ceiling_area * summer_temp_diff * 1.3) / ceiling_r_value if ceiling_area > 0 and ceiling_r_value > 0 else 0
+        ceiling_heating = (ceiling_area * winter_temp_diff) / ceiling_r_value if ceiling_area > 0 and ceiling_r_value > 0 else 0
         
         # Window loads - only for rooms with exterior walls
         if room.exterior_walls > 0 and room.window_area > 0:
@@ -268,7 +288,7 @@ class ProfessionalOutputGenerator:
         logger.info(f"  🏠 Room: {room.name} ({room.area} sq ft)")
         logger.info(f"    📏 Room area: {room.area} sq ft, Ceiling height: {room.ceiling_height} ft")
         logger.info(f"    🌡️  Temperature diffs - Summer: {summer_temp_diff}°F, Winter: {winter_temp_diff}°F")
-        logger.info(f"    🧱 Insulation R-values - Wall: R-{extraction.insulation.wall_r_value}, Ceiling: R-{extraction.insulation.ceiling_r_value}, Window U: {extraction.insulation.window_u_value}")
+        logger.info(f"    🧱 Insulation R-values - Wall: R-{wall_r_value} {'(fallback)' if wall_r_value != extraction.insulation.wall_r_value else ''}, Ceiling: R-{ceiling_r_value} {'(fallback)' if ceiling_r_value != extraction.insulation.ceiling_r_value else ''}, Window U: {extraction.insulation.window_u_value}")
         logger.info(f"    🧱 Wall area: {wall_area:.1f} sq ft (exterior_walls: {room.exterior_walls})")
         logger.info(f"    🧱 Wall loads - Cooling: {wall_cooling:.0f} BTU/hr, Heating: {wall_heating:.0f} BTU/hr")
         logger.info(f"    🏠 Ceiling area: {ceiling_area:.1f} sq ft ({room.floor_type})")
@@ -364,13 +384,24 @@ class ProfessionalOutputGenerator:
         total_area = manual_j_data['building_characteristics']['total_area']
         climate_zone = manual_j_data['climate_data']['zone']
         
-        # System selection logic
+        # Improved system selection logic based on industry standards
+        logger.info(f"System selection: {total_area} sq ft, {len(extraction.rooms)} rooms, {cooling_tons} tons cooling")
+        
         if total_area > 3000 and len(extraction.rooms) > 8:
             system_type = "zoned_ducted"
-        elif cooling_tons > 3:
+            logger.info("Selected zoned_ducted: Large home with many rooms")
+        elif cooling_tons > 4 or total_area > 2500:
             system_type = "ducted"
-        else:
+            logger.info("Selected ducted: High load or large area")
+        elif len(extraction.rooms) > 6:
+            system_type = "ducted"
+            logger.info("Selected ducted: Many rooms benefit from central system")
+        elif cooling_tons <= 2 and len(extraction.rooms) <= 4:
             system_type = "ductless"
+            logger.info("Selected ductless: Small home, low load")
+        else:
+            system_type = "ducted"
+            logger.info("Selected ducted: Default for moderate size homes")
         
         # Equipment sizing with safety factors
         equipment_cooling = round(cooling_tons * 12000 * 1.15)  # 15% safety factor
@@ -625,6 +656,34 @@ www.autohvac.pro
             "generated_by": self.config['company_name'],
             "generation_time": datetime.now().isoformat()
         }
+    
+    def _generate_data_warnings(self, extraction: ExtractionResult) -> List[str]:
+        """Generate warnings about missing or assumed data"""
+        warnings = []
+        
+        # Check for missing insulation data
+        if extraction.insulation.wall_r_value <= 0:
+            warnings.append("Wall R-value not found in blueprints - using minimum code R-13")
+        if extraction.insulation.ceiling_r_value <= 0:
+            warnings.append("Ceiling R-value not found in blueprints - using minimum code R-30")
+        if extraction.insulation.foundation_r_value <= 0:
+            warnings.append("Foundation R-value not found in blueprints - using minimum code R-10")
+            
+        # Check for missing project info
+        if not extraction.project_info.address:
+            warnings.append("Property address not found in blueprints")
+        if not extraction.project_info.zip_code:
+            warnings.append("ZIP code not found - using default climate data")
+            
+        # Check for assumed building characteristics
+        if extraction.building_chars.total_area <= 0:
+            warnings.append("Total building area not found - calculated from room areas")
+            
+        # Check for limited room data
+        if len(extraction.rooms) < 3:
+            warnings.append("Limited room data found - load calculations may be incomplete")
+            
+        return warnings
 
 # Example usage and testing
 async def main():

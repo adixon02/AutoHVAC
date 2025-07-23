@@ -201,7 +201,8 @@ async def process_blueprint_professional(job_id: str, file_path: Path, original_
                 "ai_cost": "$0.00",  # Will be updated if AI gap filling was used
                 "processing_time": "2-3 minutes",
                 "confidence_score": summary.get("analysis_confidence", "0%")
-            }
+            },
+            "data_warnings": summary.get("data_warnings", [])
         })
         
         # Files are already generated in job-specific directory, no copying needed

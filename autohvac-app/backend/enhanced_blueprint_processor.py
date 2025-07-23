@@ -604,10 +604,10 @@ class EnhancedBlueprintProcessor:
                         elif 5 <= r_value <= 25:  # More likely to be foundation
                             r_values_found.setdefault('foundation', r_value)
         
-        # Assign R-values with improved defaults for modern construction
-        specs.wall_r_value = r_values_found.get('wall', 20.0)  # Updated default R-20 walls (modern construction)
-        specs.ceiling_r_value = r_values_found.get('ceiling', 49.0)  # Updated default R-49 ceiling (energy efficient)
-        specs.foundation_r_value = r_values_found.get('foundation', 13.0)  # Updated default R-13 foundation
+        # Only use R-values actually found in blueprints - no assumptions
+        specs.wall_r_value = r_values_found.get('wall', 0.0)  # 0.0 indicates not found
+        specs.ceiling_r_value = r_values_found.get('ceiling', 0.0)  # 0.0 indicates not found
+        specs.foundation_r_value = r_values_found.get('foundation', 0.0)  # 0.0 indicates not found
         
         # Calculate confidence based on how many values were found
         found_count = len(r_values_found)
