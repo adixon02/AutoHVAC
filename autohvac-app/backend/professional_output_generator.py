@@ -144,7 +144,7 @@ class ProfessionalOutputGenerator:
             extraction_result = self.ai_gap_filler.fill_gaps(extraction_result, blueprint_path)
         
         # Step 3: Calculate Manual J loads
-        manual_j_data = self._calculate_manual_j(extraction_result)
+        manual_j_data = await self._calculate_manual_j(extraction_result)
         
         # Step 4: Design HVAC system
         hvac_design = self._design_hvac_system(manual_j_data, extraction_result)
@@ -166,19 +166,19 @@ class ProfessionalOutputGenerator:
         
         return summary
     
-    def _calculate_manual_j(self, extraction: ExtractionResult) -> Dict[str, Any]:
+    async def _calculate_manual_j(self, extraction: ExtractionResult) -> Dict[str, Any]:
         """Calculate ACCA-compliant Manual J load calculations"""
         
         logger.info("🧮 Calculating Manual J loads...")
         
         # Get climate zone for location using professional database
         zip_code = extraction.project_info.zip_code or "99019"  # Fallback to Liberty Lake
-        climate_zone = self.climate_db.get_climate_data(zip_code)
+        climate_zone = await self.climate_db.get_climate_data(zip_code)
         
         # Ensure climate_zone is a dictionary
         if not isinstance(climate_zone, dict):
             logger.error(f"Climate zone lookup returned non-dict: {type(climate_zone)} = {climate_zone}")
-            climate_zone = self.climate_db.get_climate_data("99019")  # Safe fallback
+            climate_zone = await self.climate_db.get_climate_data("99019")  # Safe fallback
         
         room_loads = []
         total_cooling = 0
