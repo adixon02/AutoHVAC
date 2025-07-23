@@ -21,7 +21,7 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "Minimal CORS Test Server", "status": "running"}
+    return {"message": "Minimal CORS Test Server", "status": "running", "timestamp": "2025-07-23"}
 
 @app.get("/health")
 async def health():
