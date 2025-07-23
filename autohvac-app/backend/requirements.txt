@@ -5,19 +5,25 @@ fastapi==0.115.0
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 
-# Image Processing
-opencv-python==4.10.0.84
+# PDF Processing
+PyPDF2==3.0.1
+
+# Image Processing  
+# opencv-python==4.10.0.84  # Temporarily disabled - heavy dependency
 Pillow==11.1.0
-pdf2image==1.17.0
+# pdf2image==1.17.0  # Disabled - requires poppler-utils
 
 # CAD Export
 ezdxf==1.3.5
 
-# ML/AI Libraries
-numpy==2.3.0
-torch==2.6.0
-torchvision==0.21.0
-ultralytics==8.3.56  # YOLOv8
+# AI Integration
+openai==1.55.1
+
+# ML/AI Libraries (optional for advanced features) - DISABLED for deployment
+# numpy==2.3.0  # Heavy dependency
+# torch==2.6.0  # Very heavy dependency - causes deployment issues
+# torchvision==0.21.0  # Heavy dependency
+# ultralytics==8.3.56  # YOLOv8 - very heavy
 
 # Data Processing
 pandas==2.3.0
@@ -27,11 +33,6 @@ shapely==2.0.6  # Geometric operations
 pydantic==2.10.5
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-
-# Development
-pytest==8.3.4
-black==25.1.0
-flake8==7.1.1
 
 # Utilities
 python-dotenv==1.0.1
