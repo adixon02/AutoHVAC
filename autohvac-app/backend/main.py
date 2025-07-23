@@ -102,4 +102,13 @@ if __name__ == "__main__":
     import os
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Starting AutoHVAC Backend API on port {port}")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run(
+        "main:app", 
+        host="0.0.0.0", 
+        port=port, 
+        reload=True,
+        # Increase timeout and size limits for large blueprint files
+        timeout_keep_alive=30,
+        limit_max_requests=1000,
+        limit_concurrency=100
+    )

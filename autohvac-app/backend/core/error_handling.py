@@ -94,7 +94,7 @@ class AutoHVACErrors:
         message="Uploaded file exceeds maximum size limit",
         category=ErrorCategory.VALIDATION,
         severity=ErrorSeverity.LOW,
-        user_message="File is too large. Please upload a file smaller than 10MB",
+        user_message="File is too large. Please upload a file smaller than 100MB",
         http_status=400
     )
     
@@ -243,10 +243,17 @@ async def autohvac_exception_handler(request: Request, exc: AutoHVACException) -
     response_data = exc.error.to_dict()
     response_data['request_id'] = request_id
     
-    return JSONResponse(
+    response = JSONResponse(
         status_code=exc.error.http_status,
         content=response_data
     )
+    
+    # Add CORS headers to error responses
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH"
+    response.headers["Access-Control-Allow-Headers"] = "Accept, Accept-Language, Content-Language, Content-Type, Authorization, X-Requested-With"
+    
+    return response
 
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """
@@ -285,7 +292,7 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         }
     )
     
-    return JSONResponse(
+    response = JSONResponse(
         status_code=exc.status_code,
         content={
             "error_code": f"HTTP_{exc.status_code}",
@@ -296,6 +303,13 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
             "request_id": request_id
         }
     )
+    
+    # Add CORS headers to error responses
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH"
+    response.headers["Access-Control-Allow-Headers"] = "Accept, Accept-Language, Content-Language, Content-Type, Authorization, X-Requested-With"
+    
+    return response
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """
@@ -324,7 +338,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         }
     )
     
-    return JSONResponse(
+    response = JSONResponse(
         status_code=422,
         content={
             "error_code": "VALIDATION_ERROR",
@@ -339,6 +353,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "request_id": request_id
         }
     )
+    
+    # Add CORS headers to error responses
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH"
+    response.headers["Access-Control-Allow-Headers"] = "Accept, Accept-Language, Content-Language, Content-Type, Authorization, X-Requested-With"
+    
+    return response
 
 async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """
@@ -367,10 +388,17 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
     response_data = error.to_dict()
     response_data['request_id'] = request_id
     
-    return JSONResponse(
+    response = JSONResponse(
         status_code=500,
         content=response_data
     )
+    
+    # Add CORS headers to error responses
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH"
+    response.headers["Access-Control-Allow-Headers"] = "Accept, Accept-Language, Content-Language, Content-Type, Authorization, X-Requested-With"
+    
+    return response
 
 def setup_error_handlers(app):
     """

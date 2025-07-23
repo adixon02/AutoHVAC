@@ -338,8 +338,8 @@ def setup_middleware(app):
     # Health check middleware (runs first for efficiency)
     app.add_middleware(HealthCheckMiddleware)
     
-    # Request size limiting
-    app.add_middleware(RequestSizeMiddleware, max_size_mb=10)
+    # Request size limiting - increased to 100MB for blueprint files
+    app.add_middleware(RequestSizeMiddleware, max_size_mb=100)
     
     # Rate limiting
     app.add_middleware(

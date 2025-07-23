@@ -77,15 +77,26 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
       }).finally(() => clearTimeout(timeoutId));
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Upload failed:', response.status, response.statusText, errorText);
+        let errorMessage = `Upload failed with status ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.user_message || errorData.message || errorMessage;
+        } catch {
+          const errorText = await response.text();
+          errorMessage = errorText || errorMessage;
+        }
+        console.error('❌ Upload failed:', response.status, response.statusText, errorMessage);
         
         if (response.status === 413) {
           throw new Error(`File too large. Blueprint files must be under 100MB. Please compress your PDF or split into smaller files.`);
         } else if (response.status === 408 || response.status === 504) {
           throw new Error(`Upload timeout. Large files may take several minutes to upload. Please check your connection and try again.`);
+        } else if (response.status === 400) {
+          throw new Error(errorMessage);
+        } else if (response.status === 500) {
+          throw new Error(`Server error: ${errorMessage}. Our team has been notified.`);
         } else {
-          throw new Error(`Upload failed: ${response.statusText} - ${errorText}`);
+          throw new Error(`Upload failed: ${errorMessage}`);
         }
       }
 
@@ -130,8 +141,19 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
 
     } catch (err) {
       console.error('❌ Upload error:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Upload failed';
-      onError(`Upload failed: ${errorMessage}. Please check your connection and try again.`);
+      let errorMessage = 'Upload failed';
+      
+      if (err instanceof Error) {
+        if (err.name === 'AbortError') {
+          errorMessage = 'Upload timed out after 5 minutes. Please check your connection and try again with a smaller file.';
+        } else if (err.message.includes('Failed to fetch')) {
+          errorMessage = 'Connection failed. Please check your internet connection and try again.';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      onError(errorMessage);
       setUploading(false);
       setIsAnalyzing(false);
       setUploadedFiles([]);
