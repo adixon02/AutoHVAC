@@ -33,8 +33,8 @@ app = FastAPI(
 # Configure CORS FIRST (before other middleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("ALLOWED_ORIGINS", "https://auto-hvac.vercel.app")],  # Use environment variable with fallback
-    allow_credentials=True,  # Should be True if you need cookies/auth
+    allow_origins=["*"],  # Temporarily allow all origins to test
+    allow_credentials=False,  # Must be False when allow_origins=["*"]
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],
     allow_headers=[
         "Accept",
