@@ -255,69 +255,22 @@ class BlueprintParser:
         # This method is disabled to avoid opencv dependency
         raise NotImplementedError("Image processing disabled for deployment compatibility")
     
-    async def _detect_walls(self, binary_image: np.ndarray) -> List[Dict[str, Any]]:
+    async def _detect_walls(self, binary_image) -> List[Dict[str, Any]]:
         """
-        Detect walls using line detection
+        Detect walls using line detection - DISABLED
         """
-        walls = []
-        
-        # Detect lines using Hough transform
-        lines = cv2.HoughLinesP(
-            binary_image,
-            rho=1,
-            theta=np.pi/180,
-            threshold=100,
-            minLineLength=50,
-            maxLineGap=10
-        )
-        
-        if lines is not None:
-            for line in lines:
-                x1, y1, x2, y2 = line[0]
-                
-                # Classify as horizontal or vertical
-                angle = np.abs(np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi)
-                orientation = "horizontal" if angle < 45 or angle > 135 else "vertical"
-                
-                walls.append({
-                    "start": (x1, y1),
-                    "end": (x2, y2),
-                    "orientation": orientation,
-                    "length": np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-                })
-        
-        return walls
+        # This method is disabled to avoid opencv/numpy dependencies
+        raise NotImplementedError("Wall detection disabled for deployment compatibility")
+        return []
     
-    async def _extract_dimensions(self, image: np.ndarray) -> Dict[str, float]:
+    async def _extract_dimensions(self, image) -> Dict[str, float]:
         """
-        Extract building dimensions from blueprint
+        Extract building dimensions from blueprint - DISABLED
         """
-        # Find contours
-        contours, _ = cv2.findContours(
-            image,
-            cv2.RETR_EXTERNAL,
-            cv2.CHAIN_APPROX_SIMPLE
-        )
-        
-        if not contours:
-            return {"width": 0, "height": 0, "scale": 1.0}
-        
-        # Find largest contour (building outline)
-        largest_contour = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest_contour)
-        
-        # Estimate scale (this would need calibration with known dimensions)
-        # For now, assume 1 pixel = 0.25 inches
-        scale = 0.25
-        
-        return {
-            "width": w * scale,
-            "height": h * scale,
-            "scale": scale,
-            "bounding_box": {"x": x, "y": y, "w": w, "h": h}
-        }
+        # This method is disabled to avoid opencv dependency
+        return {"width": 0, "height": 0, "scale": 1.0}
     
-    async def _extract_text(self, image: np.ndarray) -> List[Dict[str, Any]]:
+    async def _extract_text(self, image) -> List[Dict[str, Any]]:
         """
         Extract text elements from blueprint (room labels, dimensions)
         """
