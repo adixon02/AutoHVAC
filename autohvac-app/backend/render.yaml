@@ -2,10 +2,10 @@ services:
   - type: web
     name: autohvac-backend
     env: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: ./build.sh
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: ALLOWED_ORIGINS
-        value: https://autohvac-adixon02.vercel.app
+        value: https://auto-hvac.vercel.app
