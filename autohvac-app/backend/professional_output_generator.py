@@ -213,7 +213,8 @@ class ProfessionalOutputGenerator:
                         "winter": 30.0
                     },
                     "county": "Default County",
-                    "state": "WA"
+                    "state": "WA",
+                    "description": "Mixed-Humid (Default Location)"
                 }
         
         room_loads = []
@@ -618,7 +619,7 @@ class ProfessionalOutputGenerator:
         
         notes = [
             f"HVAC system designed per ACCA Manual J 8th Edition load calculations",
-            f"Equipment sized for {manual_j['climate_data']['description']} climate zone {manual_j['climate_data']['zone']}",
+            f"Equipment sized for {manual_j['climate_data'].get('description', 'Unknown Location')} climate zone {manual_j['climate_data']['zone']}",
             f"High-efficiency {hvac_design['equipment']['type']} selected for optimal performance",
         ]
         
@@ -660,7 +661,7 @@ BUILDING CHARACTERISTICS
 • Total Area: {manual_j['building_characteristics']['total_area']:,.0f} sq ft
 • Stories: {manual_j['building_characteristics']['stories']}
 • Construction: {manual_j['building_characteristics']['construction_type']}
-• Climate Zone: {manual_j['climate_data']['zone']} ({manual_j['climate_data']['description']})
+• Climate Zone: {manual_j['climate_data']['zone']} ({manual_j['climate_data'].get('description', 'Unknown Location')})
 • Insulation: {manual_j['building_characteristics']['insulation']['walls']} walls, {manual_j['building_characteristics']['insulation']['ceiling']} ceiling
 
 LOAD CALCULATION (Manual J)
