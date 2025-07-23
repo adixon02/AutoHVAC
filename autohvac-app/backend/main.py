@@ -16,20 +16,11 @@ app = FastAPI(
     version="0.1.0"
 )
 
-# Configure CORS for Next.js frontend
-allowed_origins = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "https://autohvac.vercel.app",
-    "https://autohvac-adixon02.vercel.app",  # Your actual Vercel domain
-    "https://auto-hvac.vercel.app",  # Alternative domain name
-]
-
+# Configure CORS for Next.js frontend - Allow all origins for debugging
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_origin_regex=r"https://.*\.vercel\.app",  # Allow all Vercel domains
-    allow_credentials=True,
+    allow_origins=["*"],  # Temporarily allow all origins to debug
+    allow_credentials=False,  # Must be False when allow_origins=["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )
