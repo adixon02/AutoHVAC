@@ -54,11 +54,17 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
       console.log('🚀 Uploading to:', `${apiUrl}/api/blueprint/upload`);
+      console.log('📍 API URL from env:', process.env.NEXT_PUBLIC_API_URL);
+      
+      // Add timeout to fetch request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
       
       const response = await fetch(`${apiUrl}/api/blueprint/upload`, {
         method: 'POST',
         body: singleFormData,
-      });
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeoutId));
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -106,7 +112,9 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
       }, 3000);
 
     } catch (err) {
-      onError(err instanceof Error ? err.message : 'Upload failed');
+      console.error('❌ Upload error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Upload failed';
+      onError(`Upload failed: ${errorMessage}. Please check your connection and try again.`);
       setUploading(false);
       setIsAnalyzing(false);
       setUploadedFiles([]);
