@@ -21,6 +21,16 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
     // If no new files and no existing files, return early
     if (acceptedFiles.length === 0 && uploadedFiles.length === 0) return;
 
+    // Check file size limits (100MB max)
+    const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+    for (const file of acceptedFiles) {
+      if (file.size > MAX_FILE_SIZE) {
+        const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+        onError(`File "${file.name}" is too large (${sizeMB}MB). Maximum file size is 100MB. Please compress your blueprint or split into smaller files.`);
+        return;
+      }
+    }
+
     // Use existing files if no new files provided (for "Process Files" button)
     const allFiles = acceptedFiles.length > 0 ? [...uploadedFiles, ...acceptedFiles] : uploadedFiles;
     
@@ -31,7 +41,9 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
     
     setUploading(true);
     setUploadProgress(0);
-    setProcessingStatus(`Uploading ${allFiles.length} blueprint${allFiles.length > 1 ? 's' : ''}...`);
+    const fileSize = allFiles[0]?.size || 0;
+    const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
+    setProcessingStatus(`Uploading ${fileSizeMB}MB blueprint... This may take a few minutes for large files.`);
 
     try {
       const formData = new FormData();
@@ -56,9 +68,9 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
       console.log('🚀 Uploading to:', `${apiUrl}/api/blueprint/upload`);
       console.log('📍 API URL from env:', process.env.NEXT_PUBLIC_API_URL);
       
-      // Add timeout to fetch request
+      // Add timeout to fetch request - increased for large files
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout for large files
       
       const response = await fetch(`${apiUrl}/api/blueprint/upload`, {
         method: 'POST',
@@ -69,7 +81,14 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
       if (!response.ok) {
         const errorText = await response.text();
         console.error('❌ Upload failed:', response.status, response.statusText, errorText);
-        throw new Error(`Upload failed: ${response.statusText} - ${errorText}`);
+        
+        if (response.status === 413) {
+          throw new Error(`File too large. Blueprint files must be under 100MB. Please compress your PDF or split into smaller files.`);
+        } else if (response.status === 408 || response.status === 504) {
+          throw new Error(`Upload timeout. Large files may take several minutes to upload. Please check your connection and try again.`);
+        } else {
+          throw new Error(`Upload failed: ${response.statusText} - ${errorText}`);
+        }
       }
 
       const data = await response.json();
@@ -197,7 +216,7 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
               }
             </p>
             <p className="text-sm text-gray-500 mt-2">
-              Supports PDF blueprint files - Professional HVAC analysis in 2-3 minutes
+              Supports PDF blueprint files up to 100MB - Large files may take 3-5 minutes to upload and analyze
             </p>
           </>
         )}
@@ -259,6 +278,8 @@ export default function BlueprintUpload({ onUploadComplete, onError, projectInfo
           <p className="font-semibold mb-2">Tips for best results:</p>
           <ul className="list-disc list-inside space-y-1">
             <li>Upload all related blueprints (floor plans, elevations, details)</li>
+            <li>Maximum file size: 100MB per file</li>
+            <li>Large files (>10MB) may take 3-5 minutes to upload</li>
             <li>Ensure blueprints are clear and readable</li>
             <li>Include room labels and dimensions when possible</li>
             <li>Higher resolution images work better</li>
