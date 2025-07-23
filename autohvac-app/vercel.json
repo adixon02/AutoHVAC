@@ -1,4 +1,4 @@
-1{
+{
   "buildCommand": "npm run build",
   "outputDirectory": ".next",
   "framework": "nextjs",
@@ -8,12 +8,20 @@
       "destination": "https://your-backend-url.railway.app/api/blueprint/:path*"
     },
     {
+      "source": "/api/v2/blueprint/:path*",
+      "destination": "https://your-backend-url.railway.app/api/v2/blueprint/:path*"
+    },
+    {
       "source": "/api/calculations/:path*",
       "destination": "https://your-backend-url.railway.app/api/calculations/:path*"
     },
     {
       "source": "/api/export/:path*",
       "destination": "https://your-backend-url.railway.app/api/export/:path*"
+    },
+    {
+      "source": "/api/climate/:path*",
+      "destination": "https://your-backend-url.railway.app/api/climate/:path*"
     }
   ]
 }
