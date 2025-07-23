@@ -173,12 +173,48 @@ class ProfessionalOutputGenerator:
         
         # Get climate zone for location using professional database
         zip_code = extraction.project_info.zip_code or "99019"  # Fallback to Liberty Lake
-        climate_zone = await self.climate_db.get_climate_data(zip_code)
+        climate_data = await self.climate_db.get_climate_data(zip_code)
+        
+        # Convert ClimateData object to dictionary if needed
+        if hasattr(climate_data, 'to_dict'):
+            climate_zone = climate_data.to_dict()
+        elif isinstance(climate_data, dict):
+            climate_zone = climate_data
+        else:
+            climate_zone = None
         
         # Ensure climate_zone is a dictionary
-        if not isinstance(climate_zone, dict):
+        if not isinstance(climate_zone, dict) or climate_zone is None:
             logger.error(f"Climate zone lookup returned non-dict: {type(climate_zone)} = {climate_zone}")
-            climate_zone = await self.climate_db.get_climate_data("99019")  # Safe fallback
+            fallback_data = await self.climate_db.get_climate_data("99019")  # Safe fallback
+            
+            # Convert fallback data to dict
+            if hasattr(fallback_data, 'to_dict'):
+                climate_zone = fallback_data.to_dict()
+            elif isinstance(fallback_data, dict):
+                climate_zone = fallback_data
+            else:
+                climate_zone = None
+            
+            # If even the fallback fails, use default values
+            if not isinstance(climate_zone, dict) or climate_zone is None:
+                logger.warning("Using default climate data - database lookup failed")
+                climate_zone = {
+                    "zip_code": zip_code,
+                    "zone": "4A",
+                    "heating_degree_days": 6000,
+                    "cooling_degree_days": 800,
+                    "design_temperatures": {
+                        "summer_db": 95.0,
+                        "winter_db": 0.0
+                    },
+                    "humidity": {
+                        "summer": 50.0,
+                        "winter": 30.0
+                    },
+                    "county": "Default County",
+                    "state": "WA"
+                }
         
         room_loads = []
         total_cooling = 0
