@@ -14,6 +14,12 @@ import json
 from pathlib import Path
 from datetime import datetime
 import logging
+import sys
+
+# Add parent directory to path to import our processors
+sys.path.append(str(Path(__file__).parent.parent))
+from enhanced_blueprint_processor import BlueprintProcessor
+from professional_output_generator import ProfessionalOutputGenerator
 
 # Basic logging
 logging.basicConfig(level=logging.INFO)
@@ -100,21 +106,56 @@ async def upload_blueprint(
         logger.error(f"Failed to save file: {e}")
         raise HTTPException(status_code=500, detail="Failed to save uploaded file")
     
-    # Create mock result for testing
-    result = {
-        "job_id": job_id,
-        "filename": file.filename,
-        "file_size": len(content),
-        "upload_time": timestamp,
-        "status": "processing",
-        "message": "Blueprint uploaded successfully. Analysis started.",
-        "project_info": {
+    # Process blueprint with actual analysis
+    try:
+        processor = BlueprintProcessor()
+        output_generator = ProfessionalOutputGenerator()
+        
+        # Extract data from PDF
+        extraction_result = processor.process_blueprint(file_path)
+        
+        # Generate professional analysis
+        professional_outputs = output_generator.generate_outputs(extraction_result, {
             "zip_code": zip_code,
             "project_name": project_name,
             "project_type": project_type,
             "construction_type": construction_type
+        })
+        
+        result = {
+            "job_id": job_id,
+            "filename": file.filename,
+            "file_size": len(content),
+            "upload_time": timestamp,
+            "status": "processing",
+            "message": "Blueprint uploaded successfully. Analysis started.",
+            "project_info": {
+                "zip_code": zip_code,
+                "project_name": project_name,
+                "project_type": project_type,
+                "construction_type": construction_type
+            },
+            "extraction_result": extraction_result,
+            "professional_outputs": professional_outputs
         }
-    }
+    except Exception as e:
+        logger.error(f"Blueprint processing failed: {e}")
+        # Fallback to basic result without analysis
+        result = {
+            "job_id": job_id,
+            "filename": file.filename,
+            "file_size": len(content),
+            "upload_time": timestamp,
+            "status": "processing",
+            "message": "Blueprint uploaded successfully. Analysis started.",
+            "project_info": {
+                "zip_code": zip_code,
+                "project_name": project_name,
+                "project_type": project_type,
+                "construction_type": construction_type
+            },
+            "error": str(e)
+        }
     
     # Save processing result
     result_file = PROCESSED_DIR / f"{job_id}.json"
@@ -152,34 +193,65 @@ async def get_analysis_results(job_id: str) -> Dict[str, Any]:
     with open(processed_file, "r") as f:
         base_result = json.load(f)
     
-    # Return mock analysis results
-    return {
-        **base_result,
-        "status": "completed",
-        "analysis": {
-            "project_info": base_result.get("project_info", {}),
-            "building_chars": {
-                "total_area": 2400,
-                "stories": 2
-            },
-            "rooms": [
-                {"name": "Living Room", "area": 400, "cooling_load": 8000},
-                {"name": "Kitchen", "area": 200, "cooling_load": 4000},
-                {"name": "Master Bedroom", "area": 300, "cooling_load": 6000}
-            ],
-            "manual_j": {
-                "cooling_tons": 2.5,
-                "heating_tons": 3.0,
-                "total_cooling_btuh": 30000,
-                "total_heating_btuh": 36000
-            },
-            "hvac_design": {
-                "system_type": "ducted",
-                "equipment_type": "heat_pump",
-                "efficiency": {"seer": 16, "hspf": 9}
+    # Return actual analysis results if available, otherwise fallback to processed data
+    if "professional_outputs" in base_result and base_result["professional_outputs"]:
+        outputs = base_result["professional_outputs"]
+        extraction = base_result.get("extraction_result", {})
+        
+        # Format data for frontend
+        manual_j = outputs.get("manual_j_calculation", {})
+        hvac_design = outputs.get("hvac_system_design", {})
+        
+        return {
+            **base_result,
+            "status": "completed",
+            "analysis": {
+                "project_info": base_result.get("project_info", {}),
+                "building_chars": {
+                    "total_area": extraction.get("building_characteristics", {}).get("total_area", 0),
+                    "stories": extraction.get("building_characteristics", {}).get("stories", 1),
+                },
+                "rooms": extraction.get("rooms", []),
+                "manual_j": {
+                    "cooling_tons": manual_j.get("cooling_tons", 0),
+                    "heating_tons": manual_j.get("heating_tons", 0),
+                    "total_cooling_btuh": manual_j.get("total_cooling_btuh", 0),
+                    "total_heating_btuh": manual_j.get("total_heating_btuh", 0)
+                },
+                "hvac_design": {
+                    "system_type": hvac_design.get("system_type", "TBD"),
+                    "equipment_type": hvac_design.get("equipment_type", "TBD"),
+                    "efficiency": hvac_design.get("efficiency", {})
+                },
+                "professional_deliverables": outputs.get("professional_deliverables", {})
             }
         }
-    }
+    else:
+        # Fallback for cases where processing failed
+        return {
+            **base_result,
+            "status": "completed", 
+            "analysis": {
+                "project_info": base_result.get("project_info", {}),
+                "building_chars": {
+                    "total_area": 0,
+                    "stories": 1
+                },
+                "rooms": [],
+                "manual_j": {
+                    "cooling_tons": 0,
+                    "heating_tons": 0,
+                    "total_cooling_btuh": 0,
+                    "total_heating_btuh": 0
+                },
+                "hvac_design": {
+                    "system_type": "TBD",
+                    "equipment_type": "TBD", 
+                    "efficiency": {}
+                },
+                "error": base_result.get("error", "Analysis not available - processing may have failed")
+            }
+        }
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
