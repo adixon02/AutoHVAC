@@ -333,6 +333,14 @@ class BlueprintService:
             # Cache the result
             await self._cache_result(result)
             
+            # Update progress to 100% before completion
+            if job_id in self.active_jobs:
+                self.active_jobs[job_id]['progress'] = 100
+                self.active_jobs[job_id]['status'] = ProcessingStatus.COMPLETED
+            
+            # Give frontend time to poll final status before moving to completed
+            await asyncio.sleep(1)
+            
             # Move to completed jobs
             self.completed_jobs[job_id] = result
             if job_id in self.active_jobs:
