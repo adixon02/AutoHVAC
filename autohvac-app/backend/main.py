@@ -27,7 +27,14 @@ app = FastAPI(
 # CORS middleware for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "https://autohvac.com"],
+    allow_origins=[
+        "http://localhost:3000", 
+        "http://localhost:3001", 
+        "https://autohvac.com",
+        "https://auto-hvac-oh1m0an31-hello-austinjdixons-projects.vercel.app",
+        "https://auto-hvac-2nwdlrsjh-hello-austinjdixons-projects.vercel.app",
+        "https://*.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
