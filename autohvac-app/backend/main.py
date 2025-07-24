@@ -183,14 +183,21 @@ async def get_processing_status(job_id: str) -> Dict[str, Any]:
     """Get processing status"""
     processed_file = PROCESSED_DIR / f"{job_id}.json"
     
+    # Debug: log what we're looking for and what exists
+    logger.info(f"Looking for job file: {processed_file}")
+    logger.info(f"Processed dir contents: {list(PROCESSED_DIR.glob('*.json'))}")
+    
     if not processed_file.exists():
-        raise HTTPException(status_code=404, detail="Job ID not found")
+        # Return a temporary processing status instead of 404
+        return {
+            "job_id": job_id,
+            "status": "processing", 
+            "message": "Analysis in progress...",
+            "progress": 50
+        }
     
     with open(processed_file, "r") as f:
         result = json.load(f)
-    
-    # Return actual status instead of forcing "completed"
-    # Keep the original status from the processing result
     
     return result
 
