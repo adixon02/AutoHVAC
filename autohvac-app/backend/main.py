@@ -120,12 +120,10 @@ async def upload_blueprint(
         extraction_result = processor.process_blueprint(Path(file_path))
         
         # Generate professional analysis
-        professional_outputs = output_generator.generate_outputs(extraction_result, {
-            "zip_code": zip_code,
-            "project_name": project_name,
-            "project_type": project_type,
-            "construction_type": construction_type
-        })
+        professional_outputs = await output_generator.generate_complete_analysis(
+            blueprint_path=Path(file_path),
+            output_dir=Path("outputs") / project_id
+        )
         
         result = {
             "job_id": job_id,
