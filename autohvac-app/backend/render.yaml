@@ -11,4 +11,4 @@ services:
       - key: PYTHONPATH
         value: /opt/render/project/src
       - key: ALLOWED_ORIGINS
-        value: https://auto-hvac-2nwdlrsjh-hello-austinjdixons-projects.vercel.app
+        value: https://your-app-name.vercel.app
