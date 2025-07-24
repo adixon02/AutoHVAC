@@ -107,10 +107,7 @@ class ProfessionalOutputGenerator:
         # Step 1: Extract blueprint data
         extraction_result = self.blueprint_processor.process_blueprint(blueprint_path)
         
-        # Step 2: Fill gaps with AI if needed
-        if (self.ai_gap_filler and 
-            extraction_result.overall_confidence < self.config['ai_gap_filling']['confidence_threshold']):
-            extraction_result = self.ai_gap_filler.fill_gaps(extraction_result, blueprint_path)
+        # Step 2: Skip AI gap filling for initial speed (can be added later as optional feature)
         
         # Step 3: Calculate Manual J loads
         manual_j_data = self._calculate_manual_j(extraction_result)
@@ -416,40 +413,62 @@ class ProfessionalOutputGenerator:
         deliverables.append(str(summary_path))
         logger.info(f"   ✅ Executive Summary: {summary_path.name}")
         
-        # 4. CAD Export (DXF)
-        if self.config['output_settings']['include_cad_export']:
-            dxf_path = output_dir / f"{project_name}_HVAC_Layout.dxf"
-            try:
-                # Convert Room objects to dictionaries for CAD export
-                rooms_data = [asdict(room) for room in extraction.rooms]
-                await self.cad_exporter.export_dxf(
-                    blueprint_data={"rooms": rooms_data},
-                    hvac_layout={"systems": [hvac_design]},
-                    output_path=dxf_path,
-                    layers=["hvac", "ducts", "equipment", "labels"],
-                    scale=1.0
-                )
-                deliverables.append(str(dxf_path))
-                logger.info(f"   ✅ CAD Drawing: {dxf_path.name}")
-            except Exception as e:
-                logger.warning(f"CAD export failed: {e}")
+        # 4. Simple Layout (JSON) - Fast alternative to CAD export
+        layout_data = self._generate_simple_layout(extraction, hvac_design)
+        layout_path = output_dir / f"{project_name}_Simple_Layout.json"
+        with open(layout_path, 'w') as f:
+            json.dump(layout_data, f, indent=2)
+        deliverables.append(str(layout_path))
+        logger.info(f"   ✅ Simple Layout: {layout_path.name}")
         
-        # 5. Web Layout (SVG)
-        svg_path = output_dir / f"{project_name}_Layout.svg"
-        try:
-            # Convert Room objects to dictionaries for SVG export
-            rooms_data = [asdict(room) for room in extraction.rooms]
-            await self.cad_exporter.export_svg(
-                blueprint_data={"rooms": rooms_data},
-                output_path=svg_path,
-                layers=["hvac", "equipment", "labels"]
-            )
-            deliverables.append(str(svg_path))
-            logger.info(f"   ✅ Web Layout: {svg_path.name}")
-        except Exception as e:
-            logger.warning(f"SVG export failed: {e}")
+        # 5. Skip complex SVG export for speed - layout data in JSON above
         
         return deliverables
+    
+    def _generate_simple_layout(self, extraction: ExtractionResult, hvac_design: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate simple JSON layout for fast visualization"""
+        
+        # Create simple room layout with HVAC components
+        layout_data = {
+            "building": {
+                "total_area": extraction.building_chars.total_area,
+                "stories": extraction.building_chars.stories
+            },
+            "rooms": [],
+            "hvac_system": {
+                "type": hvac_design["system_type"],
+                "equipment": {
+                    "type": hvac_design["equipment"]["type"],
+                    "capacity_tons": round(hvac_design["equipment"]["capacity"]["cooling"] / 12000, 1),
+                    "location": "utility_room"
+                }
+            },
+            "layout_notes": [
+                f"System: {hvac_design['system_type'].replace('_', ' ').title()}",
+                f"Equipment: {hvac_design['equipment']['capacity']['cooling']/12000:.1f} ton {hvac_design['equipment']['type'].replace('_', ' ')}",
+                f"Estimated install cost: ${hvac_design['cost_estimate']['total']:,}"
+            ]
+        }
+        
+        # Add room data with simple positioning
+        total_rooms = len(extraction.rooms)
+        cols = int(total_rooms ** 0.5) + 1
+        
+        for i, room in enumerate(extraction.rooms):
+            row = i // cols
+            col = i % cols
+            
+            room_data = {
+                "name": room.name,
+                "area": room.area,
+                "position": {"x": col * 150, "y": row * 100},
+                "dimensions": {"width": max(50, room.area ** 0.5 * 8), "height": max(50, room.area ** 0.5 * 6)},
+                "cooling_load": f"{room.area * 25:.0f} BTU/hr",  # Simple estimate
+                "has_hvac": "garage" not in room.name.lower() and "storage" not in room.name.lower()
+            }
+            layout_data["rooms"].append(room_data)
+        
+        return layout_data
     
     def _generate_design_notes(self, hvac_design: Dict[str, Any], manual_j: Dict[str, Any]) -> List[str]:
         """Generate professional design notes"""
