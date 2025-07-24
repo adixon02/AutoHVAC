@@ -318,17 +318,22 @@ class BlueprintService:
             self.active_jobs[job_id]['progress'] = 10
             
             # Process the blueprint
+            logger.info(f"Starting blueprint processing for job {job_id}")
             result = await self.processor.process_blueprint_async(
                 file_path, job_id, project_info
             )
             
             # Update progress
             self.active_jobs[job_id]['progress'] = 70
+            logger.info(f"Blueprint processing completed for job {job_id}, status: {result.status}")
             
             # Generate professional outputs
             if result.status == ProcessingStatus.COMPLETED:
+                logger.info(f"Starting professional outputs generation for job {job_id}")
+                self.active_jobs[job_id]['progress'] = 80
                 await self._generate_professional_outputs(result)
                 self.active_jobs[job_id]['progress'] = 90
+                logger.info(f"Professional outputs completed for job {job_id}")
             
             # Cache the result
             await self._cache_result(result)
@@ -358,17 +363,32 @@ class BlueprintService:
     
     async def _generate_professional_outputs(self, result: ExtractionResult):
         """
-        Generate professional deliverables
+        Generate professional deliverables from already processed extraction result
         """
         try:
             # Create output directory with parents
             output_dir = self.outputs_dir / result.job_id
             output_dir.mkdir(parents=True, exist_ok=True)
             
-            # Generate using the existing professional output generator
-            analysis = self.output_generator.generate_complete_analysis(
-                result.job_id,
-                str(self.upload_dir / f"{result.job_id}.pdf")
+            # Generate professional outputs using the already processed result
+            # instead of re-processing the blueprint
+            logger.info(f"Generating professional outputs for job {result.job_id}")
+            
+            # Calculate Manual J from extraction result
+            manual_j_data = self.output_generator._calculate_manual_j(result)
+            
+            # Design HVAC system
+            hvac_design = self.output_generator._design_hvac_system(manual_j_data, result)
+            
+            # Generate deliverables
+            project_name = f"project_{result.job_id}"
+            deliverables = await self.output_generator._generate_deliverables(
+                result, manual_j_data, hvac_design, output_dir, project_name
+            )
+            
+            # Create summary
+            analysis = self.output_generator._create_project_summary(
+                result, manual_j_data, hvac_design, deliverables
             )
             
             # Save analysis as JSON
@@ -379,7 +399,8 @@ class BlueprintService:
             logger.info(f"Generated professional outputs for job {result.job_id}")
             
         except Exception as e:
-            logger.error(f"Failed to generate professional outputs: {str(e)}")
+            logger.error(f"Failed to generate professional outputs: {str(e)}", exc_info=True)
+            raise
     
     async def _generate_professional_analysis(self, result: ExtractionResult) -> Dict[str, Any]:
         """
