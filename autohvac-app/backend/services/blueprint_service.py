@@ -331,7 +331,11 @@ class BlueprintService:
             if result.status == ProcessingStatus.COMPLETED:
                 logger.info(f"Starting professional outputs generation for job {job_id}")
                 self.active_jobs[job_id]['progress'] = 80
-                await self._generate_professional_outputs(result)
+                
+                # TEMPORARY: Skip professional outputs to test if this is the hang point
+                logger.info(f"TEMPORARILY SKIPPING professional outputs for job {job_id}")
+                # await self._generate_professional_outputs(result)
+                
                 self.active_jobs[job_id]['progress'] = 90
                 logger.info(f"Professional outputs completed for job {job_id}")
             
@@ -375,16 +379,22 @@ class BlueprintService:
             logger.info(f"Generating professional outputs for job {result.job_id}")
             
             # Calculate Manual J from extraction result
+            logger.info(f"Step 1: Calculating Manual J for job {result.job_id}")
             manual_j_data = self.output_generator._calculate_manual_j(result)
+            logger.info(f"Step 1 COMPLETE: Manual J calculated for job {result.job_id}")
             
             # Design HVAC system
+            logger.info(f"Step 2: Designing HVAC system for job {result.job_id}")
             hvac_design = self.output_generator._design_hvac_system(manual_j_data, result)
+            logger.info(f"Step 2 COMPLETE: HVAC system designed for job {result.job_id}")
             
             # Generate deliverables
+            logger.info(f"Step 3: Generating deliverables for job {result.job_id}")
             project_name = f"project_{result.job_id}"
             deliverables = await self.output_generator._generate_deliverables(
                 result, manual_j_data, hvac_design, output_dir, project_name
             )
+            logger.info(f"Step 3 COMPLETE: Generated {len(deliverables)} deliverables for job {result.job_id}")
             
             # Create summary
             analysis = self.output_generator._create_project_summary(
