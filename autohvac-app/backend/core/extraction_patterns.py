@@ -364,16 +364,108 @@ class ExtractionPatterns:
         results = self.search_patterns(text, pattern_type, max_results=1)
         return results[0] if results else None
     
-    def extract_all_matches(self, text: str) -> Dict[PatternType, List[Tuple[PatternDefinition, re.Match]]]:
-        """Extract all matches for all pattern types"""
+    def extract_all_matches(self, text: str, priority_first: bool = True, max_per_type: int = 5) -> Dict[PatternType, List[Tuple[PatternDefinition, re.Match]]]:
+        """Extract all matches for all pattern types with optimizations"""
         all_matches = {}
         
-        for pattern_type in PatternType:
-            matches = self.search_patterns(text, pattern_type)
+        # Priority order for pattern types (most important first)
+        priority_order = [
+            PatternType.ADDRESS,
+            PatternType.PROJECT_INFO,
+            PatternType.AREA,
+            PatternType.ROOM,
+            PatternType.DIMENSION,
+            PatternType.R_VALUE,
+            PatternType.WINDOW,
+            PatternType.DOOR
+        ] if priority_first else list(PatternType)
+        
+        for pattern_type in priority_order:
+            matches = self.search_patterns_optimized(text, pattern_type, max_per_type)
             if matches:
                 all_matches[pattern_type] = matches
         
         return all_matches
+    
+    def search_patterns_optimized(self, text: str, pattern_type: PatternType, max_results: int = 5) -> List[Tuple[PatternDefinition, re.Match]]:
+        """Optimized pattern search with early termination and zone-based searching"""
+        results = []
+        patterns = self.get_patterns(pattern_type)
+        
+        # Sort patterns by priority (lower number = higher priority)
+        patterns = sorted(patterns, key=lambda p: p.priority)
+        
+        # Split text into zones for more efficient searching
+        text_zones = self._split_text_into_zones(text)
+        
+        for pattern_def in patterns:
+            if not pattern_def.compiled_pattern:
+                continue
+            
+            # Early termination if we have enough high-confidence matches
+            if len(results) >= max_results:
+                # Check if all results have high confidence
+                if all(self._calculate_match_confidence(r[1]) > 0.8 for r in results):
+                    break
+            
+            # Search in priority zones first
+            found_matches = False
+            for zone_name, zone_text in text_zones.items():
+                matches = pattern_def.compiled_pattern.finditer(zone_text)
+                for match in matches:
+                    confidence = self._calculate_match_confidence(match)
+                    
+                    # Only keep high-quality matches
+                    if confidence > 0.5:
+                        results.append((pattern_def, match))
+                        found_matches = True
+                        
+                        if len(results) >= max_results:
+                            break
+                
+                if found_matches and len(results) >= max_results:
+                    break
+            
+            if len(results) >= max_results:
+                break
+        
+        return results
+    
+    def _split_text_into_zones(self, text: str) -> Dict[str, str]:
+        """Split text into logical zones for more efficient pattern matching"""
+        lines = text.split('\n')
+        total_lines = len(lines)
+        
+        zones = {
+            'header': '\n'.join(lines[:min(20, total_lines // 4)]),  # First 20 lines or 25%
+            'body': '\n'.join(lines[total_lines // 4:3 * total_lines // 4]),  # Middle 50%
+            'footer': '\n'.join(lines[3 * total_lines // 4:]),  # Last 25%
+        }
+        
+        return zones
+    
+    def _calculate_match_confidence(self, match: re.Match) -> float:
+        """Calculate confidence score for a regex match"""
+        # Base confidence
+        confidence = 0.5
+        
+        # Longer matches are generally more reliable
+        match_length = len(match.group())
+        if match_length > 20:
+            confidence += 0.2
+        elif match_length > 10:
+            confidence += 0.1
+        
+        # Matches with numbers tend to be more specific
+        if re.search(r'\d', match.group()):
+            confidence += 0.1
+        
+        # Matches with proper formatting (spaces, punctuation)
+        if re.search(r'[\s\-\(\)\.:]', match.group()):
+            confidence += 0.1
+        
+        # Cap at 1.0
+        return min(confidence, 1.0)
     
     def get_pattern_stats(self) -> Dict[str, Any]:
         """Get statistics about loaded patterns"""

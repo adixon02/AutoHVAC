@@ -5,10 +5,12 @@ High-performance, clean separation of concerns
 """
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from typing import Dict, Any, List, Optional
 import logging
 from pathlib import Path
+import json
+import asyncio
 
 from services.blueprint_service import get_blueprint_service
 from core.error_handling import (
@@ -393,6 +395,97 @@ async def cleanup_expired_jobs(max_age_hours: int = 168) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Cleanup failed: {str(e)}")
         raise HTTPException(status_code=500, detail="Cleanup operation failed")
+
+@router.get("/stream/{job_id}")
+async def stream_processing_progress(job_id: str) -> StreamingResponse:
+    """
+    Stream real-time processing progress via Server-Sent Events (SSE)
+    
+    Args:
+        job_id: Unique job identifier
+    
+    Returns:
+        StreamingResponse with SSE data containing progress updates
+    """
+    
+    async def event_stream():
+        """Generate SSE events for job progress"""
+        try:
+            last_progress = -1
+            max_wait_time = 300  # 5 minutes max wait
+            start_time = asyncio.get_event_loop().time()
+            
+            while True:
+                current_time = asyncio.get_event_loop().time()
+                if current_time - start_time > max_wait_time:
+                    yield f"event: timeout\ndata: {json.dumps({'error': 'Maximum wait time exceeded'})}\n\n"
+                    break
+                
+                try:
+                    # Get current job status
+                    status_data = await blueprint_service.get_job_status(job_id)
+                    
+                    if not status_data:
+                        yield f"event: error\ndata: {json.dumps({'error': 'Job not found'})}\n\n"
+                        break
+                    
+                    current_progress = status_data.get('progress_percentage', 0)
+                    job_status = status_data.get('status', 'unknown')
+                    
+                    # Only send updates when progress changes or every 5 seconds
+                    if (current_progress != last_progress or 
+                        int(current_time) % 5 == 0):
+                        
+                        progress_data = {
+                            'job_id': job_id,
+                            'status': job_status,
+                            'progress': current_progress,
+                            'stage': status_data.get('current_stage', 'processing'),
+                            'message': status_data.get('status_message', ''),
+                            'timestamp': current_time
+                        }
+                        
+                        yield f"event: progress\ndata: {json.dumps(progress_data)}\n\n"
+                        last_progress = current_progress
+                    
+                    # Check if job is complete
+                    if job_status in ['completed', 'failed', 'cancelled']:
+                        final_data = {
+                            'job_id': job_id,
+                            'status': job_status,
+                            'progress': 100 if job_status == 'completed' else current_progress,
+                            'message': 'Processing complete' if job_status == 'completed' else 'Processing failed',
+                            'timestamp': current_time
+                        }
+                        
+                        if job_status == 'completed':
+                            final_data['result_url'] = f"/api/blueprint/result/{job_id}"
+                        
+                        yield f"event: complete\ndata: {json.dumps(final_data)}\n\n"
+                        break
+                    
+                except Exception as e:
+                    logger.error(f"Error streaming progress for job {job_id}: {str(e)}")
+                    yield f"event: error\ndata: {json.dumps({'error': 'Internal streaming error'})}\n\n"
+                    break
+                
+                # Wait before next update
+                await asyncio.sleep(1)
+                
+        except Exception as e:
+            logger.error(f"SSE stream failed for job {job_id}: {str(e)}")
+            yield f"event: error\ndata: {json.dumps({'error': 'Stream connection failed'})}\n\n"
+    
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control"
+        }
+    )
 
 # Health check endpoint
 @router.get("/health")

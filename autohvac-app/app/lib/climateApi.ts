@@ -20,9 +20,9 @@ export async function getClimateZoneFromAPI(zipCode: string): Promise<ClimateZon
     // Convert API response to ClimateZone format
     return {
       zipCode: data.zip_code,
-      zone: data.climate_zone,
-      heatingDegreeDays: calculateHeatingDegreeDays(data.design_temperatures),
-      coolingDegreeDays: calculateCoolingDegreeDays(data.design_temperatures),
+      zone: data.zone,
+      heatingDegreeDays: data.heating_degree_days,
+      coolingDegreeDays: data.cooling_degree_days,
       designTemperatures: {
         summerDry: data.design_temperatures.summer_db,
         winterDry: data.design_temperatures.winter_db,
@@ -78,28 +78,3 @@ export async function getClimateStats(): Promise<any> {
   }
 }
 
-// Helper functions to estimate degree days from design temperatures
-function calculateHeatingDegreeDays(designTemps: any): number {
-  // Rough estimation based on winter design temperature
-  const winterDb = designTemps.winter_db || 20;
-  
-  if (winterDb <= -10) return 8000;
-  if (winterDb <= 0) return 7000;
-  if (winterDb <= 10) return 6000;
-  if (winterDb <= 20) return 5000;
-  if (winterDb <= 30) return 4000;
-  if (winterDb <= 40) return 3000;
-  return 2000;
-}
-
-function calculateCoolingDegreeDays(designTemps: any): number {
-  // Rough estimation based on summer design temperature
-  const summerDb = designTemps.summer_db || 90;
-  
-  if (summerDb >= 100) return 3000;
-  if (summerDb >= 95) return 2500;
-  if (summerDb >= 90) return 2000;
-  if (summerDb >= 85) return 1500;
-  if (summerDb >= 80) return 1000;
-  return 500;
-}

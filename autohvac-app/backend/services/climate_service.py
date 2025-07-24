@@ -93,9 +93,9 @@ class ClimateService:
             
             # Create indexes for better performance
             indexes = [
-                "CREATE INDEX IF NOT EXISTS idx_zip_code ON climate_data(zip_code)",
-                "CREATE INDEX IF NOT EXISTS idx_zone ON climate_data(zone)",
-                "CREATE INDEX IF NOT EXISTS idx_state_county ON climate_data(state, county)"
+                "CREATE INDEX IF NOT EXISTS idx_zip_code ON climate_zones(zip_code)",
+                "CREATE INDEX IF NOT EXISTS idx_zone ON climate_zones(ashrae_zone)",
+                "CREATE INDEX IF NOT EXISTS idx_state_county ON zip_codes(state, county)"
             ]
             
             for index_sql in indexes:
@@ -209,17 +209,23 @@ class ClimateService:
             
             if county:
                 query = """
-                SELECT * FROM climate_data 
-                WHERE state = ? AND county LIKE ?
-                ORDER BY zip_code
+                SELECT z.*, c.ashrae_zone, c.description, c.summer_db, c.winter_db, 
+                       c.summer_humidity, c.winter_humidity
+                FROM zip_codes z
+                LEFT JOIN climate_zones c ON z.zip_code = c.zip_code
+                WHERE z.state = ? AND z.county LIKE ?
+                ORDER BY z.zip_code
                 LIMIT 100
                 """
                 params = (state.upper(), f"%{county}%")
             else:
                 query = """
-                SELECT * FROM climate_data 
-                WHERE state = ?
-                ORDER BY zip_code
+                SELECT z.*, c.ashrae_zone, c.description, c.summer_db, c.winter_db, 
+                       c.summer_humidity, c.winter_humidity
+                FROM zip_codes z
+                LEFT JOIN climate_zones c ON z.zip_code = c.zip_code
+                WHERE z.state = ?
+                ORDER BY z.zip_code
                 LIMIT 100
                 """
                 params = (state.upper(),)
@@ -331,8 +337,11 @@ class ClimateService:
             conn = self._get_db_connection()
             
             query = """
-            SELECT * FROM climate_data 
-            WHERE zip_code = ?
+            SELECT z.*, c.ashrae_zone, c.description, c.summer_db, c.winter_db, 
+                   c.summer_humidity, c.winter_humidity
+            FROM zip_codes z
+            LEFT JOIN climate_zones c ON z.zip_code = c.zip_code
+            WHERE z.zip_code = ?
             LIMIT 1
             """
             
@@ -366,8 +375,11 @@ class ClimateService:
             # Use IN clause for batch query
             placeholders = ','.join('?' * len(zip_codes))
             query = f"""
-            SELECT * FROM climate_data 
-            WHERE zip_code IN ({placeholders})
+            SELECT z.*, c.ashrae_zone, c.description, c.summer_db, c.winter_db, 
+                   c.summer_humidity, c.winter_humidity
+            FROM zip_codes z
+            LEFT JOIN climate_zones c ON z.zip_code = c.zip_code
+            WHERE z.zip_code IN ({placeholders})
             """
             
             cursor = conn.execute(query, zip_codes)
@@ -407,40 +419,62 @@ class ClimateService:
     def _row_to_climate_data(self, row) -> Optional[ClimateData]:
         """Convert database row to ClimateData object"""
         try:
-            # Parse design temperatures and humidity from JSON or individual columns
-            design_temps = {}
-            humidity = {}
+            # Use new schema with ashrae_zone, summer_db, winter_db, etc.
+            design_temps = {
+                'summer_db': row['summer_db'] if row['summer_db'] is not None else 95.0,
+                'winter_db': row['winter_db'] if row['winter_db'] is not None else 10.0
+            }
             
-            if 'design_temperatures' in row.keys():
-                design_temps = json.loads(row['design_temperatures'] or '{}')
-            else:
-                # Fallback to individual columns
-                design_temps = {
-                    'summer_dry': row.get('summer_dry_bulb', 95.0),
-                    'winter_dry': row.get('winter_dry_bulb', 10.0)
-                }
+            humidity = {
+                'summer': row['summer_humidity'] if row['summer_humidity'] is not None else 60.0,
+                'winter': row['winter_humidity'] if row['winter_humidity'] is not None else 30.0
+            }
             
-            if 'humidity' in row.keys():
-                humidity = json.loads(row['humidity'] or '{}')
+            # Estimate degree days from design temperatures
+            winter_db = design_temps['winter_db']
+            summer_db = design_temps['summer_db']
+            
+            # Rough degree day estimation
+            if winter_db <= -10:
+                heating_dd = 8000
+            elif winter_db <= 0:
+                heating_dd = 7000
+            elif winter_db <= 10:
+                heating_dd = 6000
+            elif winter_db <= 20:
+                heating_dd = 5000
+            elif winter_db <= 30:
+                heating_dd = 4000
+            elif winter_db <= 40:
+                heating_dd = 3000
             else:
-                # Fallback values
-                humidity = {
-                    'summer': row.get('summer_humidity', 60.0),
-                    'winter': row.get('winter_humidity', 30.0)
-                }
+                heating_dd = 2000
+                
+            if summer_db >= 100:
+                cooling_dd = 3000
+            elif summer_db >= 95:
+                cooling_dd = 2500
+            elif summer_db >= 90:
+                cooling_dd = 2000
+            elif summer_db >= 85:
+                cooling_dd = 1500
+            elif summer_db >= 80:
+                cooling_dd = 1000
+            else:
+                cooling_dd = 500
             
             return ClimateData(
                 zip_code=row['zip_code'],
-                zone=row.get('zone', 'Unknown'),
-                heating_degree_days=row.get('heating_degree_days', 3000),
-                cooling_degree_days=row.get('cooling_degree_days', 1000),
+                zone=row['ashrae_zone'] if row['ashrae_zone'] is not None else 'Unknown',
+                heating_degree_days=heating_dd,
+                cooling_degree_days=cooling_dd,
                 design_temperatures=design_temps,
                 humidity=humidity,
-                county=row.get('county', ''),
-                state=row.get('state', ''),
-                latitude=row.get('latitude', 0.0),
-                longitude=row.get('longitude', 0.0),
-                elevation=row.get('elevation', 0)
+                county=row['county'] if row['county'] is not None else '',
+                state=row['state'] if row['state'] is not None else '',
+                latitude=row['latitude'] if row['latitude'] is not None else 0.0,
+                longitude=row['longitude'] if row['longitude'] is not None else 0.0,
+                elevation=0
             )
             
         except Exception as e:

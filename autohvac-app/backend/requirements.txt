@@ -6,7 +6,7 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 
 # PDF Processing
-PyPDF2==3.0.1
+PyMuPDF==1.24.13
 
 # Image Processing  
 # opencv-python==4.10.0.84  # Temporarily disabled - heavy dependency
@@ -37,3 +37,6 @@ passlib[bcrypt]==1.7.4
 python-dotenv==1.0.1
 httpx==0.27.2
 requests==2.32.3
+
+# Caching
+redis==5.2.0

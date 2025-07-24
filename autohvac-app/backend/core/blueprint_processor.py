@@ -4,7 +4,7 @@ Unified High-Performance Blueprint Processor for AutoHVAC
 Consolidates all blueprint processing functionality with optimized performance
 """
 
-import PyPDF2
+import fitz  # PyMuPDF
 import re
 import json
 import asyncio
@@ -15,6 +15,17 @@ import logging
 from datetime import datetime
 import time
 import uuid
+import concurrent.futures
+from threading import Lock
+import hashlib
+
+# Optional Redis import
+try:
+    import redis
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    logger.warning("Redis not available, using in-memory caching only")
 
 from .data_models import (
     ExtractionResult, ProjectInfo, BuildingCharacteristics, Room, 
@@ -26,17 +37,97 @@ from .extraction_patterns import get_patterns, PatternType
 # Set up logging
 logger = logging.getLogger(__name__)
 
+class SmartCache:
+    """
+    Intelligent caching layer with Redis fallback to in-memory
+    """
+    
+    def __init__(self, redis_url: str = None, default_ttl: int = 3600):
+        self.default_ttl = default_ttl
+        self.redis_client = None
+        self._memory_cache = {}
+        self._cache_lock = Lock()
+        
+        # Try to connect to Redis
+        if REDIS_AVAILABLE and redis_url:
+            try:
+                self.redis_client = redis.from_url(redis_url, decode_responses=True)
+                self.redis_client.ping()  # Test connection
+                logger.info("Connected to Redis for caching")
+            except Exception as e:
+                logger.warning(f"Failed to connect to Redis: {e}, using in-memory cache")
+                self.redis_client = None
+        else:
+            logger.info("Using in-memory caching (Redis not available)")
+    
+    def _generate_key(self, content: str) -> str:
+        """Generate cache key from content"""
+        return hashlib.md5(content.encode()).hexdigest()
+    
+    def get(self, key: str) -> Optional[str]:
+        """Get value from cache"""
+        if self.redis_client:
+            try:
+                return self.redis_client.get(key)
+            except Exception as e:
+                logger.warning(f"Redis get failed: {e}")
+        
+        # Fallback to memory cache
+        with self._cache_lock:
+            return self._memory_cache.get(key)
+    
+    def set(self, key: str, value: str, ttl: int = None) -> bool:
+        """Set value in cache"""
+        ttl = ttl or self.default_ttl
+        
+        if self.redis_client:
+            try:
+                return self.redis_client.setex(key, ttl, value)
+            except Exception as e:
+                logger.warning(f"Redis set failed: {e}")
+        
+        # Fallback to memory cache
+        with self._cache_lock:
+            self._memory_cache[key] = value
+            return True
+    
+    async def get_async(self, key: str) -> Optional[str]:
+        """Async get value from cache"""
+        return await asyncio.to_thread(self.get, key)
+    
+    async def set_async(self, key: str, value: str, ttl: int = None) -> bool:
+        """Async set value in cache"""
+        return await asyncio.to_thread(self.set, key, value, ttl)
+    
+    def get_extraction_cache_key(self, file_path: Path, file_size: int, mtime: float) -> str:
+        """Generate cache key for extraction results"""
+        content = f"{file_path.name}:{file_size}:{mtime}"
+        return f"extraction:{self._generate_key(content)}"
+    
+    def get_calculation_cache_key(self, extraction_data: Dict) -> str:
+        """Generate cache key for calculation results"""
+        # Create deterministic key from extraction data
+        key_data = {
+            'total_area': extraction_data.get('building_chars', {}).get('total_area', 0),
+            'rooms_count': len(extraction_data.get('rooms', [])),
+            'zip_code': extraction_data.get('project_info', {}).get('zip_code', ''),
+            'construction_type': extraction_data.get('building_chars', {}).get('construction_type', '')
+        }
+        content = json.dumps(key_data, sort_keys=True)
+        return f"calculation:{self._generate_key(content)}"
+
 class BlueprintProcessor:
     """
     High-performance blueprint processor with caching, pre-compiled patterns,
     and intelligent extraction algorithms
     """
     
-    def __init__(self, enable_caching: bool = True):
+    def __init__(self, enable_caching: bool = True, redis_url: str = None):
         self.enable_caching = enable_caching
         self._pattern_cache: Dict[str, Any] = {}
-        self._text_cache: Dict[str, str] = {}
+        self.smart_cache = SmartCache(redis_url) if enable_caching else None
         self.patterns = get_patterns()
+        self._cache_lock = Lock()  # Thread safety for caching
         
         # Performance optimization: pre-compile common patterns
         self._precompile_critical_patterns()
@@ -50,7 +141,8 @@ class BlueprintProcessor:
             'extraction_accuracy': 0.0
         }
         
-        logger.info("BlueprintProcessor initialized with pattern caching")
+        cache_type = "Redis/Memory" if self.smart_cache and self.smart_cache.redis_client else "Memory"
+        logger.info(f"BlueprintProcessor initialized with {cache_type} caching and parallel processing")
     
     def _precompile_critical_patterns(self):
         """Pre-compile the most commonly used patterns for better performance"""
@@ -66,14 +158,14 @@ class BlueprintProcessor:
         logger.debug(f"Pre-compiled {len(critical_patterns)} critical patterns")
     
     async def process_blueprint_async(self, file_path: Union[str, Path], job_id: str = None, 
-                                     project_info: Dict = None) -> ExtractionResult:
+                                     project_info: Dict = None, progress_callback = None) -> ExtractionResult:
         """
-        Asynchronously process a blueprint file
+        Asynchronously process a blueprint file with progress updates
         """
-        return await asyncio.to_thread(self.process_blueprint, file_path, job_id, project_info)
+        return await asyncio.to_thread(self.process_blueprint, file_path, job_id, project_info, progress_callback)
     
     def process_blueprint(self, file_path: Union[str, Path], job_id: str = None, 
-                         project_info: Dict = None) -> ExtractionResult:
+                         project_info: Dict = None, progress_callback = None) -> ExtractionResult:
         """
         Main entry point for blueprint processing with comprehensive error handling
         """
@@ -89,13 +181,22 @@ class BlueprintProcessor:
             created_at=datetime.now()
         )
         
+        def update_progress(stage: str, percentage: int, message: str = ""):
+            """Helper function to update progress"""
+            if progress_callback:
+                progress_callback(job_id, stage, percentage, message)
+        
         try:
             logger.info(f"Processing blueprint: {file_path} (Job ID: {job_id})")
+            update_progress("initializing", 5, "Starting blueprint processing")
             
             # Extract text from PDF
+            update_progress("extracting_text", 15, "Extracting text from PDF pages")
             text_content = self._extract_text_from_pdf(file_path)
             if not text_content:
                 raise ValueError("No text content extracted from PDF")
+            
+            update_progress("text_extracted", 30, f"Extracted text from PDF ({len(text_content)} characters)")
             
             # Store raw text for debugging
             result.raw_data['extracted_text'] = text_content[:5000]  # First 5000 chars
@@ -103,8 +204,10 @@ class BlueprintProcessor:
             result.raw_data['file_name'] = Path(file_path).name
             
             # Perform comprehensive extraction
+            update_progress("pattern_matching", 45, "Running pattern matching and data extraction")
             result = self._perform_comprehensive_extraction(result, text_content, project_info)
             
+            update_progress("validating", 80, "Validating extracted data")
             # Calculate overall confidence and validate
             result.calculate_overall_confidence()
             validation_issues = validate_extraction_result(result)
@@ -113,6 +216,7 @@ class BlueprintProcessor:
                 result.processing_notes.extend(validation_issues)
                 logger.warning(f"Validation issues found: {validation_issues}")
             
+            update_progress("finalizing", 95, "Finalizing results")
             # Finalize result
             result.status = ProcessingStatus.COMPLETED
             result.completed_at = datetime.now()
@@ -122,6 +226,8 @@ class BlueprintProcessor:
             self._update_stats(processing_time, result.overall_confidence)
             
             result.extraction_metrics.extraction_time_seconds = processing_time
+            
+            update_progress("completed", 100, f"Processing completed in {processing_time:.2f}s")
             
             logger.info(f"Blueprint processing completed in {processing_time:.2f}s "
                        f"with {result.overall_confidence:.2f} confidence")
@@ -135,46 +241,210 @@ class BlueprintProcessor:
             result.completed_at = datetime.now()
             return result
     
-    def _extract_text_from_pdf(self, file_path: Union[str, Path]) -> str:
+    async def _extract_text_from_pdf_async(self, file_path: Union[str, Path]) -> str:
         """
-        Extract text from PDF with caching and error handling
+        High-performance text extraction using PyMuPDF with smart caching
         """
         file_path = Path(file_path)
-        cache_key = f"{file_path.name}_{file_path.stat().st_mtime}"
+        file_stat = file_path.stat()
         
-        # Check cache first
-        if self.enable_caching and cache_key in self._text_cache:
-            self.stats['cache_hits'] += 1
-            return self._text_cache[cache_key]
+        # Check smart cache first (async)
+        if self.smart_cache:
+            cache_key = self.smart_cache.get_extraction_cache_key(
+                file_path, file_stat.st_size, file_stat.st_mtime
+            )
+            
+            cached_text = await self.smart_cache.get_async(cache_key)
+            if cached_text:
+                self.stats['cache_hits'] += 1
+                logger.debug(f"Cache hit for PDF text extraction: {file_path.name}")
+                return cached_text
         
         self.stats['cache_misses'] += 1
         
         try:
-            with open(file_path, 'rb') as file:
-                reader = PyPDF2.PdfReader(file)
-                text_content = []
-                
-                for page_num, page in enumerate(reader.pages):
-                    try:
-                        page_text = page.extract_text()
-                        if page_text.strip():
-                            text_content.append(page_text)
-                    except Exception as e:
-                        logger.warning(f"Failed to extract text from page {page_num}: {e}")
-                        continue
-                
-                full_text = '\n'.join(text_content)
-                
-                # Cache the result
-                if self.enable_caching:
-                    self._text_cache[cache_key] = full_text
-                
-                logger.debug(f"Extracted {len(full_text)} characters from {len(reader.pages)} pages")
-                return full_text
+            # Open document with PyMuPDF (async file I/O)
+            doc = await asyncio.to_thread(fitz.open, str(file_path))
+            page_count = len(doc)
+            
+            if page_count == 0:
+                await asyncio.to_thread(doc.close)
+                raise ValueError("PDF contains no pages")
+            
+            logger.debug(f"Processing {page_count} pages with parallel extraction")
+            
+            # Use parallel processing for pages if document is large enough
+            if page_count > 3:
+                text_content = await asyncio.to_thread(self._extract_pages_parallel, doc)
+            else:
+                text_content = await asyncio.to_thread(self._extract_pages_sequential, doc)
+            
+            await asyncio.to_thread(doc.close)
+            
+            full_text = '\n'.join(text_content)
+            
+            # Cache the result in smart cache (async)
+            if self.smart_cache:
+                cache_key = self.smart_cache.get_extraction_cache_key(
+                    file_path, file_stat.st_size, file_stat.st_mtime
+                )
+                await self.smart_cache.set_async(cache_key, full_text, ttl=7200)  # 2 hours TTL
+            
+            logger.debug(f"Extracted {len(full_text)} characters from {page_count} pages")
+            return full_text
                 
         except Exception as e:
             logger.error(f"Failed to extract text from PDF: {e}")
             raise ValueError(f"PDF text extraction failed: {e}")
+    
+    def _extract_text_from_pdf(self, file_path: Union[str, Path]) -> str:
+        """
+        Synchronous wrapper for async PDF text extraction
+        """
+        # If we're in an async context, use the async version
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # We're in an async context but called sync method
+                # This should not happen in normal usage
+                logger.warning("Sync PDF extraction called from async context")
+                return asyncio.run_coroutine_threadsafe(
+                    self._extract_text_from_pdf_async(file_path), loop
+                ).result()
+            else:
+                return asyncio.run(self._extract_text_from_pdf_async(file_path))
+        except RuntimeError:
+            # No event loop, run the async function
+            return asyncio.run(self._extract_text_from_pdf_async(file_path))
+    
+    def _extract_pages_parallel(self, doc: fitz.Document) -> List[str]:
+        """Extract text from pages in parallel with intelligent page filtering"""
+        text_content = [''] * len(doc)  # Pre-allocate list
+        
+        def extract_page_text(page_num: int) -> Tuple[int, str]:
+            """Extract text from a single page with relevance filtering"""
+            try:
+                page = doc[page_num]
+                page_text = page.get_text()
+                
+                # Skip irrelevant pages using smart filtering
+                if not self._is_relevant_page(page_text, page_num, len(doc)):
+                    return page_num, ""
+                    
+                return page_num, page_text
+            except Exception as e:
+                logger.warning(f"Failed to extract text from page {page_num}: {e}")
+                return page_num, ""
+        
+        # Use ThreadPoolExecutor for parallel page processing
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(extract_page_text, i) for i in range(len(doc))]
+            
+            for future in concurrent.futures.as_completed(futures):
+                page_num, page_text = future.result()
+                if page_text:
+                    text_content[page_num] = page_text
+        
+        # Filter out empty pages
+        return [text for text in text_content if text]
+    
+    def _extract_pages_sequential(self, doc: fitz.Document) -> List[str]:
+        """Extract text from pages sequentially with intelligent filtering"""
+        text_content = []
+        
+        for page_num in range(len(doc)):
+            try:
+                page = doc[page_num]
+                page_text = page.get_text()
+                
+                # Use same relevance filtering as parallel method
+                if page_text.strip() and self._is_relevant_page(page_text, page_num, len(doc)):
+                    text_content.append(page_text)
+                elif page_text.strip():
+                    logger.debug(f"Filtered out page {page_num} as irrelevant")
+                    
+            except Exception as e:
+                logger.warning(f"Failed to extract text from page {page_num}: {e}")
+                continue
+                
+        return text_content
+    
+    def _is_relevant_page(self, page_text: str, page_num: int, total_pages: int) -> bool:
+        """
+        Determine if a page is relevant for HVAC blueprint processing
+        """
+        text_clean = page_text.strip()
+        
+        # Skip obviously empty pages
+        if len(text_clean) < 30:
+            return False
+        
+        # Skip cover pages (usually first page with title info only)
+        if page_num == 0:
+            # Check if it's likely a cover page
+            cover_indicators = [
+                'title page', 'cover sheet', 'project information',
+                'drawing index', 'sheet index', 'revision', 'drawing list'
+            ]
+            text_lower = text_clean.lower()
+            
+            # If it has HVAC content, keep it even if it's the first page
+            hvac_indicators = [
+                'hvac', 'heating', 'cooling', 'duct', 'air conditioning',
+                'ventilation', 'cfm', 'btu', 'ton', 'equipment', 'unit'
+            ]
+            
+            has_hvac_content = any(indicator in text_lower for indicator in hvac_indicators)
+            has_cover_content = any(indicator in text_lower for indicator in cover_indicators)
+            
+            if has_cover_content and not has_hvac_content and len(text_clean) < 500:
+                logger.debug(f"Skipping cover page {page_num}")
+                return False
+        
+        # Skip index/table of contents pages
+        index_indicators = [
+            'table of contents', 'drawing index', 'sheet list',
+            'drawing list', 'index of drawings', 'sheet index'
+        ]
+        text_lower = text_clean.lower()
+        if any(indicator in text_lower for indicator in index_indicators):
+            # Unless it contains actual room or area data
+            if not any(word in text_lower for word in ['sf', 'sq ft', 'area', 'room']):
+                logger.debug(f"Skipping index page {page_num}")
+                return False
+        
+        # Skip pages that are mostly administrative text
+        admin_indicators = [
+            'general notes', 'legend', 'abbreviations', 'symbols',
+            'code compliance', 'specifications', 'standard details'
+        ]
+        if any(indicator in text_lower for indicator in admin_indicators):
+            # Unless they contain area or room information
+            area_indicators = ['area', 'sq ft', 'sf', 'room', 'space']
+            if not any(indicator in text_lower for indicator in area_indicators):
+                logger.debug(f"Skipping administrative page {page_num}")
+                return False
+        
+        # Keep pages with HVAC-relevant content
+        hvac_keywords = [
+            'hvac', 'heating', 'cooling', 'air conditioning', 'ventilation',
+            'duct', 'cfm', 'btu', 'ton', 'unit', 'equipment', 'mechanical',
+            'room', 'area', 'sq ft', 'sf', 'floor plan', 'space',
+            'bedroom', 'bathroom', 'kitchen', 'living', 'dining'
+        ]
+        
+        relevant_content = sum(1 for keyword in hvac_keywords if keyword in text_lower)
+        
+        # Keep if it has multiple relevant keywords or significant text with some keywords
+        if relevant_content >= 2 or (relevant_content >= 1 and len(text_clean) > 200):
+            return True
+        
+        # Skip pages with very little content
+        if len(text_clean) < 100:
+            logger.debug(f"Skipping minimal content page {page_num}")
+            return False
+        
+        return True
     
     def _perform_comprehensive_extraction(self, result: ExtractionResult, 
                                         text_content: str, project_info: Dict = None) -> ExtractionResult:

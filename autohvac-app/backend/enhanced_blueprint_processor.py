@@ -4,7 +4,7 @@ Enhanced Blueprint Processor - MVP for $100M Revenue Goal
 Handles 95% of standard blueprint formats with intelligent fallbacks
 """
 
-import PyPDF2
+import fitz  # PyMuPDF
 import re
 import json
 from pathlib import Path
@@ -249,25 +249,27 @@ class EnhancedBlueprintProcessor:
         }
         
         try:
-            with open(pdf_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
-                text_data['total_pages'] = len(pdf_reader.pages)
-                
-                all_text = ""
-                
-                for i, page in enumerate(pdf_reader.pages):
-                    page_text = page.extract_text()
-                    text_data['pages'][i+1] = {
-                        'text': page_text,
-                        'lines': [line.strip() for line in page_text.split('\n') if line.strip()],
-                        'word_count': len(page_text.split())
-                    }
-                    all_text += page_text + "\n"
-                
-                text_data['combined_text'] = all_text
-                text_data['word_count'] = len(all_text.split())
-                
-                logger.info(f"Extracted text from {text_data['total_pages']} pages, {text_data['word_count']} words")
+            doc = fitz.open(str(pdf_path))
+            text_data['total_pages'] = len(doc)
+            
+            all_text = ""
+            
+            for i in range(len(doc)):
+                page = doc[i]
+                page_text = page.get_text()
+                text_data['pages'][i+1] = {
+                    'text': page_text,
+                    'lines': [line.strip() for line in page_text.split('\n') if line.strip()],
+                    'word_count': len(page_text.split())
+                }
+                all_text += page_text + "\n"
+            
+            doc.close()
+            
+            text_data['combined_text'] = all_text
+            text_data['word_count'] = len(all_text.split())
+            
+            logger.info(f"Extracted text from {text_data['total_pages']} pages, {text_data['word_count']} words")
                 
         except Exception as e:
             logger.error(f"Error extracting PDF text: {e}")
