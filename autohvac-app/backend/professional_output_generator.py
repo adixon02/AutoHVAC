@@ -13,9 +13,8 @@ from typing import Dict, Any, List, Optional
 import logging
 import sys
 
-# Import modules (using relative imports when possible)
-
 from enhanced_blueprint_processor import ExtractionResult, EnhancedBlueprintProcessor
+from ai_gap_filler import AIGapFiller
 from processors.cad_exporter import CADExporter
 from dataclasses import asdict
 
@@ -28,17 +27,9 @@ class ProfessionalOutputGenerator:
     """
     
     def __init__(self, config_path: Optional[Path] = None):
-        # Default to config.json in current directory or backend directory
+        # Default to config.json in current directory
         if config_path is None:
-            # Try current directory first, then backend directory
-            possible_paths = [Path('config.json'), Path('backend/config.json'), Path('autohvac-app/backend/config.json')]
-            config_path = None
-            for path in possible_paths:
-                if path.exists():
-                    config_path = path
-                    break
-            if config_path is None:
-                config_path = Path('config.json')  # Use default location
+            config_path = Path('config.json')
         self.config = self._load_config(config_path)
         self.setup_components()
     
@@ -49,6 +40,11 @@ class ProfessionalOutputGenerator:
             "company_name": "AutoHVAC Pro",
             "company_tagline": "Professional HVAC Analysis & Design",
             "logo_path": "",
+            "ai_gap_filling": {
+                "enabled": True,
+                "max_cost_per_blueprint": 0.50,
+                "confidence_threshold": 0.90
+            },
             "output_settings": {
                 "include_calculations": True,
                 "include_cad_export": True,
@@ -85,9 +81,16 @@ class ProfessionalOutputGenerator:
         """Initialize processing components"""
         self.blueprint_processor = EnhancedBlueprintProcessor()
         
+        # Pass API key to AI gap filler if available
+        api_key = self.config.get('openai_api_key', '')
+        if self.config['ai_gap_filling']['enabled'] and api_key:
+            self.ai_gap_filler = AIGapFiller(api_key=api_key)
+        else:
+            self.ai_gap_filler = AIGapFiller() if self.config['ai_gap_filling']['enabled'] else None
+            
         self.cad_exporter = CADExporter()
     
-    def generate_complete_analysis(self, blueprint_path: Path, output_dir: Optional[Path] = None) -> Dict[str, Any]:
+    async def generate_complete_analysis(self, blueprint_path: Path, output_dir: Optional[Path] = None) -> Dict[str, Any]:
         """
         Main function: Generate complete professional analysis package
         """
@@ -104,18 +107,23 @@ class ProfessionalOutputGenerator:
         # Step 1: Extract blueprint data
         extraction_result = self.blueprint_processor.process_blueprint(blueprint_path)
         
-        # Step 2: Calculate Manual J loads
+        # Step 2: Fill gaps with AI if needed
+        if (self.ai_gap_filler and 
+            extraction_result.overall_confidence < self.config['ai_gap_filling']['confidence_threshold']):
+            extraction_result = self.ai_gap_filler.fill_gaps(extraction_result, blueprint_path)
+        
+        # Step 3: Calculate Manual J loads
         manual_j_data = self._calculate_manual_j(extraction_result)
         
-        # Step 3: Design HVAC system
+        # Step 4: Design HVAC system
         hvac_design = self._design_hvac_system(manual_j_data, extraction_result)
         
-        # Step 4: Generate all deliverables
-        deliverables = self._generate_deliverables(
+        # Step 5: Generate all deliverables
+        deliverables = await self._generate_deliverables(
             extraction_result, manual_j_data, hvac_design, output_dir, project_name
         )
         
-        # Step 5: Create summary package
+        # Step 6: Create summary package
         summary = self._create_project_summary(extraction_result, manual_j_data, hvac_design, deliverables)
         
         logger.info(f"✅ Analysis complete! {len(deliverables)} files generated")
@@ -191,20 +199,15 @@ class ProfessionalOutputGenerator:
         summer_temp_diff = climate_zone['design_temperatures']['summer_dry'] - 75
         winter_temp_diff = 70 - climate_zone['design_temperatures']['winter_dry']
         
-        # Wall loads - estimate wall area based on room perimeter
-        # Estimate perimeter assuming square room, then adjust for exterior walls
-        estimated_perimeter = 4 * (room.area ** 0.5)  # Perimeter of square room
-        exterior_wall_length = estimated_perimeter * (room.exterior_walls / 4)  # Proportion based on exterior walls
-        wall_area = exterior_wall_length * room.ceiling_height
-        
-        # Apply heat transfer coefficients (BTU/hr-ft²-°F) 
-        wall_cooling = wall_area * summer_temp_diff * (1.0 / extraction.insulation.wall_r_value)
-        wall_heating = wall_area * winter_temp_diff * (1.0 / extraction.insulation.wall_r_value)
+        # Wall loads
+        wall_area = room.exterior_walls * room.ceiling_height * (room.area ** 0.5) * 0.8
+        wall_cooling = (wall_area * summer_temp_diff) / extraction.insulation.wall_r_value
+        wall_heating = (wall_area * winter_temp_diff) / extraction.insulation.wall_r_value
         
         # Ceiling loads (if top floor)
         ceiling_area = room.area if room.floor_type == 'upper' else 0
-        ceiling_cooling = ceiling_area * summer_temp_diff * 1.3 * (1.0 / extraction.insulation.ceiling_r_value)
-        ceiling_heating = ceiling_area * winter_temp_diff * (1.0 / extraction.insulation.ceiling_r_value)
+        ceiling_cooling = (ceiling_area * summer_temp_diff * 1.3) / extraction.insulation.ceiling_r_value
+        ceiling_heating = (ceiling_area * winter_temp_diff) / extraction.insulation.ceiling_r_value
         
         # Window loads
         window_area = room.window_area if room.window_area > 0 else room.area * 0.15 * room.exterior_walls
@@ -230,16 +233,6 @@ class ProfessionalOutputGenerator:
         cooling_load = (wall_cooling + ceiling_cooling + window_cooling + 
                        solar_gain + internal_gains + infiltration_cooling + latent_load)
         heating_load = (wall_heating + ceiling_heating + window_heating + infiltration_heating)
-        
-        # Sanity check - typical residential loads are 15-35 BTU/hr per sq ft
-        cooling_per_sqft = cooling_load / room.area if room.area > 0 else 0
-        heating_per_sqft = heating_load / room.area if room.area > 0 else 0
-        
-        # Cap unrealistic values (likely calculation errors)
-        if cooling_per_sqft > 50:  # Way too high
-            cooling_load = room.area * 30  # Use reasonable default
-        if heating_per_sqft > 60:  # Way too high
-            heating_load = room.area * 35  # Use reasonable default
         
         # Apply room-specific factors
         if 'garage' in room.name.lower():
@@ -385,7 +378,7 @@ class ProfessionalOutputGenerator:
             "total": total_cost
         }
     
-    def _generate_deliverables(self, extraction: ExtractionResult, manual_j: Dict[str, Any], 
+    async def _generate_deliverables(self, extraction: ExtractionResult, manual_j: Dict[str, Any], 
                                    hvac_design: Dict[str, Any], output_dir: Path, project_name: str) -> List[str]:
         """Generate all professional deliverables"""
         
@@ -429,7 +422,7 @@ class ProfessionalOutputGenerator:
             try:
                 # Convert Room objects to dictionaries for CAD export
                 rooms_data = [asdict(room) for room in extraction.rooms]
-                self.cad_exporter.export_dxf(
+                await self.cad_exporter.export_dxf(
                     blueprint_data={"rooms": rooms_data},
                     hvac_layout={"systems": [hvac_design]},
                     output_path=dxf_path,
@@ -446,7 +439,7 @@ class ProfessionalOutputGenerator:
         try:
             # Convert Room objects to dictionaries for SVG export
             rooms_data = [asdict(room) for room in extraction.rooms]
-            self.cad_exporter.export_svg(
+            await self.cad_exporter.export_svg(
                 blueprint_data={"rooms": rooms_data},
                 output_path=svg_path,
                 layers=["hvac", "equipment", "labels"]
@@ -570,42 +563,6 @@ www.autohvac.pro
             "generated_by": self.config['company_name'],
             "generation_time": datetime.now().isoformat()
         }
-
-    def generate_outputs(self, extraction_result: ExtractionResult, project_info: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Synchronous wrapper for generate_complete_analysis - for API compatibility
-        """
-        try:
-            logger.info("🔧 Processing extraction result...")
-            
-            # Step 1: Calculate Manual J loads
-            manual_j_data = self._calculate_manual_j(extraction_result)
-            
-            # Step 2: Design HVAC system
-            hvac_design = self._design_hvac_system(manual_j_data, extraction_result)
-            
-            return {
-                'extraction_result': extraction_result,
-                'manual_j_calculation': manual_j_data,
-                'hvac_system_design': hvac_design,
-                'professional_deliverables': {
-                    'manual_j_report': manual_j_data,
-                    'hvac_design': hvac_design,
-                    'executive_summary': self._generate_executive_summary(extraction_result, manual_j_data, hvac_design),
-                    'analysis_confidence': extraction_result.overall_confidence
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in generate_outputs: {e}")
-            # Return minimal structure for error cases
-            return {
-                'extraction_result': extraction_result,
-                'manual_j_calculation': {},
-                'hvac_system_design': {},
-                'professional_deliverables': {},
-                'error': str(e)
-            }
 
 # Example usage and testing
 async def main():

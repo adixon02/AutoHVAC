@@ -21,34 +21,14 @@ from dataclasses import asdict
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Add root directory to path to import our processors
-# This handles both local development and Render deployment paths
-current_dir = Path(__file__).parent
-root_dir = current_dir.parent
-sys.path.insert(0, str(root_dir))
-
+# Import processors from local directory
 try:
     from enhanced_blueprint_processor import EnhancedBlueprintProcessor as BlueprintProcessor
     from professional_output_generator import ProfessionalOutputGenerator
     logger.info("✅ Successfully imported core modules")
 except ImportError as e:
     logger.error(f"❌ Import error: {e}")
-    # Fallback for deployment environments where files might be in different locations
-    import os
-    for possible_path in [current_dir, root_dir, Path("/app")]:
-        logger.info(f"🔍 Checking path: {possible_path}")
-        if (possible_path / "enhanced_blueprint_processor.py").exists():
-            sys.path.insert(0, str(possible_path))
-            logger.info(f"✅ Added path: {possible_path}")
-            break
-    
-    try:
-        from enhanced_blueprint_processor import EnhancedBlueprintProcessor as BlueprintProcessor
-        from professional_output_generator import ProfessionalOutputGenerator
-        logger.info("✅ Successfully imported core modules (fallback)")
-    except ImportError as e2:
-        logger.error(f"❌ Critical import failure: {e2}")
-        raise
+    raise
 
 app = FastAPI(
     title="AutoHVAC Backend API",
