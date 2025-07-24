@@ -7,29 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 
 # Import API routers
-try:
-    from api.climate import router as climate_router
-    climate_router_loaded = True
-except Exception as e:
-    print(f"Failed to import climate router: {e}")
-    climate_router = None
-    climate_router_loaded = False
-
-try:
-    from api.calculations import router as calculations_router
-    calculations_router_loaded = True
-except Exception as e:
-    print(f"Failed to import calculations router: {e}")
-    calculations_router = None
-    calculations_router_loaded = False
-
-try:
-    from api.blueprint import router as blueprint_router
-    blueprint_router_loaded = True
-except Exception as e:
-    print(f"Failed to import blueprint router: {e}")
-    blueprint_router = None
-    blueprint_router_loaded = False
+from api.climate import router as climate_router
+from api.calculations import router as calculations_router
+from api.blueprint import router as blueprint_router
 
 # Configure logging
 logging.basicConfig(
@@ -61,31 +41,13 @@ app.add_middleware(
 )
 
 # Include API routers  
-if climate_router_loaded:
-    app.include_router(climate_router)
-    print("✅ Climate router included")
-else:
-    print("❌ Climate router not included")
-
-if calculations_router_loaded:
-    app.include_router(calculations_router)
-    print("✅ Calculations router included")
-else:
-    print("❌ Calculations router not included")
-
-if blueprint_router_loaded:
-    app.include_router(blueprint_router)
-    print("✅ Blueprint router included")
-else:
-    print("❌ Blueprint router not included")
+app.include_router(climate_router)
+app.include_router(calculations_router)
+app.include_router(blueprint_router)
 
 # Add test data loading endpoint for development
-try:
-    from add_test_endpoint import test_router
-    app.include_router(test_router)
-    print("✅ Test router included")
-except Exception as e:
-    print(f"❌ Test router failed: {e}")
+from add_test_endpoint import test_router
+app.include_router(test_router)
 
 @app.get("/")
 async def root():
