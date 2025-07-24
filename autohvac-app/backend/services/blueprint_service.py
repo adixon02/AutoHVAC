@@ -353,9 +353,9 @@ class BlueprintService:
         Generate professional deliverables
         """
         try:
-            # Create output directory
+            # Create output directory with parents
             output_dir = self.outputs_dir / result.job_id
-            output_dir.mkdir(exist_ok=True)
+            output_dir.mkdir(parents=True, exist_ok=True)
             
             # Generate using the existing professional output generator
             analysis = self.output_generator.generate_complete_analysis(
@@ -411,7 +411,7 @@ class BlueprintService:
         Cache professional analysis to disk
         """
         output_dir = self.outputs_dir / job_id
-        output_dir.mkdir(exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
         
         analysis_file = output_dir / "professional_analysis.json"
         with open(analysis_file, 'w') as f:
