@@ -3,7 +3,7 @@
 Simplified AutoHVAC Backend - Focus on core blueprint upload
 """
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from typing import Dict, Any, Optional
@@ -57,8 +57,10 @@ app.add_middleware(
 # Create directories
 UPLOAD_DIR = Path("uploads")
 PROCESSED_DIR = Path("processed")
+OUTPUTS_DIR = Path("outputs")
 UPLOAD_DIR.mkdir(exist_ok=True)
 PROCESSED_DIR.mkdir(exist_ok=True)
+OUTPUTS_DIR.mkdir(exist_ok=True)
 
 @app.get("/")
 async def root():
@@ -79,6 +81,7 @@ async def health_check():
 
 @app.post("/api/blueprint/upload")
 async def upload_blueprint(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     zip_code: Optional[str] = Form(None),
     project_name: Optional[str] = Form(None),
@@ -111,58 +114,34 @@ async def upload_blueprint(
         logger.error(f"Failed to save file: {e}")
         raise HTTPException(status_code=500, detail="Failed to save uploaded file")
     
-    # Process blueprint with actual analysis
-    try:
-        processor = BlueprintProcessor()
-        output_generator = ProfessionalOutputGenerator()
-        
-        # Extract data from PDF
-        extraction_result = processor.process_blueprint(Path(file_path))
-        
-        # Generate professional analysis
-        professional_outputs = await output_generator.generate_complete_analysis(
-            blueprint_path=Path(file_path),
-            output_dir=Path("outputs") / job_id
-        )
-        
-        result = {
-            "job_id": job_id,
-            "filename": file.filename,
-            "file_size": len(content),
-            "upload_time": timestamp,
-            "status": "processing",
-            "message": "Blueprint uploaded successfully. Analysis started.",
-            "project_info": {
-                "zip_code": zip_code,
-                "project_name": project_name,
-                "project_type": project_type,
-                "construction_type": construction_type
-            },
-            "extraction_result": asdict(extraction_result),
-            "professional_outputs": professional_outputs
-        }
-    except Exception as e:
-        logger.error(f"Blueprint processing failed: {e}")
-        import traceback
-        logger.error(f"Full traceback: {traceback.format_exc()}")
-        
-        # Return error status instead of hiding the failure
-        result = {
-            "job_id": job_id,
-            "filename": file.filename,
-            "file_size": len(content),
-            "upload_time": timestamp,
-            "status": "failed",
-            "message": f"Blueprint processing failed: {str(e)}",
-            "project_info": {
-                "zip_code": zip_code,
-                "project_name": project_name,
-                "project_type": project_type,
-                "construction_type": construction_type
-            },
-            "error": str(e),
-            "error_type": type(e).__name__
-        }
+    # Create project info dict
+    project_info = {
+        "zip_code": zip_code,
+        "project_name": project_name,
+        "project_type": project_type,
+        "construction_type": construction_type
+    }
+    
+    # Add background processing task
+    background_tasks.add_task(
+        process_blueprint_background, 
+        job_id, 
+        file_path, 
+        file.filename,
+        project_info
+    )
+    
+    # Return immediately with processing status
+    result = {
+        "job_id": job_id,
+        "filename": file.filename,
+        "file_size": len(content),
+        "upload_time": timestamp,
+        "status": "processing",
+        "message": "Blueprint uploaded successfully. Professional analysis started.",
+        "estimated_completion": "2-3 minutes",
+        "project_info": project_info
+    }
     
     # Save processing result with error handling
     result_file = PROCESSED_DIR / f"{job_id}.json"
@@ -282,6 +261,81 @@ async def get_analysis_results(job_id: str) -> Dict[str, Any]:
                     "warning": "Analysis incomplete - partial data available"
                 }
             }
+
+async def process_blueprint_background(
+    job_id: str, 
+    file_path: Path, 
+    original_filename: str,
+    project_info: Dict[str, Any]
+):
+    """
+    Background task to process blueprint using our professional output generator
+    """
+    result = {
+        "job_id": job_id,
+        "status": "processing",
+        "timestamp": datetime.now().isoformat(),
+        "original_filename": original_filename,
+        "project_info": project_info
+    }
+    
+    try:
+        # Initialize processors
+        processor = BlueprintProcessor()
+        output_generator = ProfessionalOutputGenerator()
+        
+        # Create output directory
+        output_dir = Path("outputs") / job_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"Starting background processing for job {job_id}")
+        
+        # Extract data from PDF
+        extraction_result = processor.process_blueprint(file_path)
+        
+        # Generate professional analysis
+        professional_outputs = await output_generator.generate_complete_analysis(
+            blueprint_path=file_path,
+            output_dir=output_dir,
+            zip_code=project_info.get("zip_code"),
+            project_name=project_info.get("project_name")
+        )
+        
+        # Prepare result with all the professional data
+        result.update({
+            "status": "completed",
+            "completion_time": datetime.now().isoformat(),
+            "extraction_result": asdict(extraction_result),
+            "professional_outputs": professional_outputs,
+            "analysis_summary": professional_outputs,
+            "deliverables": {
+                "files_generated": len(professional_outputs.get("files", [])),
+                "file_list": professional_outputs.get("files", [])
+            }
+        })
+        
+        logger.info(f"✅ Background processing completed for job {job_id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Background processing failed for job {job_id}: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        
+        result.update({
+            "status": "failed",
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "error_time": datetime.now().isoformat()
+        })
+    
+    # Save result
+    result_file = PROCESSED_DIR / f"{job_id}.json"
+    try:
+        with open(result_file, "w") as f:
+            json.dump(result, f, indent=2)
+        logger.info(f"✅ Saved processing result: {result_file}")
+    except Exception as json_error:
+        logger.error(f"❌ Failed to save JSON result: {json_error}")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
