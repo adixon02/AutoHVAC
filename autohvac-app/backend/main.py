@@ -122,7 +122,7 @@ async def upload_blueprint(
         # Generate professional analysis
         professional_outputs = await output_generator.generate_complete_analysis(
             blueprint_path=Path(file_path),
-            output_dir=Path("outputs") / project_id
+            output_dir=Path("outputs") / job_id
         )
         
         result = {
