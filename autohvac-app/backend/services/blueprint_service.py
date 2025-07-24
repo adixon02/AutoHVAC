@@ -340,15 +340,21 @@ class BlueprintService:
                 logger.info(f"Professional outputs completed for job {job_id}")
             
             # Cache the result
+            logger.info(f"Caching result for job {job_id}")
             await self._cache_result(result)
+            logger.info(f"Result cached for job {job_id}")
             
             # Update progress to 100% before completion
             if job_id in self.active_jobs:
+                logger.info(f"Setting progress to 100% for job {job_id}")
                 self.active_jobs[job_id]['progress'] = 100
                 self.active_jobs[job_id]['status'] = ProcessingStatus.COMPLETED
+                logger.info(f"Job {job_id} marked as completed with 100% progress")
             
             # Give frontend time to poll final status before moving to completed
+            logger.info(f"Waiting 1 second before finalizing job {job_id}")
             await asyncio.sleep(1)
+            logger.info(f"Wait complete for job {job_id}")
             
             # Move to completed jobs
             self.completed_jobs[job_id] = result
