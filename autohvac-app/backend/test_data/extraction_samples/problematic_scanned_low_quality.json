@@ -1,0 +1,194 @@
+{
+  "extraction_id": "test-problematic-scanned",
+  "job_id": "test-job-problematic", 
+  "pdf_metadata": {
+    "filename": "old_scanned_blueprint.pdf",
+    "original_filename": "old_scanned_blueprint.pdf",
+    "file_size_bytes": 4096000,
+    "file_size_mb": 3.91,
+    "page_count": 5,
+    "uploaded_at": "2025-01-24T12:00:00Z",
+    "has_text_layer": false,
+    "is_scanned": true
+  },
+  "raw_text": "RESIDENTIAL CONSTRUCTION\nSome partial text extracted from OCR...\n1500 SQUARE FEET?\nWALL INSUL... R-??\nCEILING... \nWINDOWS: DOUBL...\n\nROOM INFO:\nLIVING... 250\nKITCH... 150\nBED... unclear\nBATH...",
+  "raw_text_by_page": [
+    "RESIDENTIAL CONSTRUCTION",
+    "Some partial text extracted from OCR...\n1500 SQUARE FEET?",
+    "WALL INSUL... R-??\nCEILING...",
+    "WINDOWS: DOUBL...",
+    "ROOM INFO:\nLIVING... 250\nKITCH... 150\nBED... unclear\nBATH..."
+  ],
+  "regex_extraction": {
+    "floor_area_ft2": 1500,
+    "wall_insulation": null,
+    "ceiling_insulation": null,
+    "window_schedule": null,
+    "air_tightness": null,
+    "foundation_type": null,
+    "orientation": null,
+    "room_dimensions": [
+      {
+        "name": "Living Room",
+        "length_ft": null,
+        "width_ft": null,
+        "area_ft2": 250,
+        "perimeter_ft": null
+      },
+      {
+        "name": "Kitchen",
+        "length_ft": null,
+        "width_ft": null,
+        "area_ft2": 150,
+        "perimeter_ft": null
+      }
+    ],
+    "patterns_matched": {
+      "floor_area": ["1500 SQUARE FEET?"],
+      "room_areas": ["250", "150"]
+    },
+    "confidence_scores": {
+      "floor_area_ft2": 0.60,
+      "wall_insulation": 0.0,
+      "ceiling_insulation": 0.0,
+      "window_schedule": 0.0,
+      "air_tightness": 0.0,
+      "foundation_type": 0.0,
+      "room_dimensions": 0.30
+    },
+    "extraction_notes": [
+      "OCR text quality very poor",
+      "Most building envelope data unreadable",
+      "Only partial room areas extracted",
+      "Floor area extraction uncertain"
+    ]
+  },
+  "ai_extraction": {
+    "room_layouts": [
+      {
+        "name": "Living Room",
+        "position": {"x": 0, "y": 0},
+        "orientation": "unknown",
+        "adjacencies": ["Kitchen"],
+        "exterior_walls": ["south"]
+      },
+      {
+        "name": "Kitchen", 
+        "position": {"x": 250, "y": 0},
+        "orientation": "unknown",
+        "adjacencies": ["Living Room"],
+        "exterior_walls": ["north"]
+      }
+    ],
+    "window_orientations": {
+      "south": ["Living Room"],
+      "north": ["Kitchen"]
+    },
+    "building_envelope": {
+      "wall_construction": "unclear from image",
+      "roof_type": "appears to be gable",
+      "foundation": "cannot determine",
+      "thermal_bridge_details": "not visible"
+    },
+    "architectural_details": {
+      "ceiling_heights": {
+        "main_floor": null,
+        "vaulted_areas": null
+      },
+      "floor_plan_type": "unknown",
+      "structural_system": "unknown"
+    },
+    "hvac_existing": {
+      "equipment_detected": false,
+      "ductwork_visible": false,
+      "notes": "Image quality too poor to determine"
+    },
+    "model_used": "gpt-4-vision-preview",
+    "ai_confidence": 0.25,
+    "processing_tokens": 850,
+    "api_cost_usd": 0.03,
+    "visual_analysis_notes": [
+      "Scanned image with poor quality",
+      "Many details illegible or unclear", 
+      "Architectural drawings partially visible but degraded",
+      "Recommend rescanning or obtaining digital original"
+    ],
+    "room_count_detected": 2,
+    "floor_plan_type": "unknown",
+    "architectural_style": "unknown"
+  },
+  "processing_metadata": {
+    "extraction_id": "test-problematic-scanned",
+    "job_id": "test-job-problematic",
+    "extraction_timestamp": "2025-01-24T12:08:00Z",
+    "processing_duration_ms": 12800,
+    "extraction_version": "1.2.0",
+    "extraction_method": "regex_and_ai_combined",
+    "errors": [
+      "OCR text quality insufficient for reliable extraction",
+      "Multiple regex patterns failed to match"
+    ],
+    "warnings": [
+      "Floor area extraction has low confidence",
+      "Building envelope data missing",
+      "Room data incomplete",
+      "AI analysis hampered by image quality",
+      "Recommend manual review of all extracted values"
+    ],
+    "text_extraction_ms": 2500,
+    "regex_processing_ms": 1800,
+    "ai_processing_ms": 8500,
+    "server_version": "1.0.0",
+    "python_version": "3.11.5"
+  },
+  "final_building_data": {
+    "floor_area_ft2": 1500,
+    "wall_insulation": {"effective_r": 19},
+    "ceiling_insulation": 38,
+    "window_schedule": {"u_value": 0.35, "shgc": 0.70},
+    "air_tightness": 7.0,
+    "foundation_type": "slab"
+  },
+  "final_room_data": [
+    {
+      "name": "Living Room",
+      "area_ft2": 250,
+      "ceiling_height": 9.0,
+      "window_area": 30,
+      "exterior_walls": 2,
+      "window_orientations": ["south"]
+    },
+    {
+      "name": "Kitchen",
+      "area_ft2": 150,
+      "ceiling_height": 9.0,
+      "window_area": 18,
+      "exterior_walls": 1,
+      "window_orientations": ["north"]
+    },
+    {
+      "name": "Bedroom",
+      "area_ft2": 200,
+      "ceiling_height": 9.0,
+      "window_area": 24,
+      "exterior_walls": 1,
+      "window_orientations": ["east"]
+    },
+    {
+      "name": "Bathroom",
+      "area_ft2": 100,
+      "ceiling_height": 9.0,
+      "window_area": 8,
+      "exterior_walls": 1,
+      "window_orientations": ["north"]
+    },
+    {
+      "name": "Utility/Hall",
+      "area_ft2": 800,
+      "ceiling_height": 9.0,
+      "window_area": 0,
+      "exterior_walls": 0,
+      "window_orientations": []
+    }
+  ]
+}

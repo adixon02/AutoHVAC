@@ -1,0 +1,205 @@
+{
+  "extraction_id": "test-residential-900-minimal",
+  "job_id": "frontend-test-900",
+  "pdf_metadata": {
+    "filename": "small_home_900sqft.pdf",
+    "original_filename": "small_home_900sqft.pdf",
+    "file_size_bytes": 1024000,
+    "file_size_mb": 0.98,
+    "page_count": 2,
+    "uploaded_at": "2025-01-24T11:00:00+00:00",
+    "pdf_version": null,
+    "has_text_layer": true,
+    "is_scanned": false
+  },
+  "raw_text": "SMALL HOME PLAN\nFloor Area: 900 sq ft\nWalls: R-13 insulation\nCeiling: Standard R-30\nWindows: Double pane\n\nRooms:\nLiving/Kitchen: 24' x 20' (480 sq ft)\nBedroom: 12' x 12' (144 sq ft) \nBedroom 2: 12' x 10' (120 sq ft)\nBathroom: 8' x 10' (80 sq ft)\nUtility: 6' x 8' (48 sq ft)\nHall: 28 sq ft",
+  "raw_text_by_page": [
+    "SMALL HOME PLAN\nFloor Area: 900 sq ft\nWalls: R-13 insulation\nCeiling: Standard R-30\nWindows: Double pane",
+    "Rooms:\nLiving/Kitchen: 24' x 20' (480 sq ft)\nBedroom: 12' x 12' (144 sq ft)\nBedroom 2: 12' x 10' (120 sq ft)\nBathroom: 8' x 10' (80 sq ft)\nUtility: 6' x 8' (48 sq ft)\nHall: 28 sq ft"
+  ],
+  "regex_extraction": {
+    "floor_area_ft2": 900.0,
+    "wall_insulation": {
+      "cavity": 13.0,
+      "continuous": 0.0,
+      "effective_r": 13.0
+    },
+    "ceiling_insulation": 30.0,
+    "window_schedule": {
+      "u_value": 0.35,
+      "shgc": 0.7,
+      "total_area": 108
+    },
+    "air_tightness": 7.0,
+    "foundation_type": "slab",
+    "orientation": null,
+    "room_dimensions": [
+      {
+        "name": "Living/Kitchen",
+        "length_ft": 24,
+        "width_ft": 20,
+        "area_ft2": 480,
+        "perimeter_ft": 88
+      },
+      {
+        "name": "Bedroom",
+        "length_ft": 12,
+        "width_ft": 12,
+        "area_ft2": 144,
+        "perimeter_ft": 48
+      },
+      {
+        "name": "Bedroom 2",
+        "length_ft": 12,
+        "width_ft": 10,
+        "area_ft2": 120,
+        "perimeter_ft": 44
+      },
+      {
+        "name": "Bathroom",
+        "length_ft": 8,
+        "width_ft": 10,
+        "area_ft2": 80,
+        "perimeter_ft": 36
+      },
+      {
+        "name": "Utility",
+        "length_ft": 6,
+        "width_ft": 8,
+        "area_ft2": 48,
+        "perimeter_ft": 28
+      },
+      {
+        "name": "Hall",
+        "length_ft": 14,
+        "width_ft": 2,
+        "area_ft2": 28,
+        "perimeter_ft": 32
+      }
+    ],
+    "patterns_matched": {
+      "floor_area": [
+        "900 sq ft"
+      ],
+      "r_value": [
+        "R-13",
+        "R-30"
+      ],
+      "room_dimensions": [
+        "24' x 20'",
+        "12' x 12'",
+        "12' x 10'",
+        "8' x 10'",
+        "6' x 8'"
+      ]
+    },
+    "confidence_scores": {
+      "floor_area_ft2": 0.95,
+      "wall_insulation": 0.85,
+      "ceiling_insulation": 0.8,
+      "window_schedule": 0.6,
+      "air_tightness": 0.5,
+      "foundation_type": 0.6,
+      "room_dimensions": 0.9
+    },
+    "extraction_notes": [
+      "Basic insulation values found",
+      "Window specifications incomplete - used defaults",
+      "Air tightness estimated based on construction type",
+      "Building orientation not specified"
+    ]
+  },
+  "ai_extraction": null,
+  "processing_metadata": {
+    "extraction_id": "test-residential-900-minimal",
+    "job_id": "frontend-test-900",
+    "extraction_timestamp": "2025-01-24T11:05:00+00:00",
+    "processing_duration_ms": 3200,
+    "extraction_version": "1.2.0",
+    "extraction_method": "regex_only",
+    "errors": [
+      "AI analysis failed: No API key configured"
+    ],
+    "warnings": [
+      "Window specifications incomplete",
+      "Air tightness value estimated",
+      "Building orientation unknown"
+    ],
+    "text_extraction_ms": 120,
+    "regex_processing_ms": 3080,
+    "ai_processing_ms": null,
+    "server_version": "1.0.0",
+    "python_version": "3.11.5"
+  },
+  "final_building_data": {
+    "floor_area_ft2": 900,
+    "wall_insulation": {
+      "effective_r": 13
+    },
+    "ceiling_insulation": 30,
+    "window_schedule": {
+      "u_value": 0.35,
+      "shgc": 0.7
+    },
+    "air_tightness": 7.0,
+    "foundation_type": "slab"
+  },
+  "final_room_data": [
+    {
+      "name": "Living/Kitchen",
+      "area_ft2": 480,
+      "ceiling_height": 8.0,
+      "window_area": 58,
+      "exterior_walls": 2,
+      "window_orientations": [
+        "south"
+      ]
+    },
+    {
+      "name": "Bedroom",
+      "area_ft2": 144,
+      "ceiling_height": 8.0,
+      "window_area": 17,
+      "exterior_walls": 2,
+      "window_orientations": [
+        "east"
+      ]
+    },
+    {
+      "name": "Bedroom 2",
+      "area_ft2": 120,
+      "ceiling_height": 8.0,
+      "window_area": 14,
+      "exterior_walls": 1,
+      "window_orientations": [
+        "west"
+      ]
+    },
+    {
+      "name": "Bathroom",
+      "area_ft2": 80,
+      "ceiling_height": 8.0,
+      "window_area": 8,
+      "exterior_walls": 1,
+      "window_orientations": [
+        "north"
+      ]
+    },
+    {
+      "name": "Utility",
+      "area_ft2": 48,
+      "ceiling_height": 8.0,
+      "window_area": 0,
+      "exterior_walls": 1,
+      "window_orientations": []
+    },
+    {
+      "name": "Hall",
+      "area_ft2": 28,
+      "ceiling_height": 8.0,
+      "window_area": 0,
+      "exterior_walls": 0,
+      "window_orientations": []
+    }
+  ]
+}

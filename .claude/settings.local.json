@@ -12,7 +12,26 @@
       "Bash(git push:*)",
       "Bash(find:*)",
       "Bash(ls:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(python3:*)",
+      "Bash(source:*)",
+      "Bash(pip install:*)",
+      "Bash(curl:*)",
+      "Bash(cat:*)",
+      "Bash(mv:*)",
+      "Bash(rm:*)",
+      "Bash(cp:*)",
+      "Bash(npx create-next-app:*)",
+      "Bash(npx tailwindcss:*)",
+      "Bash(sqlite3:*)",
+      "Bash(python test:*)",
+      "Bash(/Library/Developer/CommandLineTools/usr/bin/python3:*)",
+      "WebFetch(domain:localhost)",
+      "Bash(npm run lint)",
+      "Bash(kill:*)",
+      "Bash(uvicorn:*)",
+      "Bash(python -m pytest -v)",
+      "Bash(python:*)"
     ],
     "deny": []
   }

@@ -1,0 +1,9 @@
+{
+  "buildCommand": "cd autohvac-app/frontend && npm run build",
+  "outputDirectory": "autohvac-app/frontend/.next",
+  "installCommand": "cd autohvac-app/frontend && npm install",
+  "framework": "nextjs",
+  "env": {
+    "NEXT_PUBLIC_API_URL": "https://autohvac-backend.onrender.com"
+  }
+}

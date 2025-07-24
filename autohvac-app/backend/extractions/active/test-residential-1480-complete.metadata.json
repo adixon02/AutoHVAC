@@ -1,0 +1,11 @@
+{
+  "extraction_id": "test-residential-1480-complete",
+  "job_id": "frontend-test-1480",
+  "storage_path": "extractions/active/frontend-test-1480_extraction_test-residential-1480-complete.json",
+  "file_size_bytes": 8300,
+  "created_at": "2025-07-24T13:47:44.824471",
+  "last_accessed": "2025-07-24T13:49:57.131798",
+  "access_count": 2,
+  "retention_expires_at": "2025-08-23T13:47:44.824440",
+  "is_compressed": false
+}
