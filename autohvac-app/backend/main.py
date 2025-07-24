@@ -31,9 +31,9 @@ app.add_middleware(
         "http://localhost:3000", 
         "http://localhost:3001", 
         "https://autohvac.com",
+        "https://auto-hvac.vercel.app",
         "https://auto-hvac-oh1m0an31-hello-austinjdixons-projects.vercel.app",
-        "https://auto-hvac-2nwdlrsjh-hello-austinjdixons-projects.vercel.app",
-        "https://*.vercel.app"
+        "https://auto-hvac-2nwdlrsjh-hello-austinjdixons-projects.vercel.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],
