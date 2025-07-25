@@ -23,7 +23,7 @@ class ClimateServiceImpl {
   private baseUrl: string;
 
   constructor() {
-    this.baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    this.baseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://autohvac.onrender.com';
   }
 
   /**
