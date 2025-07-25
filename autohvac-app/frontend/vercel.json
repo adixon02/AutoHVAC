@@ -4,6 +4,7 @@
   "framework": "nextjs",
   "installCommand": "npm install",
   "env": {
-    "NEXT_PUBLIC_API_URL": "https://autohvac-api.onrender.com"
+    "NEXT_PUBLIC_API_URL": "https://autohvac.onrender.com",
+    "NEXT_PUBLIC_BACKEND_URL": "https://autohvac.onrender.com"
   }
 }
