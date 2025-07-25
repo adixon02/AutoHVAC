@@ -1,134 +1,199 @@
 """
-AutoHVAC V2 Backend - Hardened for Large PDF Processing
-Rock-solid FastAPI backend with async processing and enhanced CORS
+AutoHVAC V2 Backend - Clean FastAPI implementation
 """
-import os
-import re
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
-import logging
 from contextlib import asynccontextmanager
+import time
+import uuid
+import re
 
-# Import configuration
-from app.config import config
+from .core import settings, setup_logging, get_logger, create_http_exception
+from .routes import blueprint, job, health, climate
 
-# Import API routers
-from api.climate import router as climate_router
-from api.calculations import router as calculations_router
-from app.routes.upload import router as upload_router
 
-# In-memory job storage (Redis would be better for production)
-job_storage = {}
+# Setup logging
+setup_logging()
+logger = get_logger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan management"""
-    # Startup
-    os.makedirs(config.UPLOAD_DIR, exist_ok=True)
-    logging.info("AutoHVAC Backend started successfully")
-    
+    """Application lifespan manager"""
+    logger.info("AutoHVAC API V2 starting up...")
     yield
-    
-    # Shutdown
-    logging.info("AutoHVAC Backend shutting down")
+    logger.info("AutoHVAC API V2 shutting down...")
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
-# Create FastAPI app with redirect_slashes for trailing slash handling
+# Create FastAPI app
 app = FastAPI(
-    title="AutoHVAC API V2",
-    description="Professional HVAC load calculations and system recommendations - Hardened for large files",
-    version="2.0.0",
+    title=settings.app_name,
+    description="Professional HVAC load calculations and system recommendations",
+    version=settings.app_version,
     lifespan=lifespan,
     redirect_slashes=True
 )
 
-# Enhanced CORS middleware - MUST be first middleware
+
+# CORS middleware with dynamic origin validation
+def is_allowed_origin(origin: str) -> bool:
+    """Check if origin is allowed including wildcard subdomains"""
+    if origin in settings.allowed_origins:
+        return True
+    
+    # Check for auto-hvac.*.vercel.app pattern
+    if re.match(r"https://auto-hvac-.+\.vercel\.app$", origin):
+        return True
+        
+    return False
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.CORS_ORIGINS,
-    allow_origin_regex=config.CORS_ORIGIN_REGEX,
+    allow_origin_regex=r"https://auto-hvac-.*\.vercel\.app$",
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
-    max_age=600,  # Cache preflight for 10 minutes
 )
 
-# Global exception handler to ensure CORS headers on ALL responses
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Global exception: {exc}", exc_info=True)
+
+# Request ID middleware for tracking
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    """Add request ID to all requests for tracking"""
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
     
-    # Create JSON response with CORS headers
-    response = JSONResponse(
-        status_code=500,
-        content={"error": "Internal server error", "detail": str(exc)}
+    start_time = time.time()
+    
+    # Log request start
+    logger.info(
+        "Request started",
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "query": str(request.url.query) if request.url.query else None,
+            "user_agent": request.headers.get("user-agent"),
+            "origin": request.headers.get("origin")
+        }
     )
     
-    # Add CORS headers manually for error responses
-    origin = request.headers.get("origin")
-    if origin and config.is_allowed_origin(origin):
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "*"
+    response = await call_next(request)
+    
+    # Log request completion
+    duration_ms = (time.time() - start_time) * 1000
+    logger.info(
+        "Request completed",
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status_code": response.status_code,
+            "duration_ms": round(duration_ms, 2)
+        }
+    )
+    
+    # Add request ID to response headers
+    response.headers["X-Request-ID"] = request_id
     
     return response
 
-# Validation error handler with CORS
+
+# Global exception handlers
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTP exceptions with CORS headers"""
+    origin = request.headers.get("origin")
+    
+    response = JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail}
+    )
+    
+    # Add CORS headers for error responses
+    if origin and is_allowed_origin(origin):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    
+    return response
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    logger.warning(f"Validation error: {exc}")
+    """Handle request validation errors"""
+    origin = request.headers.get("origin")
     
     response = JSONResponse(
         status_code=422,
-        content={"error": "Validation error", "detail": exc.errors()}
+        content={
+            "detail": "Validation error",
+            "errors": exc.errors()
+        }
     )
     
     # Add CORS headers
-    origin = request.headers.get("origin")
-    if origin and config.is_allowed_origin(origin):
+    if origin and is_allowed_origin(origin):
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
     
     return response
 
-# Include API routers with configurable prefix
-app.include_router(climate_router, prefix=config.API_VERSION_PREFIX)
-app.include_router(calculations_router, prefix=config.API_VERSION_PREFIX)
-app.include_router(upload_router, prefix=config.API_VERSION_PREFIX, dependencies=[])
 
-# Health check endpoint for Render
-@app.get("/health")
-async def health_check():
-    """Lightweight health check for Render's probe"""
-    return {
-        "status": "healthy",
-        "version": "2.0.0",
-        "max_file_size_mb": config.MAX_FILE_SIZE_MB,
-        "upload_dir": config.UPLOAD_DIR
-    }
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all other exceptions"""
+    request_id = getattr(request.state, 'request_id', 'unknown')
+    
+    logger.error(
+        "Unhandled exception", 
+        extra={"request_id": request_id, "exception": str(exc)},
+        exc_info=True
+    )
+    
+    origin = request.headers.get("origin")
+    
+    response = JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "request_id": request_id
+        }
+    )
+    
+    # Add CORS headers
+    if origin and is_allowed_origin(origin):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    
+    return response
 
-# Root endpoint
+
+# Include routers with v2 prefix
+app.include_router(health.router, tags=["health"])
+app.include_router(blueprint.router, prefix="/api/v2/blueprint", tags=["blueprint"])
+app.include_router(job.router, prefix="/api/v2/job", tags=["jobs"])
+app.include_router(climate.router, prefix="/api/v2/climate", tags=["climate"])
+
+
 @app.get("/")
 async def root():
+    """Root endpoint"""
     return {
-        "message": "AutoHVAC API V2 - Hardened Backend", 
-        "status": "healthy",
-        "max_file_size_mb": config.MAX_FILE_SIZE_MB
+        "message": "AutoHVAC API V2 - Clean architecture",
+        "version": settings.app_version,
+        "status": "healthy"
     }
 
-# Make job_storage available to upload router
-app.state.job_storage = job_storage
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(
+        "app.main:app",
+        host=settings.host,
+        port=settings.port,
+        reload=settings.debug
+    )

@@ -1,0 +1,158 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-and-test:
+    name: Lint, Type Check, and Test
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: ./autohvac-app/backend
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: './autohvac-app/backend/requirements.txt'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Lint with flake8
+        run: |
+          # Stop the build if there are Python syntax errors or undefined names
+          flake8 app tests --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Exit-zero treats all errors as warnings. Line length set to 100 chars.
+          flake8 app tests --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
+      
+      - name: Sort imports with isort
+        run: |
+          isort --check-only --diff app tests
+      
+      - name: Type check with mypy
+        run: |
+          mypy app --ignore-missing-imports --no-strict-optional
+      
+      - name: Run tests with pytest
+        env:
+          REDIS_URL: redis://localhost:6379/0
+          ALLOWED_ORIGINS: http://localhost:3000
+        run: |
+          pytest --maxfail=1 --disable-warnings -v --cov=app --cov-report=xml
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./autohvac-app/backend/coverage.xml
+          flags: backend
+          name: backend-coverage
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: ./autohvac-app/backend
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install safety bandit
+      
+      - name: Check for known vulnerabilities with Safety
+        run: |
+          safety check --requirements requirements.txt
+      
+      - name: Security linting with Bandit
+        run: |
+          bandit -r app -f json -o bandit-report.json || true
+          bandit -r app
+
+  deploy:
+    name: Deploy to Render
+    runs-on: ubuntu-latest
+    needs: [lint-and-test, security-scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+      - name: Deploy to Render
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
+            -d '{"clearCache": false}'
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Wait for deployment
+        run: sleep 60
+      
+      - name: Test deployed API
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL || 'https://autohvac.onrender.com' }}
+        run: |
+          # Test health endpoint
+          response=$(curl -s -o /dev/null -w "%{http_code}" "$API_BASE_URL/health")
+          if [ "$response" != "200" ]; then
+            echo "Health check failed with status $response"
+            exit 1
+          fi
+          
+          # Test CORS preflight
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X OPTIONS \
+            -H "Origin: https://auto-hvac.vercel.app" \
+            -H "Access-Control-Request-Method: POST" \
+            "$API_BASE_URL/api/v2/blueprint/upload")
+          if [ "$response" != "204" ]; then
+            echo "CORS preflight failed with status $response"
+            exit 1
+          fi
+          
+          echo "✅ All integration tests passed"
