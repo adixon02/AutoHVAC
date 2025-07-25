@@ -5,7 +5,7 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 300
+    startCommand: uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --timeout-keep-alive 300
     healthCheckPath: /health
     envVars:
       - key: PORT
@@ -36,7 +36,7 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: celery -A app.tasks.worker worker --loglevel=info
+    startCommand: celery -A tasks.worker worker --loglevel=info
     envVars:
       - key: APP_NAME
         value: "AutoHVAC Worker V2"
