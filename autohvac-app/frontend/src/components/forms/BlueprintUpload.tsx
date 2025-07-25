@@ -65,21 +65,16 @@ const BlueprintUpload: React.FC<BlueprintUploadProps> = ({
       formData.append('building_type', projectData.buildingType);
       formData.append('construction_type', projectData.constructionType);
 
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      console.log('🚀 Uploading to V2 API:', `${apiUrl}/api/v2/blueprint/upload`);
+      console.log('🚀 Uploading via proxy to:', '/api/upload');
       
       // Add timeout to fetch request - increased for large files
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout for large files
       
-      const response = await fetch(`${apiUrl}/api/v2/blueprint/upload`, {
+      const response = await fetch('/api/upload', {
         method: 'POST',
         body: formData,
         signal: controller.signal,
-        headers: {
-          'Accept': 'application/json',
-        },
-        credentials: 'omit',
       }).finally(() => clearTimeout(timeoutId));
 
       if (!response.ok) {
@@ -126,7 +121,7 @@ const BlueprintUpload: React.FC<BlueprintUploadProps> = ({
         }
         
         try {
-          const statusResponse = await fetch(`${apiUrl}/api/v2/blueprint/status/${jobId}`);
+          const statusResponse = await fetch(`/api/status/${jobId}`);
           const statusData = await statusResponse.json();
 
           if (statusData.status === 'completed') {
@@ -135,7 +130,7 @@ const BlueprintUpload: React.FC<BlueprintUploadProps> = ({
             
             // Fetch the actual results to ensure they're ready
             try {
-              const resultsResponse = await fetch(`${apiUrl}/api/v2/blueprint/results/${jobId}`);
+              const resultsResponse = await fetch(`/api/results/${jobId}`);
               if (!resultsResponse.ok) {
                 throw new Error(`Results not ready: ${resultsResponse.status}`);
               }
