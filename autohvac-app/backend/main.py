@@ -45,9 +45,12 @@ app.include_router(climate_router)
 app.include_router(calculations_router)
 app.include_router(blueprint_router)
 
-# Add test data loading endpoint for development
-from add_test_endpoint import test_router
-app.include_router(test_router)
+# Add test data loading endpoint for development (optional)
+try:
+    from add_test_endpoint import test_router
+    app.include_router(test_router)
+except ImportError as e:
+    logger.warning(f"Test endpoint not available: {e}")
 
 @app.get("/")
 async def root():
