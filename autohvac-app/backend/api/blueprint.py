@@ -14,8 +14,20 @@ from datetime import datetime
 from pathlib import Path
 import logging
 import struct
-from celery.result import AsyncResult
-from tasks.blueprint_processing import process_blueprint_task
+
+# Configure logger early
+logger = logging.getLogger(__name__)
+
+# Try to import Celery components, but make them optional
+try:
+    from celery.result import AsyncResult
+    from tasks.blueprint_processing import process_blueprint_task
+    CELERY_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Celery not available: {e}. Will use synchronous processing.")
+    AsyncResult = None
+    process_blueprint_task = None
+    CELERY_AVAILABLE = False
 
 # Import graceful shutdown functions from main
 import sys
@@ -36,8 +48,6 @@ from models.extraction_schema import (
     ExtractionMethod, ExtractionDebugResponse
 )
 from services.extraction_storage import get_extraction_storage
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(
     tags=["blueprint"],
@@ -166,26 +176,31 @@ async def upload_blueprint(
         
         logger.info(f"Starting blueprint processing for job: {job_id}")
         
-        # Start background processing with Celery
-        try:
-            task = process_blueprint_task.delay(
-                job_id=job_id,
-                file_path=file_path,
-                file_info=job_data["file_info"],
-                project_info=job_data["project_info"]
-            )
-            
-            # Update job data with task ID
-            job_data["task_id"] = task.id
-            job_data["status"] = "processing"
-            job_data["progress"] = 15
-            job_data["message"] = "Blueprint processing started in background"
-            
-            logger.info(f"Blueprint processing task started: {task.id} for job: {job_id}")
-            
-        except Exception as celery_error:
-            logger.error(f"Failed to start Celery task for job {job_id}: {celery_error}")
-            # Fall back to synchronous processing if Celery is unavailable
+        # Start background processing with Celery if available
+        if CELERY_AVAILABLE and process_blueprint_task:
+            try:
+                task = process_blueprint_task.delay(
+                    job_id=job_id,
+                    file_path=file_path,
+                    file_info=job_data["file_info"],
+                    project_info=job_data["project_info"]
+                )
+                
+                # Update job data with task ID
+                job_data["task_id"] = task.id
+                job_data["status"] = "processing"
+                job_data["progress"] = 15
+                job_data["message"] = "Blueprint processing started in background"
+                
+                logger.info(f"Blueprint processing task started: {task.id} for job: {job_id}")
+                
+            except Exception as celery_error:
+                logger.error(f"Failed to start Celery task for job {job_id}: {celery_error}")
+                # Fall back to synchronous processing if Celery is unavailable
+                return await _process_blueprint_synchronous(job_id, file_path, job_data)
+        else:
+            # Use synchronous processing if Celery not available
+            logger.info(f"Using synchronous processing for job {job_id} (Celery not available)")
             return await _process_blueprint_synchronous(job_id, file_path, job_data)
         
         logger.info(f"Blueprint upload endpoint completed for job: {job_id}")
@@ -213,7 +228,7 @@ async def get_job_status(job_id: str):
     job_data = job_storage[job_id]
     
     # If job has a Celery task, check its status
-    if "task_id" in job_data and job_data["status"] == "processing":
+    if "task_id" in job_data and job_data["status"] == "processing" and CELERY_AVAILABLE and AsyncResult:
         try:
             task = AsyncResult(job_data["task_id"])
             
