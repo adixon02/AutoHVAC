@@ -124,19 +124,12 @@ async def upload_blueprint(
             regex_result = _convert_building_data_to_regex_result(building_data, text_duration)
             
             job_data["progress"] = 60
-            job_data["message"] = "Analyzing blueprint with AI..."
+            job_data["message"] = "Processing blueprint data..."
             
-            # Use AI for visual analysis (if API key available)
+            # Skip AI analysis during upload to prevent timeouts
+            # AI enhancement should be called separately after JSON extraction
             ai_result = None
-            ai_start = datetime.now()
-            try:
-                ai_analyzer = AIBlueprintAnalyzer()
-                ai_data = await ai_analyzer.analyze_blueprint_visual(file_path)
-                ai_duration = (datetime.now() - ai_start).total_seconds() * 1000
-                ai_result = _convert_ai_data_to_ai_result(ai_data, ai_duration)
-            except Exception as ai_error:
-                logger.warning(f"AI analysis failed, continuing with regex extraction: {ai_error}")
-                ai_duration = (datetime.now() - ai_start).total_seconds() * 1000
+            ai_duration = 0
             
             job_data["progress"] = 80
             job_data["message"] = "Saving extraction data..."
@@ -549,6 +542,118 @@ async def reprocess_extraction(job_id: str, request: Optional[Dict[str, Any]] = 
     except Exception as e:
         logger.error(f"Failed to reprocess extraction for {job_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Reprocessing failed: {str(e)}")
+
+@router.post("/api/v2/blueprint/{job_id}/enhance-with-ai")
+async def enhance_blueprint_with_ai(job_id: str):
+    """
+    Enhance existing blueprint extraction with AI analysis.
+    This should be called after initial extraction to add AI insights
+    for more accurate Manual J calculations.
+    """
+    try:
+        # Check if job exists
+        if job_id not in job_storage:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        
+        job_data = job_storage[job_id]
+        
+        # Check if already has AI analysis
+        extraction_id = job_data.get("extraction_id")
+        if not extraction_id:
+            raise HTTPException(status_code=400, detail="No extraction data found for this job")
+        
+        # Load existing extraction
+        storage_service = get_extraction_storage()
+        extraction_data = storage_service.load_extraction(extraction_id)
+        
+        if not extraction_data:
+            raise HTTPException(status_code=404, detail=f"Extraction {extraction_id} not found")
+        
+        # Check if AI analysis already exists
+        if extraction_data.ai_extraction:
+            return {
+                "job_id": job_id,
+                "extraction_id": extraction_id,
+                "message": "AI analysis already exists for this blueprint",
+                "ai_confidence": extraction_data.ai_extraction.ai_confidence
+            }
+        
+        # Get file path
+        file_path = job_data.get("file_info", {}).get("path")
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Blueprint file not found")
+        
+        # Update job status
+        job_data["status"] = "processing"
+        job_data["progress"] = 50
+        job_data["message"] = "Enhancing with AI analysis..."
+        
+        # Perform AI analysis
+        from services.ai_blueprint_analyzer import AIBlueprintAnalyzer
+        
+        ai_start = datetime.now()
+        try:
+            ai_analyzer = AIBlueprintAnalyzer()
+            ai_data = await ai_analyzer.analyze_blueprint_visual(file_path)
+            ai_duration = (datetime.now() - ai_start).total_seconds() * 1000
+            ai_result = _convert_ai_data_to_ai_result(ai_data, ai_duration)
+            
+            # Create new extraction with AI data
+            new_extraction_id = str(uuid4())
+            enhanced_result = CompleteExtractionResult(
+                extraction_id=new_extraction_id,
+                job_id=job_id,
+                pdf_metadata=extraction_data.pdf_metadata,
+                raw_text=extraction_data.raw_text,
+                raw_text_by_page=extraction_data.raw_text_by_page,
+                regex_extraction=extraction_data.regex_extraction,
+                ai_extraction=ai_result,
+                processing_metadata=ProcessingMetadata(
+                    extraction_id=new_extraction_id,
+                    job_id=job_id,
+                    extraction_timestamp=datetime.now(),
+                    processing_duration_ms=int(ai_duration),
+                    extraction_version=ExtractionVersion.CURRENT,
+                    extraction_method=ExtractionMethod.REGEX_AND_AI,
+                    regex_processing_ms=extraction_data.processing_metadata.regex_processing_ms,
+                    ai_processing_ms=int(ai_duration)
+                )
+            )
+            
+            # Save enhanced extraction
+            storage_info = storage_service.save_extraction(enhanced_result)
+            
+            # Update job with enhanced results
+            building_data = _convert_regex_result_to_building_data(extraction_data.regex_extraction)
+            ai_data_converted = _convert_ai_result_to_ai_data(ai_result)
+            combined_results = _combine_extraction_results(building_data, ai_data_converted)
+            
+            job_data["extraction_id"] = new_extraction_id
+            job_data["status"] = "completed"
+            job_data["progress"] = 100
+            job_data["message"] = "AI enhancement complete"
+            job_data["results"] = combined_results
+            
+            return {
+                "job_id": job_id,
+                "extraction_id": new_extraction_id,
+                "message": "AI enhancement completed successfully",
+                "ai_confidence": ai_result.ai_confidence if ai_result else 0,
+                "processing_duration_ms": ai_duration
+            }
+            
+        except Exception as ai_error:
+            logger.error(f"AI enhancement failed for {job_id}: {ai_error}")
+            job_data["status"] = "completed"
+            job_data["progress"] = 100
+            job_data["message"] = "AI enhancement failed, using regex extraction only"
+            raise HTTPException(status_code=500, detail=f"AI enhancement failed: {str(ai_error)}")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to enhance {job_id} with AI: {e}")
+        raise HTTPException(status_code=500, detail=f"Enhancement failed: {str(e)}")
 
 # === JSON Extraction Helper Functions ===
 
