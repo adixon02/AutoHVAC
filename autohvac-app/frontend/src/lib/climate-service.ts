@@ -4,6 +4,8 @@
  * Following docs/02-development/api-checklist.md
  */
 
+import { config } from './config';
+
 export interface ClimateData {
   zipCode: string;
   zone: string;
@@ -23,7 +25,7 @@ class ClimateServiceImpl {
   private baseUrl: string;
 
   constructor() {
-    this.baseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://autohvac.onrender.com';
+    this.baseUrl = config.api.baseUrl;
   }
 
   /**
@@ -39,7 +41,7 @@ class ClimateServiceImpl {
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), config.api.timeout);
 
       const response = await fetch(`${this.baseUrl}/api/v2/climate/${zipCode}`, {
         method: 'GET',
@@ -82,7 +84,7 @@ class ClimateServiceImpl {
     } catch (error) {
       console.error(`Climate service error for ZIP ${zipCode}:`, error);
       
-      if (error.name === 'AbortError') {
+      if (error instanceof Error && error.name === 'AbortError') {
         throw new Error('Request timed out. Please check your connection and try again.');
       }
       
@@ -107,7 +109,7 @@ class ClimateServiceImpl {
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), config.api.timeout);
 
       const response = await fetch(`${this.baseUrl}/api/v2/climate/${zipCode}/validate`, {
         method: 'GET',
@@ -126,7 +128,7 @@ class ClimateServiceImpl {
       
       return false;
     } catch (error) {
-      if (error.name === 'AbortError') {
+      if (error instanceof Error && error.name === 'AbortError') {
         console.error(`ZIP validation timeout for ${zipCode}`);
       } else {
         console.error(`ZIP validation error for ${zipCode}:`, error);

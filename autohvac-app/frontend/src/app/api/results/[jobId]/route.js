@@ -1,7 +1,9 @@
+import { config as appConfig } from '../../../../lib/config.js';
+
 export const runtime = 'nodejs';
 
 export async function GET(request, { params }) {
-  const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL; // https://autohvac.onrender.com
+  const BACKEND = appConfig.backend.baseUrl;
   const { jobId } = params;
   
   if (!BACKEND) {

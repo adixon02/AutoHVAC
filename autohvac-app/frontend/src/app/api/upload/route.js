@@ -1,3 +1,5 @@
+import { config as appConfig } from '../../../lib/config.js';
+
 export const runtime = 'nodejs';
 
 export const config = {
@@ -8,7 +10,7 @@ export const config = {
 };
 
 export async function POST(request) {
-  const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL; // https://autohvac.onrender.com
+  const BACKEND = appConfig.backend.baseUrl;
   
   if (!BACKEND) {
     return new Response(

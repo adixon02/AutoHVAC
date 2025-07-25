@@ -19,6 +19,7 @@ import {
   CalculationResponse
 } from '@/types';
 import { ClimateService } from '@/lib/climate-service';
+import { config } from '@/lib/config';
 
 // App State Interface
 interface AppState {
@@ -255,8 +256,7 @@ export const useAppStore = create<AppStore>()(
               }))
             };
             
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-            const response = await fetch(`${apiUrl}/api/calculate`, {
+            const response = await fetch(`${config.api.baseUrl}/api/v2/calculations/calculate`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(apiRequest),
@@ -337,10 +337,8 @@ export const useAppStore = create<AppStore>()(
               jobId,
             });
             
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-            
             // Fetch actual results from API
-            const response = await fetch(`${apiUrl}/api/v2/blueprint/results/${jobId}`);
+            const response = await fetch(`${config.api.baseUrl}/api/v2/blueprint/results/${jobId}`);
             
             if (!response.ok) {
               throw new Error(`Failed to fetch blueprint results: ${response.status}`);
