@@ -38,7 +38,7 @@ class ClimateServiceImpl {
         throw new Error('Please enter a valid 5-digit ZIP code');
       }
 
-      const response = await fetch(`${this.baseUrl}/api/climate/${zipCode}`, {
+      const response = await fetch(`${this.baseUrl}/api/v2/climate/${zipCode}`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
@@ -91,7 +91,7 @@ class ClimateServiceImpl {
    */
   async validateZipCode(zipCode: string): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/climate/${zipCode}/validate`, {
+      const response = await fetch(`${this.baseUrl}/api/v2/climate/${zipCode}/validate`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
