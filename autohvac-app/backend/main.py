@@ -11,6 +11,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import threading
 import time
+import re
 
 # Import API routers
 from api.climate import router as climate_router
@@ -23,6 +24,32 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def is_allowed_origin(origin: str) -> bool:
+    """Check if origin is allowed based on patterns"""
+    if not origin:
+        return False
+    
+    allowed_exact = [
+        "http://localhost:3000",
+        "http://localhost:3001", 
+        "https://auto-hvac.vercel.app"
+    ]
+    
+    if origin in allowed_exact:
+        return True
+    
+    # Check Vercel subdomain patterns
+    vercel_patterns = [
+        r"^https://auto-hvac-git-.*\.vercel\.app$",
+        r"^https://auto-hvac-.*\.vercel\.app$"
+    ]
+    
+    for pattern in vercel_patterns:
+        if re.match(pattern, origin):
+            return True
+    
+    return False
 
 # Global state for graceful shutdown
 shutdown_event = asyncio.Event()
@@ -86,9 +113,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware for frontend communication
+# CORS middleware for frontend communication with custom origin validation
 app.add_middleware(
     CORSMiddleware,
+    allow_origin_regex=r"^https://auto-hvac.*\.vercel\.app$|^http://localhost:300[01]$",
     allow_origins=[
         "http://localhost:3000", 
         "http://localhost:3001", 
@@ -112,13 +140,8 @@ async def global_exception_handler(request: Request, exc: Exception):
     
     # Add CORS headers manually for error responses
     origin = request.headers.get("origin")
-    allowed_origins = [
-        "http://localhost:3000", 
-        "http://localhost:3001", 
-        "https://auto-hvac.vercel.app"
-    ]
     
-    if origin in allowed_origins:
+    if is_allowed_origin(origin):
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
     

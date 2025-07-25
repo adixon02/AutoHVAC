@@ -513,7 +513,7 @@ async def reprocess_extraction(job_id: str, request: Optional[Dict[str, Any]] = 
         logger.error(f"Failed to reprocess extraction for {job_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Reprocessing failed: {str(e)}")
 
-@router.post("/api/v2/blueprint/{job_id}/enhance-with-ai")
+@router.post("/{job_id}/enhance-with-ai")
 async def enhance_blueprint_with_ai(job_id: str):
     """
     Enhance existing blueprint extraction with AI analysis.
