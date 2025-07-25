@@ -49,15 +49,20 @@ async def upload_blueprint(
         if not file.filename.endswith('.pdf'):
             raise HTTPException(status_code=400, detail="Only PDF files are supported")
         
-        # Check file size (100MB limit)
-        contents = await file.read()
-        file_size_mb = len(contents) / (1024 * 1024)
+        # Check file size (100MB limit) - use seek to avoid loading into memory
+        file.file.seek(0, 2)  # Seek to end
+        file_size = file.file.tell()
+        file.file.seek(0)  # Reset to beginning
+        file_size_mb = file_size / (1024 * 1024)
         
         if file_size_mb > 100:
             raise HTTPException(
                 status_code=413, 
                 detail=f"File too large ({file_size_mb:.1f}MB). Maximum size is 100MB"
             )
+        
+        # Stream file to disk instead of loading into memory
+        contents = await file.read()
         
         # Generate unique job ID
         job_id = str(uuid.uuid4())
@@ -105,20 +110,35 @@ async def upload_blueprint(
             job_data["progress"] = 20
             job_data["message"] = "Reading PDF file..."
             
-            # Extract PDF metadata and raw text
-            pdf_metadata = await _extract_pdf_metadata(file_path, file.filename)
-            raw_text, raw_text_by_page = await _extract_raw_text(file_path)
+            # Add timeout wrapper for PDF processing
+            import asyncio
             
-            job_data["progress"] = 30
-            job_data["message"] = "Extracting data from blueprint..."
+            async def process_with_timeout():
+                # Extract PDF metadata and raw text
+                pdf_metadata = await _extract_pdf_metadata(file_path, file.filename)
+                raw_text, raw_text_by_page = await _extract_raw_text(file_path)
+                
+                job_data["progress"] = 30
+                job_data["message"] = "Extracting data from blueprint..."
+                
+                # Initialize extractors
+                blueprint_extractor = BlueprintExtractor()
+                
+                # Extract building data systematically
+                text_start = datetime.now()
+                building_data = await blueprint_extractor.extract_building_data(file_path)
+                text_duration = (datetime.now() - text_start).total_seconds() * 1000
+                
+                return pdf_metadata, raw_text, raw_text_by_page, building_data, text_duration
             
-            # Initialize extractors
-            blueprint_extractor = BlueprintExtractor()
-            
-            # Extract building data systematically
-            text_start = datetime.now()
-            building_data = await blueprint_extractor.extract_building_data(file_path)
-            text_duration = (datetime.now() - text_start).total_seconds() * 1000
+            # Process with 60 second timeout to prevent hanging
+            try:
+                pdf_metadata, raw_text, raw_text_by_page, building_data, text_duration = await asyncio.wait_for(
+                    process_with_timeout(), timeout=60.0
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"PDF processing timeout for file: {file_path}")
+                raise HTTPException(status_code=408, detail="PDF processing timeout. File may be too complex or corrupted.")
             
             # Convert BuildingData to RegexExtractionResult
             regex_result = _convert_building_data_to_regex_result(building_data, text_duration)

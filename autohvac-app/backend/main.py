@@ -2,8 +2,9 @@
 AutoHVAC V2 Backend
 Clean FastAPI implementation following our planning documents
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import logging
 
 # Import API routers
@@ -21,7 +22,9 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="AutoHVAC API V2",
     description="Professional HVAC load calculations and system recommendations",
-    version="2.0.0"
+    version="2.0.0",
+    # Add timeout configuration
+    timeout=300  # 5 minutes for large file uploads
 )
 
 # CORS middleware for frontend communication
@@ -40,12 +43,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Global exception handler to ensure CORS headers are always sent
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Global exception: {exc}")
+    
+    # Create JSON response with CORS headers
+    response = JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error", "error": str(exc)}
+    )
+    
+    # Add CORS headers manually for error responses
+    origin = request.headers.get("origin")
+    allowed_origins = [
+        "http://localhost:3000", 
+        "http://localhost:3001", 
+        "https://autohvac.com",
+        "https://auto-hvac.vercel.app",
+        "https://auto-hvac-oh1m0an31-hello-austinjdixons-projects.vercel.app",
+        "https://auto-hvac-2nwdlrsjh-hello-austinjdixons-projects.vercel.app"
+    ]
+    
+    if origin in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    
+    return response
+
 # Include API routers  
 app.include_router(climate_router)
 app.include_router(calculations_router)
 app.include_router(blueprint_router)
-
-# Test endpoints removed for production stability
 
 @app.get("/")
 async def root():
