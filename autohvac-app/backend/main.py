@@ -65,10 +65,10 @@ async def global_exception_handler(request: Request, exc: Exception):
     
     return response
 
-# Include API routers  
-app.include_router(climate_router)
-app.include_router(calculations_router)
-app.include_router(blueprint_router)
+# Include API routers with v2 prefix
+app.include_router(climate_router, prefix="/api/v2")
+app.include_router(calculations_router, prefix="/api/v2")
+app.include_router(blueprint_router, prefix="/api/v2")
 
 @app.get("/")
 async def root():
