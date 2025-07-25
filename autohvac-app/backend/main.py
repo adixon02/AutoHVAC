@@ -113,19 +113,23 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware for frontend communication with custom origin validation
+# CORS middleware - must be added BEFORE routers
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https://auto-hvac.*\.vercel\.app$|^http://localhost:300[01]$",
     allow_origins=[
-        "http://localhost:3000", 
-        "http://localhost:3001", 
-        "https://auto-hvac.vercel.app"
+        "https://auto-hvac.vercel.app",
+        "http://localhost:3000"
     ],
+    allow_origin_regex=r"^https://auto-hvac.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Include API routers with v2 prefix
+app.include_router(blueprint_router, prefix="/api/v2/blueprint")
+app.include_router(climate_router, prefix="/api/v2/climate")
+app.include_router(calculations_router, prefix="/api/v2/calculations")
 
 # Global exception handler to ensure CORS headers are always sent
 @app.exception_handler(Exception)
@@ -146,11 +150,6 @@ async def global_exception_handler(request: Request, exc: Exception):
         response.headers["Access-Control-Allow-Credentials"] = "true"
     
     return response
-
-# Include API routers with v2 prefix
-app.include_router(climate_router, prefix="/api/v2/climate")
-app.include_router(calculations_router, prefix="/api/v2/calculations")
-app.include_router(blueprint_router, prefix="/api/v2/blueprint")
 
 @app.get("/")
 async def root():

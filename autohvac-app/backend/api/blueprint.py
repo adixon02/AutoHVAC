@@ -40,7 +40,6 @@ from services.extraction_storage import get_extraction_storage
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/blueprint",
     tags=["blueprint"],
     responses={404: {"description": "Not found"}},
 )
