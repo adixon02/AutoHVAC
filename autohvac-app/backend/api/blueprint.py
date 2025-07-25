@@ -39,6 +39,7 @@ async def upload_options() -> Response:
     return Response(status_code=204)
 
 @router.post("/upload")
+@router.post("/upload/")  # handles trailing slash
 async def upload_blueprint(
     file: UploadFile = File(...),
     zip_code: str = Form(...),
@@ -69,9 +70,6 @@ async def upload_blueprint(
                 detail=f"File too large ({file_size_mb:.1f}MB). Maximum size is 50MB"
             )
         
-        # Stream file to disk instead of loading into memory
-        contents = await file.read()
-        
         # Generate unique job ID
         job_id = str(uuid.uuid4())
         
@@ -79,10 +77,11 @@ async def upload_blueprint(
         upload_dir = "uploads"
         os.makedirs(upload_dir, exist_ok=True)
         
-        # Save file temporarily
+        # Stream file to disk to avoid memory spikes
         file_path = os.path.join(upload_dir, f"{job_id}_{file.filename}")
-        with open(file_path, "wb") as f:
-            f.write(contents)
+        with open(file_path, "wb") as out:
+            while chunk := await file.read(1024 * 1024):  # 1MB chunks
+                out.write(chunk)
         
         # Initialize job data
         job_data = {
