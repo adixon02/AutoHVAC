@@ -65,8 +65,21 @@ async def validate_zip_code(zip_code: str) -> ApiResponse[bool]:
     """
     Validate if we have climate data coverage for a ZIP code
     """
+    logger.info(f"ZIP validation request received for: {zip_code}")
+    
     try:
+        # Validate ZIP code format first
+        if not zip_code or len(zip_code) != 5 or not zip_code.isdigit():
+            logger.warning(f"Invalid ZIP code format in validation: {zip_code}")
+            return ApiResponse(
+                success=True,
+                data=False,
+                message=f"ZIP code {zip_code} has invalid format"
+            )
+        
+        logger.info(f"Calling climate service to validate ZIP: {zip_code}")
         is_valid = await climate_service.validate_zip_coverage(zip_code)
+        logger.info(f"ZIP validation result for {zip_code}: {is_valid}")
         
         return ApiResponse(
             success=True,

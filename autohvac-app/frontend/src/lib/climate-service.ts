@@ -38,12 +38,18 @@ class ClimateServiceImpl {
         throw new Error('Please enter a valid 5-digit ZIP code');
       }
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
       const response = await fetch(`${this.baseUrl}/api/v2/climate/${zipCode}`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
         },
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -76,6 +82,10 @@ class ClimateServiceImpl {
     } catch (error) {
       console.error(`Climate service error for ZIP ${zipCode}:`, error);
       
+      if (error.name === 'AbortError') {
+        throw new Error('Request timed out. Please check your connection and try again.');
+      }
+      
       if (error instanceof Error) {
         throw error;
       }
@@ -91,12 +101,23 @@ class ClimateServiceImpl {
    */
   async validateZipCode(zipCode: string): Promise<boolean> {
     try {
+      // Validate ZIP code format on frontend first
+      if (!zipCode || zipCode.length !== 5 || !/^\d{5}$/.test(zipCode)) {
+        return false;
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
       const response = await fetch(`${this.baseUrl}/api/v2/climate/${zipCode}/validate`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
         },
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const result = await response.json();
@@ -105,7 +126,11 @@ class ClimateServiceImpl {
       
       return false;
     } catch (error) {
-      console.error(`ZIP validation error for ${zipCode}:`, error);
+      if (error.name === 'AbortError') {
+        console.error(`ZIP validation timeout for ${zipCode}`);
+      } else {
+        console.error(`ZIP validation error for ${zipCode}:`, error);
+      }
       return false;
     }
   }
