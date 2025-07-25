@@ -33,13 +33,10 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000", 
         "http://localhost:3001", 
-        "https://autohvac.com",
-        "https://auto-hvac.vercel.app",
-        "https://auto-hvac-oh1m0an31-hello-austinjdixons-projects.vercel.app",
-        "https://auto-hvac-2nwdlrsjh-hello-austinjdixons-projects.vercel.app"
+        "https://auto-hvac.vercel.app"
     ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -59,10 +56,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     allowed_origins = [
         "http://localhost:3000", 
         "http://localhost:3001", 
-        "https://autohvac.com",
-        "https://auto-hvac.vercel.app",
-        "https://auto-hvac-oh1m0an31-hello-austinjdixons-projects.vercel.app",
-        "https://auto-hvac-2nwdlrsjh-hello-austinjdixons-projects.vercel.app"
+        "https://auto-hvac.vercel.app"
     ]
     
     if origin in allowed_origins:

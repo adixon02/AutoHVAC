@@ -49,16 +49,19 @@ async def upload_blueprint(
         if not file.filename.endswith('.pdf'):
             raise HTTPException(status_code=400, detail="Only PDF files are supported")
         
-        # Check file size (100MB limit) - use seek to avoid loading into memory
+        # Check file size (50MB limit) - use seek to avoid loading into memory
         file.file.seek(0, 2)  # Seek to end
         file_size = file.file.tell()
         file.file.seek(0)  # Reset to beginning
         file_size_mb = file_size / (1024 * 1024)
         
-        if file_size_mb > 100:
+        logger.info(f"Blueprint upload: {file.filename}, {file_size_mb:.1f}MB")
+        
+        if file_size_mb > 50:
+            logger.warning(f"File too large: {file_size_mb:.1f}MB")
             raise HTTPException(
                 status_code=413, 
-                detail=f"File too large ({file_size_mb:.1f}MB). Maximum size is 100MB"
+                detail=f"File too large ({file_size_mb:.1f}MB). Maximum size is 50MB"
             )
         
         # Stream file to disk instead of loading into memory
@@ -99,6 +102,8 @@ async def upload_blueprint(
         # Store job data
         job_storage[job_id] = job_data
         
+        logger.info(f"Starting blueprint processing for job: {job_id}")
+        
         # Process blueprint with enhanced extraction and JSON storage
         from services.blueprint_extractor import BlueprintExtractor
         from services.ai_blueprint_analyzer import AIBlueprintAnalyzer
@@ -137,8 +142,11 @@ async def upload_blueprint(
                     process_with_timeout(), timeout=60.0
                 )
             except asyncio.TimeoutError:
-                logger.error(f"PDF processing timeout for file: {file_path}")
+                logger.error(f"PDF processing timeout for job {job_id}, file: {file_path}")
                 raise HTTPException(status_code=408, detail="PDF processing timeout. File may be too complex or corrupted.")
+            except Exception as processing_error:
+                logger.error(f"PDF processing error for job {job_id}: {processing_error}")
+                raise
             
             # Convert BuildingData to RegexExtractionResult
             regex_result = _convert_building_data_to_regex_result(building_data, text_duration)
@@ -197,9 +205,10 @@ async def upload_blueprint(
             job_data["progress"] = 100
             job_data["message"] = "Blueprint analysis complete"
             job_data["results"] = combined_results
+            logger.info(f"Blueprint processing completed successfully for job: {job_id}")
             
         except Exception as extraction_error:
-            logger.error(f"Blueprint processing failed: {extraction_error}")
+            logger.error(f"Blueprint processing failed for job {job_id}: {extraction_error}")
             # Fall back to mock data for now
             job_data["status"] = "completed"
             job_data["progress"] = 100
@@ -273,7 +282,7 @@ async def upload_blueprint(
                 "extraction_notes": f"Extraction failed: {str(extraction_error)}"
             }
         
-        logger.info(f"Blueprint uploaded successfully: {job_id}")
+        logger.info(f"Blueprint upload endpoint completed for job: {job_id}")
         
         return {
             "job_id": job_id,
@@ -284,7 +293,7 @@ async def upload_blueprint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Blueprint upload error: {str(e)}")
+        logger.error(f"Blueprint upload error for job {job_id if 'job_id' in locals() else 'unknown'}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 @router.get("/status/{job_id}")
