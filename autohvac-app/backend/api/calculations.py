@@ -13,7 +13,7 @@ from models.api import CalculationRequest, CalculationResponse, ApiResponse
 from models.calculations import SystemRecommendation, SystemTier, CoolingSystem, HeatingSystem
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api", tags=["calculations"])
+router = APIRouter(prefix="/calculations", tags=["calculations"])
 
 # Initialize services
 climate_service = ClimateService()

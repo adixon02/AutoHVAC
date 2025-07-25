@@ -9,7 +9,7 @@ from models.api import ApiResponse
 from models.climate import ClimateData
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/climate", tags=["climate"])
+router = APIRouter(prefix="/climate", tags=["climate"])
 
 # Initialize climate service
 climate_service = ClimateService()
