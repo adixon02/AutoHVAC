@@ -3,7 +3,7 @@ Blueprint processing API endpoints
 Handles PDF upload, processing, and analysis with JSON intermediate storage
 """
 from fastapi import APIRouter, File, UploadFile, Form, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from typing import Optional, Dict, Any
 import uuid
 from uuid import uuid4
@@ -32,6 +32,11 @@ router = APIRouter(
 
 # In-memory storage for MVP (replace with database in production)
 job_storage = {}
+
+@router.options("/upload", include_in_schema=False)
+async def upload_options() -> Response:
+    """Explicit OPTIONS handler for CORS preflight"""
+    return Response(status_code=204)
 
 @router.post("/upload")
 async def upload_blueprint(
