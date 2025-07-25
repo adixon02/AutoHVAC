@@ -6,3 +6,4 @@ openai==1.55.3
 aiofiles==24.1.0
 python-dotenv==1.0.1
 pdfplumber==0.11.4
+Pillow==10.0.0
