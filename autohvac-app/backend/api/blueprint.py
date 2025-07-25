@@ -13,6 +13,21 @@ import pdfplumber
 from datetime import datetime
 from pathlib import Path
 import logging
+import struct
+from celery.result import AsyncResult
+from tasks.blueprint_processing import process_blueprint_task
+
+# Import graceful shutdown functions from main
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+try:
+    from main import add_active_upload, remove_active_upload
+except ImportError:
+    # Fallback functions if main module not available
+    def add_active_upload(job_id: str):
+        pass
+    def remove_active_upload(job_id: str):
+        pass
 
 # Import new JSON schema and storage
 from models.extraction_schema import (
@@ -32,6 +47,34 @@ router = APIRouter(
 
 # In-memory storage for MVP (replace with database in production)
 job_storage = {}
+
+def _is_valid_pdf(file_path: str) -> bool:
+    """
+    Validate that the file is actually a PDF by checking the file signature
+    """
+    try:
+        with open(file_path, 'rb') as f:
+            # Read first 5 bytes to check PDF signature
+            header = f.read(5)
+            if header != b'%PDF-':
+                return False
+            
+            # Try to find xref table or trailer - basic validation
+            f.seek(-1024, 2)  # Read last 1KB
+            trailer_data = f.read()
+            
+            # Check for essential PDF components
+            if b'trailer' not in trailer_data and b'xref' not in trailer_data:
+                # For very simple PDFs, just check if we can read some content
+                f.seek(0)
+                content = f.read(2048)  # Read first 2KB
+                if b'obj' not in content and b'stream' not in content:
+                    return False
+            
+            return True
+    except Exception as e:
+        logger.warning(f"PDF validation failed for {file_path}: {e}")
+        return False
 
 @router.options("/upload", include_in_schema=False)
 async def upload_options() -> Response:
@@ -83,6 +126,19 @@ async def upload_blueprint(
             while chunk := await file.read(1024 * 1024):  # 1MB chunks
                 out.write(chunk)
         
+        # Validate that the uploaded file is actually a valid PDF
+        if not _is_valid_pdf(file_path):
+            # Clean up the invalid file
+            try:
+                os.remove(file_path)
+            except:
+                pass
+            logger.error(f"Invalid PDF file uploaded: {file.filename}")
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid PDF file. Please ensure the file is a valid PDF document."
+            )
+        
         # Initialize job data
         job_data = {
             "job_id": job_id,
@@ -106,185 +162,32 @@ async def upload_blueprint(
         # Store job data
         job_storage[job_id] = job_data
         
+        # Track this upload for graceful shutdown
+        add_active_upload(job_id)
+        
         logger.info(f"Starting blueprint processing for job: {job_id}")
         
-        # Process blueprint with enhanced extraction and JSON storage
-        from services.blueprint_extractor import BlueprintExtractor
-        from services.ai_blueprint_analyzer import AIBlueprintAnalyzer
-        import asyncio
-        
-        start_time = datetime.now()
-        
+        # Start background processing with Celery
         try:
-            job_data["progress"] = 20
-            job_data["message"] = "Reading PDF file..."
-            
-            # Add timeout wrapper for PDF processing
-            import asyncio
-            
-            async def process_with_timeout():
-                # Extract PDF metadata and raw text
-                pdf_metadata = await _extract_pdf_metadata(file_path, file.filename)
-                raw_text, raw_text_by_page = await _extract_raw_text(file_path)
-                
-                job_data["progress"] = 30
-                job_data["message"] = "Extracting data from blueprint..."
-                
-                # Initialize extractors
-                blueprint_extractor = BlueprintExtractor()
-                
-                # Extract building data systematically
-                text_start = datetime.now()
-                building_data = await blueprint_extractor.extract_building_data(file_path)
-                text_duration = (datetime.now() - text_start).total_seconds() * 1000
-                
-                return pdf_metadata, raw_text, raw_text_by_page, building_data, text_duration
-            
-            # Process with 60 second timeout to prevent hanging
-            try:
-                pdf_metadata, raw_text, raw_text_by_page, building_data, text_duration = await asyncio.wait_for(
-                    process_with_timeout(), timeout=60.0
-                )
-            except asyncio.TimeoutError:
-                logger.error(f"PDF processing timeout for job {job_id}, file: {file_path}")
-                raise HTTPException(status_code=408, detail="PDF processing timeout. File may be too complex or corrupted.")
-            except Exception as processing_error:
-                logger.error(f"PDF processing error for job {job_id}: {processing_error}")
-                raise
-            
-            # Convert BuildingData to RegexExtractionResult
-            regex_result = _convert_building_data_to_regex_result(building_data, text_duration)
-            
-            job_data["progress"] = 60
-            job_data["message"] = "Processing blueprint data..."
-            
-            # Skip AI analysis during upload to prevent timeouts
-            # AI enhancement should be called separately after JSON extraction
-            ai_result = None
-            ai_duration = 0
-            
-            job_data["progress"] = 80
-            job_data["message"] = "Saving extraction data..."
-            
-            # Create complete extraction result
-            total_duration = (datetime.now() - start_time).total_seconds() * 1000
-            extraction_id = str(uuid4())
-            
-            complete_result = CompleteExtractionResult(
-                extraction_id=extraction_id,
+            task = process_blueprint_task.delay(
                 job_id=job_id,
-                pdf_metadata=pdf_metadata,
-                raw_text=raw_text,
-                raw_text_by_page=raw_text_by_page,
-                regex_extraction=regex_result,
-                ai_extraction=ai_result,
-                processing_metadata=ProcessingMetadata(
-                    extraction_id=extraction_id,
-                    job_id=job_id,
-                    extraction_timestamp=datetime.now(),
-                    processing_duration_ms=int(total_duration),
-                    extraction_version=ExtractionVersion.CURRENT,
-                    extraction_method=_determine_extraction_method(regex_result, ai_result),
-                    text_extraction_ms=int(text_duration) if 'text_duration' in locals() else None,
-                    regex_processing_ms=int(text_duration),
-                    ai_processing_ms=int(ai_duration) if ai_result else None
-                )
+                file_path=file_path,
+                file_info=job_data["file_info"],
+                project_info=job_data["project_info"]
             )
             
-            # Save extraction data to JSON storage
-            storage_service = get_extraction_storage()
-            storage_info = storage_service.save_extraction(complete_result)
+            # Update job data with task ID
+            job_data["task_id"] = task.id
+            job_data["status"] = "processing"
+            job_data["progress"] = 15
+            job_data["message"] = "Blueprint processing started in background"
             
-            logger.info(f"Saved extraction data: {extraction_id} -> {storage_info.storage_path}")
+            logger.info(f"Blueprint processing task started: {task.id} for job: {job_id}")
             
-            job_data["progress"] = 90
-            job_data["message"] = "Combining extracted data..."
-            
-            # Combine regex and AI extracted data (using existing logic for backward compatibility)
-            combined_results = _combine_extraction_results(building_data, ai_data if 'ai_data' in locals() else None)
-            
-            # Store extraction_id in job data for later retrieval
-            job_data["extraction_id"] = extraction_id
-            job_data["status"] = "completed"
-            job_data["progress"] = 100
-            job_data["message"] = "Blueprint analysis complete"
-            job_data["results"] = combined_results
-            logger.info(f"Blueprint processing completed successfully for job: {job_id}")
-            
-        except Exception as extraction_error:
-            logger.error(f"Blueprint processing failed for job {job_id}: {extraction_error}")
-            # Fall back to mock data for now
-            job_data["status"] = "completed"
-            job_data["progress"] = 100
-            job_data["message"] = "Blueprint analysis complete (using fallback data)"
-            job_data["results"] = {
-                "total_area": 1480,  # Add this for frontend compatibility
-                "rooms": [
-                    {
-                        "name": "Living Room",
-                        "area": 300,  # Use 'area' not 'area_ft2' for frontend
-                        "height": 10,  # Use 'height' not 'ceiling_height' for frontend
-                        "windows": 3,  # Number of windows
-                        "exterior_walls": 2
-                    },
-                    {
-                        "name": "Kitchen",
-                        "area": 200,
-                        "height": 10,
-                        "windows": 2,
-                        "exterior_walls": 1
-                    },
-                    {
-                        "name": "Master Bedroom",
-                        "area": 250,
-                        "height": 10,
-                        "windows": 2,
-                        "exterior_walls": 2
-                    },
-                    {
-                        "name": "Bedroom 2",
-                        "area": 180,
-                        "height": 10,
-                        "windows": 1,
-                        "exterior_walls": 2
-                    },
-                    {
-                        "name": "Bedroom 3",
-                        "area": 150,
-                        "height": 10,
-                        "windows": 1,
-                        "exterior_walls": 1
-                    },
-                    {
-                        "name": "Bathrooms",
-                        "area": 120,
-                        "height": 10,
-                        "windows": 1,
-                        "exterior_walls": 1
-                    },
-                    {
-                        "name": "Hallway",
-                        "area": 280,
-                        "height": 10,
-                        "windows": 0,
-                        "exterior_walls": 0
-                    }
-                ],
-                "building_details": {
-                    "floors": 1,
-                    "foundation_type": "slab",
-                    "roof_type": "standard"
-                },
-                "building_data": {
-                    "floor_area_ft2": 1480,
-                    "wall_insulation": {"effective_r": 19},
-                    "ceiling_insulation": 38,
-                    "window_schedule": {"u_value": 0.30, "shgc": 0.65},
-                    "air_tightness": 5.0,
-                    "foundation_type": "slab"
-                },
-                "extraction_notes": f"Extraction failed: {str(extraction_error)}"
-            }
+        except Exception as celery_error:
+            logger.error(f"Failed to start Celery task for job {job_id}: {celery_error}")
+            # Fall back to synchronous processing if Celery is unavailable
+            return await _process_blueprint_synchronous(job_id, file_path, job_data)
         
         logger.info(f"Blueprint upload endpoint completed for job: {job_id}")
         
@@ -309,6 +212,40 @@ async def get_job_status(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
     
     job_data = job_storage[job_id]
+    
+    # If job has a Celery task, check its status
+    if "task_id" in job_data and job_data["status"] == "processing":
+        try:
+            task = AsyncResult(job_data["task_id"])
+            
+            if task.ready():
+                # Task completed
+                if task.successful():
+                    # Update job data with task result
+                    result = task.result
+                    job_data.update(result)
+                    
+                    # Remove from active uploads tracking
+                    remove_active_upload(job_id)
+                    
+                    logger.info(f"Celery task completed for job {job_id}")
+                else:
+                    # Task failed
+                    job_data["status"] = "failed"
+                    job_data["progress"] = 0
+                    job_data["message"] = f"Processing failed: {str(task.info)}"
+                    
+                    # Remove from active uploads tracking
+                    remove_active_upload(job_id)
+                    
+                    logger.error(f"Celery task failed for job {job_id}: {task.info}")
+            else:
+                # Task still running, check for progress updates
+                if task.state == 'PROGRESS' and task.info:
+                    job_data.update(task.info)
+                    
+        except Exception as task_error:
+            logger.warning(f"Failed to check Celery task status for {job_id}: {task_error}")
     
     return {
         "job_id": job_id,
@@ -687,6 +624,135 @@ async def enhance_blueprint_with_ai(job_id: str):
     except Exception as e:
         logger.error(f"Failed to enhance {job_id} with AI: {e}")
         raise HTTPException(status_code=500, detail=f"Enhancement failed: {str(e)}")
+
+# === Synchronous Processing Fallback ===
+
+async def _process_blueprint_synchronous(job_id: str, file_path: str, job_data: dict):
+    """
+    Fallback synchronous processing when Celery is unavailable
+    """
+    try:
+        logger.info(f"Using synchronous fallback processing for job: {job_id}")
+        
+        from services.blueprint_extractor import BlueprintExtractor
+        import asyncio
+        
+        start_time = datetime.now()
+        
+        job_data["progress"] = 20
+        job_data["message"] = "Reading PDF file..."
+        
+        # Extract PDF metadata and raw text  
+        pdf_metadata = await _extract_pdf_metadata(file_path, job_data["file_info"]["filename"])
+        raw_text, raw_text_by_page = await _extract_raw_text(file_path)
+        
+        job_data["progress"] = 40
+        job_data["message"] = "Extracting building data..."
+        
+        # Initialize blueprint extractor
+        blueprint_extractor = BlueprintExtractor()
+        text_start = datetime.now()
+        building_data = await blueprint_extractor.extract_building_data(file_path)
+        text_duration = (datetime.now() - text_start).total_seconds() * 1000
+        
+        # Convert BuildingData to RegexExtractionResult
+        regex_result = _convert_building_data_to_regex_result(building_data, text_duration)
+        
+        job_data["progress"] = 80
+        job_data["message"] = "Saving extraction data..."
+        
+        # Create complete extraction result
+        total_duration = (datetime.now() - start_time).total_seconds() * 1000
+        extraction_id = str(uuid4())
+        
+        complete_result = CompleteExtractionResult(
+            extraction_id=extraction_id,
+            job_id=job_id,
+            pdf_metadata=pdf_metadata,
+            raw_text=raw_text,
+            raw_text_by_page=raw_text_by_page,
+            regex_extraction=regex_result,
+            ai_extraction=None,
+            processing_metadata=ProcessingMetadata(
+                extraction_id=extraction_id,
+                job_id=job_id,
+                extraction_timestamp=datetime.now(),
+                processing_duration_ms=int(total_duration),
+                extraction_version=ExtractionVersion.CURRENT,
+                extraction_method=_determine_extraction_method(regex_result, None),
+                text_extraction_ms=int(text_duration),
+                regex_processing_ms=int(text_duration),
+                ai_processing_ms=None
+            )
+        )
+        
+        # Save extraction data
+        storage_service = get_extraction_storage()
+        storage_info = storage_service.save_extraction(complete_result)
+        
+        # Combine results
+        combined_results = _combine_extraction_results(building_data, None)
+        
+        # Update job data
+        job_data["extraction_id"] = extraction_id
+        job_data["status"] = "completed"
+        job_data["progress"] = 100
+        job_data["message"] = "Blueprint analysis complete"
+        job_data["results"] = combined_results
+        
+        # Remove from active uploads tracking
+        remove_active_upload(job_id)
+        
+        logger.info(f"Synchronous processing completed for job: {job_id}")
+        
+        return {
+            "job_id": job_id,
+            "message": "Blueprint uploaded and processed successfully",
+            "status": "completed"
+        }
+        
+    except Exception as e:
+        logger.error(f"Synchronous processing failed for job {job_id}: {e}")
+        
+        # Use fallback data
+        job_data["status"] = "completed"
+        job_data["progress"] = 100
+        job_data["message"] = "Blueprint analysis complete (using fallback data)"
+        job_data["results"] = _get_fallback_results()
+        job_data["extraction_notes"] = f"Processing failed: {str(e)}"
+        
+        # Remove from active uploads tracking
+        remove_active_upload(job_id)
+        
+        return {
+            "job_id": job_id,
+            "message": "Blueprint uploaded with fallback processing",
+            "status": "completed"
+        }
+
+def _get_fallback_results():
+    """Return fallback results when processing fails"""
+    return {
+        "total_area": 1480,
+        "rooms": [
+            {"name": "Living Room", "area": 300, "height": 10, "windows": 3, "exterior_walls": 2},
+            {"name": "Kitchen", "area": 200, "height": 10, "windows": 2, "exterior_walls": 1},
+            {"name": "Master Bedroom", "area": 250, "height": 10, "windows": 2, "exterior_walls": 2},
+            {"name": "Bedroom 2", "area": 180, "height": 10, "windows": 1, "exterior_walls": 2},
+            {"name": "Bedroom 3", "area": 150, "height": 10, "windows": 1, "exterior_walls": 1},
+            {"name": "Bathrooms", "area": 120, "height": 10, "windows": 1, "exterior_walls": 1},
+            {"name": "Hallway", "area": 280, "height": 10, "windows": 0, "exterior_walls": 0}
+        ],
+        "building_details": {"floors": 1, "foundation_type": "slab", "roof_type": "standard"},
+        "building_data": {
+            "floor_area_ft2": 1480,
+            "wall_insulation": {"effective_r": 19},
+            "ceiling_insulation": 38,
+            "window_schedule": {"u_value": 0.30, "shgc": 0.65},
+            "air_tightness": 5.0,
+            "foundation_type": "slab"
+        }
+    }
 
 # === JSON Extraction Helper Functions ===
 

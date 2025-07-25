@@ -1,14 +1,63 @@
 services:
+  # Web API Service - handles HTTP requests
   - type: web
-    name: autohvac-backend
+    name: autohvac-api
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 300
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: 10000
       - key: PYTHONPATH
         value: /opt/render/project/src
       - key: ALLOWED_ORIGINS
-        value: https://your-app-name.vercel.app
+        value: https://auto-hvac.vercel.app,http://localhost:3000,http://localhost:3001
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: autohvac-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: autohvac-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: autohvac-redis
+          property: connectionString
+
+  # Background Worker Service - processes blueprint files
+  - type: worker
+    name: autohvac-worker
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python start_worker.py
+    envVars:
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: autohvac-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: autohvac-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: autohvac-redis
+          property: connectionString
+
+  # Redis Service - message broker and result backend
+  - type: redis
+    name: autohvac-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru

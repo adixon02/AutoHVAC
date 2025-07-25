@@ -6,6 +6,11 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
+import signal
+import asyncio
+from contextlib import asynccontextmanager
+import threading
+import time
 
 # Import API routers
 from api.climate import router as climate_router
@@ -19,12 +24,66 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Global state for graceful shutdown
+shutdown_event = asyncio.Event()
+active_uploads = set()
+upload_lock = threading.Lock()
+
+def add_active_upload(job_id: str):
+    """Track an active upload to prevent shutdown"""
+    with upload_lock:
+        active_uploads.add(job_id)
+        logger.info(f"Added active upload: {job_id}, total active: {len(active_uploads)}")
+
+def remove_active_upload(job_id: str):
+    """Remove completed upload from tracking"""
+    with upload_lock:
+        active_uploads.discard(job_id)
+        logger.info(f"Removed active upload: {job_id}, total active: {len(active_uploads)}")
+
+def get_active_upload_count() -> int:
+    """Get current number of active uploads"""
+    with upload_lock:
+        return len(active_uploads)
+
+async def wait_for_uploads_to_complete(max_wait_seconds: int = 300):
+    """Wait for all active uploads to complete before shutdown"""
+    start_time = time.time()
+    while get_active_upload_count() > 0 and (time.time() - start_time) < max_wait_seconds:
+        logger.info(f"Waiting for {get_active_upload_count()} active uploads to complete...")
+        await asyncio.sleep(5)
+    
+    remaining = get_active_upload_count()
+    if remaining > 0:
+        logger.warning(f"Shutdown timeout reached, {remaining} uploads still active")
+    else:
+        logger.info("All uploads completed, safe to shutdown")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager for graceful startup/shutdown"""
+    logger.info("AutoHVAC API starting up...")
+    
+    # Setup signal handlers for graceful shutdown
+    def signal_handler(signum, frame):
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        shutdown_event.set()
+    
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    yield
+    
+    # Graceful shutdown
+    logger.info("AutoHVAC API shutting down...")
+    await wait_for_uploads_to_complete()
+    logger.info("AutoHVAC API shutdown complete")
+
 app = FastAPI(
     title="AutoHVAC API V2",
     description="Professional HVAC load calculations and system recommendations",
     version="2.0.0",
-    # Add timeout configuration
-    timeout=300  # 5 minutes for large file uploads
+    lifespan=lifespan
 )
 
 # CORS middleware for frontend communication
@@ -76,14 +135,8 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {
-        "status": "healthy",
-        "version": "2.0.0",
-        "services": {
-            "api": "healthy",
-            "calculations": "healthy"
-        }
-    }
+    """Immediate health check - returns 200 immediately for load balancer"""
+    return {"status": "healthy"}
 
 if __name__ == "__main__":
     import uvicorn

@@ -116,6 +116,57 @@ class BlueprintExtractor:
             logger.error(f"Blueprint extraction failed: {e}")
             raise
     
+    def extract_building_data_sync(self, pdf_path: str) -> BuildingData:
+        """
+        Synchronous version of extract_building_data for Celery tasks
+        
+        Args:
+            pdf_path: Path to PDF blueprint file
+            
+        Returns:
+            BuildingData with extracted information and confidence scores
+        """
+        try:
+            logger.info(f"Starting systematic extraction from {pdf_path}")
+            
+            # Extract text from all pages
+            raw_text = self._extract_pdf_text(pdf_path)
+            
+            # Apply extraction patterns
+            building_data = BuildingData()
+            confidence_scores = {}
+            
+            # 1. Extract conditioned floor area
+            building_data.floor_area_ft2, confidence_scores["floor_area"] = self._extract_floor_area(raw_text)
+            
+            # 2. Extract envelope R-values
+            building_data.wall_insulation, confidence_scores["wall_insulation"] = self._extract_wall_insulation(raw_text)
+            building_data.ceiling_insulation, confidence_scores["ceiling_insulation"] = self._extract_ceiling_insulation(raw_text)
+            
+            # 3. Extract window schedule
+            building_data.window_schedule, confidence_scores["windows"] = self._extract_window_data(raw_text)
+            
+            # 4. Extract air tightness
+            building_data.air_tightness, confidence_scores["air_tightness"] = self._extract_air_tightness(raw_text)
+            
+            # 5. Extract room dimensions
+            building_data.room_dimensions, confidence_scores["room_dimensions"] = self._extract_room_dimensions(raw_text)
+            
+            # 6. Extract building characteristics
+            building_data.foundation_type, confidence_scores["foundation"] = self._extract_foundation_type(raw_text)
+            building_data.orientation, confidence_scores["orientation"] = self._extract_orientation(raw_text)
+            
+            building_data.confidence_scores = confidence_scores
+            
+            # Log extraction summary
+            self._log_extraction_summary(building_data)
+            
+            return building_data
+            
+        except Exception as e:
+            logger.error(f"Blueprint extraction failed: {e}")
+            raise
+    
     def _extract_pdf_text(self, pdf_path: str) -> str:
         """Extract text from all PDF pages"""
         try:
