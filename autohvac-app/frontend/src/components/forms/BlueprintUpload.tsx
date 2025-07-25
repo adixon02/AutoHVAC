@@ -76,6 +76,10 @@ const BlueprintUpload: React.FC<BlueprintUploadProps> = ({
         method: 'POST',
         body: formData,
         signal: controller.signal,
+        headers: {
+          'Accept': 'application/json',
+        },
+        credentials: 'omit',
       }).finally(() => clearTimeout(timeoutId));
 
       if (!response.ok) {
