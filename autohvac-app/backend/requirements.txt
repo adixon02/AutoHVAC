@@ -7,3 +7,5 @@ aiofiles==24.1.0
 python-dotenv==1.0.1
 pdfplumber==0.11.4
 Pillow==10.4.0
+redis==5.0.1
+celery[redis]==5.3.4
