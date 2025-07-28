@@ -7,6 +7,27 @@ import logging
 
 router = APIRouter()
 
+@router.post("/force-migration")
+async def force_migration():
+    """Force database migration for debugging"""
+    try:
+        import logging
+        from init_db import initialize_database
+        
+        logging.info("🔧 Force running database migration...")
+        success = initialize_database()
+        
+        return {
+            "status": "success" if success else "failed",
+            "message": "Migration completed" if success else "Migration failed"
+        }
+    except Exception as e:
+        logging.exception(f"Migration error: {e}")
+        return {
+            "status": "error", 
+            "message": str(e)
+        }
+
 
 @router.get("/{job_id}", response_model=JobStatus)
 async def get_job_status(
