@@ -61,15 +61,15 @@ class Project(SQLModel, table=True):
     # Parsed blueprint data
     parsed_schema_json: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     
-    # Progress tracking
-    progress_percent: int = Field(
+    # Progress tracking (optional for backward compatibility)
+    progress_percent: Optional[int] = Field(
         default=0,
-        sa_column=Column(Integer, nullable=False, server_default="0")
+        sa_column=Column(Integer, nullable=True, server_default="0")
     )
-    current_stage: str = Field(
+    current_stage: Optional[str] = Field(
         default="initializing",
         max_length=64,
-        sa_column=Column(String(64), nullable=False, server_default="initializing")
+        sa_column=Column(String(64), nullable=True, server_default="'initializing'")
     )
     
     # Relationships

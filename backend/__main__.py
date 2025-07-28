@@ -13,58 +13,103 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def run_migrations():
-    """Run database migrations with fallback to direct table creation"""
-    # First try Alembic directly
+def ensure_progress_columns_exist():
+    """Self-healing schema: ensure progress columns exist, add them if missing"""
     try:
-        logger.info("🔧 Running Alembic migrations directly...")
+        logger.info("🔍 Checking database schema for progress tracking columns...")
+        
+        from sqlalchemy import create_engine, inspect, text
+        from database import DATABASE_URL
+        
+        # Create engine for schema inspection
+        engine = create_engine(DATABASE_URL, echo=False)
+        inspector = inspect(engine)
+        
+        # Check if projects table exists
+        tables = inspector.get_table_names()
+        if 'projects' not in tables:
+            logger.warning("⚠️ Projects table doesn't exist - will be created by SQLModel")
+            return True
+            
+        # Get current columns
+        columns = inspector.get_columns('projects')
+        column_names = [col['name'] for col in columns]
+        
+        logger.info(f"📊 Current projects table columns: {column_names}")
+        
+        # Check and add missing columns
+        missing_columns = []
+        
+        if 'progress_percent' not in column_names:
+            missing_columns.append('progress_percent')
+            logger.info("🔧 Adding missing progress_percent column...")
+            with engine.connect() as conn:
+                conn.execute(text("""
+                    ALTER TABLE projects 
+                    ADD COLUMN progress_percent INTEGER NOT NULL DEFAULT 0
+                """))
+                conn.commit()
+            
+        if 'current_stage' not in column_names:
+            missing_columns.append('current_stage')
+            logger.info("🔧 Adding missing current_stage column...")
+            with engine.connect() as conn:
+                conn.execute(text("""
+                    ALTER TABLE projects 
+                    ADD COLUMN current_stage VARCHAR(64) NOT NULL DEFAULT 'initializing'
+                """))
+                conn.commit()
+        
+        if missing_columns:
+            logger.info(f"✅ Successfully added missing columns: {missing_columns}")
+        else:
+            logger.info("✅ All required columns already exist")
+            
+        return True
+        
+    except Exception as e:
+        logger.exception(f"❌ Schema validation/fix failed: {e}")
+        return False
+
+def run_migrations():
+    """Run database schema validation and migration with multiple fallbacks"""
+    
+    # Step 1: Always ensure critical columns exist (self-healing)
+    logger.info("🏥 Running self-healing schema check...")
+    if not ensure_progress_columns_exist():
+        logger.error("❌ Critical: Could not ensure required columns exist")
+        return False
+    
+    # Step 2: Try Alembic if possible (optional)
+    try:
+        logger.info("🔧 Attempting Alembic migrations (optional)...")
         result = subprocess.run([
             sys.executable, "-m", "alembic", "upgrade", "head"
-        ], capture_output=True, text=True, cwd=Path(__file__).parent)
+        ], capture_output=True, text=True, cwd=Path(__file__).parent, timeout=30)
         
         if result.returncode == 0:
             logger.info("✅ Alembic migrations completed successfully")
-            logger.info(f"Migration output: {result.stdout}")
-            return True
         else:
-            logger.warning(f"⚠️ Alembic failed with return code {result.returncode}")
-            logger.warning(f"Error: {result.stderr}")
-    except Exception as e:
-        logger.exception(f"❌ Alembic subprocess error: {e}")
-    
-    # Fallback to init_db
-    try:
-        logger.info("🔧 Trying init_db approach...")
-        from init_db import initialize_database
-        
-        if initialize_database():
-            logger.info("✅ Database migrations completed via init_db")
-            return True
-        else:
-            logger.warning("⚠️ init_db migrations failed, trying direct table creation...")
-            return create_tables_directly()
+            logger.warning("⚠️ Alembic failed, but continuing with self-healed schema")
             
     except Exception as e:
-        logger.exception(f"❌ init_db error: {e}")
-        logger.warning("⚠️ Trying direct table creation as fallback...")
-        return create_tables_directly()
-
-def create_tables_directly():
-    """Create tables directly using SQLModel as fallback"""
+        logger.warning(f"⚠️ Alembic unavailable, but schema is self-healed: {e}")
+    
+    # Step 3: Fallback to direct table creation if needed
     try:
-        logger.info("🔧 Creating tables directly with SQLModel...")
-        
+        logger.info("🔧 Ensuring all tables exist...")
         from sqlmodel import SQLModel
         from database import sync_engine
         from models.db_models import User, EmailToken, Project, RateLimit
         
         SQLModel.metadata.create_all(sync_engine)
-        logger.info("✅ Tables created directly with SQLModel!")
+        logger.info("✅ All tables created/verified")
         return True
         
     except Exception as e:
-        logger.exception(f"❌ Direct table creation failed: {e}")
+        logger.exception(f"❌ Final table creation failed: {e}")
         return False
+
 
 def start_server():
     """Start the uvicorn server"""
