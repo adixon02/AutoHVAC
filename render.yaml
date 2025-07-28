@@ -34,23 +34,25 @@ services:
       - key: STRIPE_PRICE_ID
         sync: false
 
-  - type: worker
-    name: autohvac-worker
-    env: python
-    buildCommand: cd backend && pip install --only-binary=:all: -r requirements.txt
-    startCommand: cd backend && celery -A tasks.parse_blueprint worker --loglevel=info --concurrency=1
-    envVars:
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: autohvac-redis
-          property: connectionString
-      - key: DATABASE_URL
-        fromDatabase:
-          name: autohvac-postgres
-          property: connectionString
-      - key: OPENAI_API_KEY
-        sync: false
+  # Celery worker disabled - using simple job processor instead
+  # TODO: Re-enable once Celery task is updated to use database storage
+  # - type: worker
+  #   name: autohvac-worker
+  #   env: python
+  #   buildCommand: cd backend && pip install --only-binary=:all: -r requirements.txt
+  #   startCommand: cd backend && celery -A tasks.parse_blueprint worker --loglevel=info --concurrency=1
+  #   envVars:
+  #     - key: REDIS_URL
+  #       fromService:
+  #         type: redis
+  #         name: autohvac-redis
+  #         property: connectionString
+  #     - key: DATABASE_URL
+  #       fromDatabase:
+  #         name: autohvac-postgres
+  #         property: connectionString
+  #     - key: OPENAI_API_KEY
+  #       sync: false
 
   - type: redis
     name: autohvac-redis

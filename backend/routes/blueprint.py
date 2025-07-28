@@ -20,12 +20,11 @@ from app.config import DEBUG, DEV_VERIFIED_EMAILS
 
 logger = logging.getLogger(__name__)
 
-# Force simple processor for development (no Redis required)
-# TODO: Set USE_CELERY=True once Redis/Celery are running locally for full stage-based processing
-# NOTE: Front-end progress bar shows 5 stages (25% -> 100%) which matches Celery pipeline,
-#       but simple processor jumps directly to completion. Consider updating UI copy for dev mode.
+# Use simple processor for now (Celery task needs database integration updates)
+# TODO: Update Celery task to use database instead of in-memory store
 USE_CELERY = False
 from services.simple_job_processor import process_job_async
+from tasks.parse_blueprint import process_blueprint
 import aiofiles
 import os
 
@@ -271,8 +270,10 @@ async def upload_blueprint(
             logger.info("🔍 Step 8: Starting background job processor")
             logger.info(f"Starting background thread for job {project_id}")
             if USE_CELERY:
-                # For Celery, we'd need to pass file path instead of content
-                process_blueprint.delay(project_id, temp_path, file.filename, email, "90210")
+                # Read file content for Celery task
+                async with aiofiles.open(temp_path, 'rb') as f:
+                    file_content = await f.read()
+                process_blueprint.delay(project_id, file_content, file.filename, email, "90210")
             else:
                 process_job_async(project_id, temp_path, file.filename, email, "90210")
             logger.info(f"Background thread started for job {project_id}")
