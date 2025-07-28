@@ -1,0 +1,9 @@
+version: '3.8'
+
+services:
+  backend:
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - DEV_VERIFIED_EMAILS=austind02@gmail.com
+      - DISABLE_PDF=true

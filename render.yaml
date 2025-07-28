@@ -1,0 +1,66 @@
+services:
+  - type: web
+    name: autohvac-frontend
+    env: node
+    buildCommand: cd frontend && npm install && npm run build
+    startCommand: cd frontend && npm start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: autohvac-backend
+          property: host
+
+  - type: web
+    name: autohvac-backend
+    env: python
+    buildCommand: cd backend && pip install -r requirements.txt
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: autohvac-redis
+          property: connectionString
+      - key: DATABASE_URL
+        fromDatabase:
+          name: autohvac-postgres
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_ID
+        sync: false
+
+  - type: worker
+    name: autohvac-worker
+    env: python
+    buildCommand: cd backend && pip install -r requirements.txt
+    startCommand: cd backend && celery -A tasks.parse_blueprint worker --loglevel=info --concurrency=1
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: autohvac-redis
+          property: connectionString
+      - key: DATABASE_URL
+        fromDatabase:
+          name: autohvac-postgres
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+
+  - type: redis
+    name: autohvac-redis
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
+
+databases:
+  - name: autohvac-postgres
+    databaseName: autohvac
+    user: autohvac

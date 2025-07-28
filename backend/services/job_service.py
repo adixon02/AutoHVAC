@@ -1,0 +1,293 @@
+from typing import Optional, List, Dict, Any
+from sqlmodel import Session, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from models.db_models import Project, JobStatus, User
+from database import get_async_session
+from datetime import datetime, timezone
+import uuid
+import asyncio
+
+class JobService:
+    """PostgreSQL-backed job service replacing InMemoryJobStore"""
+    
+    def __init__(self):
+        # Event registry for job resumption
+        self._job_events: Dict[str, asyncio.Event] = {}
+    
+    @staticmethod
+    async def create_project(
+        user_email: str,
+        project_label: str,
+        filename: str,
+        file_size: Optional[int] = None,
+        session: Optional[AsyncSession] = None
+    ) -> str:
+        """Create a new project and return its ID"""
+        if session is None:
+            async with get_async_session() as session:
+                return await JobService.create_project(user_email, project_label, filename, file_size, session)
+        
+        project_id = str(uuid.uuid4())
+        project = Project(
+            id=project_id,
+            user_email=user_email,
+            project_label=project_label,
+            filename=filename,
+            file_size=file_size,
+            status=JobStatus.PENDING
+        )
+        
+        session.add(project)
+        await session.commit()
+        await session.refresh(project)
+        
+        return project_id
+    
+    @staticmethod
+    async def create_project_with_assumptions(
+        user_email: str,
+        project_label: str,
+        filename: str,
+        file_size: Optional[int] = None,
+        duct_config: str = "ducted_attic",
+        heating_fuel: str = "gas",
+        session: Optional[AsyncSession] = None
+    ) -> str:
+        """Create a new project with Manual J assumptions already collected"""
+        if session is None:
+            async with get_async_session() as session:
+                return await JobService.create_project_with_assumptions(
+                    user_email, project_label, filename, file_size, 
+                    duct_config, heating_fuel, session
+                )
+        
+        project_id = str(uuid.uuid4())
+        project = Project(
+            id=project_id,
+            user_email=user_email,
+            project_label=project_label,
+            filename=filename,
+            file_size=file_size,
+            status=JobStatus.PENDING,
+            duct_config=duct_config,
+            heating_fuel=heating_fuel,
+            assumptions_collected=True  # Already collected in multi-step flow
+        )
+        
+        session.add(project)
+        await session.commit()
+        await session.refresh(project)
+        
+        return project_id
+    
+    @staticmethod
+    async def get_project(project_id: str, session: Optional[AsyncSession] = None) -> Optional[Project]:
+        """Get project by ID"""
+        if session is None:
+            async with get_async_session() as session:
+                return await JobService.get_project(project_id, session)
+        
+        statement = select(Project).where(Project.id == project_id)
+        result = await session.execute(statement)
+        return result.scalars().first()
+    
+    @staticmethod
+    async def update_project(
+        project_id: str,
+        updates: Dict[str, Any],
+        session: Optional[AsyncSession] = None
+    ) -> bool:
+        """Update project with given data"""
+        if session is None:
+            async with get_async_session() as session:
+                return await JobService.update_project(project_id, updates, session)
+        
+        project = await JobService.get_project(project_id, session)
+        if not project:
+            return False
+        
+        for key, value in updates.items():
+            if hasattr(project, key):
+                setattr(project, key, value)
+        
+        # Set completion time if status changed to completed
+        if updates.get("status") == JobStatus.COMPLETED:
+            project.completed_at = datetime.now(timezone.utc)
+        
+        session.add(project)
+        await session.commit()
+        return True
+    
+    @staticmethod
+    async def get_user_projects(
+        user_email: str,
+        limit: Optional[int] = None,
+        session: Optional[AsyncSession] = None
+    ) -> List[Project]:
+        """Get all projects for a user"""
+        if session is None:
+            async with get_async_session() as session:
+                return await JobService.get_user_projects(user_email, limit, session)
+        
+        statement = select(Project).where(Project.user_email == user_email).order_by(Project.created_at.desc())
+        
+        if limit:
+            statement = statement.limit(limit)
+        
+        result = await session.execute(statement)
+        return result.scalars().all()
+    
+    @staticmethod
+    async def delete_project(project_id: str, session: Optional[AsyncSession] = None) -> bool:
+        """Delete a project"""
+        if session is None:
+            async with get_async_session() as session:
+                return await JobService.delete_project(project_id, session)
+        
+        project = await JobService.get_project(project_id, session)
+        if not project:
+            return False
+        
+        await session.delete(project)
+        await session.commit()
+        return True
+    
+    @staticmethod
+    async def get_project_by_user_and_id(
+        project_id: str,
+        user_email: str,
+        session: Optional[AsyncSession] = None
+    ) -> Optional[Project]:
+        """Get project only if it belongs to the specified user"""
+        if session is None:
+            async with get_async_session() as session:
+                return await JobService.get_project_by_user_and_id(project_id, user_email, session)
+        
+        statement = select(Project).where(
+            Project.id == project_id,
+            Project.user_email == user_email
+        )
+        result = await session.execute(statement)
+        return result.scalars().first()
+    
+    @staticmethod
+    async def count_user_projects(user_email: str, session: Optional[AsyncSession] = None) -> int:
+        """Count total projects for a user"""
+        if session is None:
+            async with get_async_session() as session:
+                return await JobService.count_user_projects(user_email, session)
+        
+        statement = select(Project).where(Project.user_email == user_email)
+        result = await session.execute(statement)
+        return len(result.scalars().all())
+    
+    @staticmethod
+    async def get_projects_by_status(
+        status: JobStatus,
+        limit: Optional[int] = None,
+        session: Optional[AsyncSession] = None
+    ) -> List[Project]:
+        """Get projects by status (useful for processing queue)"""
+        if session is None:
+            async with get_async_session() as session:
+                return await JobService.get_projects_by_status(status, limit, session)
+        
+        statement = select(Project).where(Project.status == status).order_by(Project.created_at)
+        
+        if limit:
+            statement = statement.limit(limit)
+        
+        result = await session.execute(statement)
+        return result.scalars().all()
+    
+    @staticmethod
+    async def set_project_processing(project_id: str, session: Optional[AsyncSession] = None) -> bool:
+        """Mark project as processing"""
+        return await JobService.update_project(
+            project_id,
+            {"status": JobStatus.PROCESSING},
+            session
+        )
+    
+    @staticmethod
+    async def set_project_completed(
+        project_id: str,
+        result: Dict[str, Any],
+        pdf_report_path: Optional[str] = None,
+        session: Optional[AsyncSession] = None
+    ) -> bool:
+        """Mark project as completed with results"""
+        updates = {
+            "status": JobStatus.COMPLETED,
+            "result": result
+        }
+        
+        if pdf_report_path:
+            updates["pdf_report_path"] = pdf_report_path
+        
+        return await JobService.update_project(project_id, updates, session)
+    
+    @staticmethod
+    async def set_project_failed(
+        project_id: str,
+        error: str,
+        session: Optional[AsyncSession] = None
+    ) -> bool:
+        """Mark project as failed with error message"""
+        return await JobService.update_project(
+            project_id,
+            {"status": JobStatus.FAILED, "error": error},
+            session
+        )
+    
+    async def update_project_assumptions(
+        self,
+        project_id: str,
+        duct_config: str,
+        heating_fuel: str,
+        session: Optional[AsyncSession] = None
+    ) -> bool:
+        """Update project with Manual J assumptions"""
+        success = await JobService.update_project(
+            project_id,
+            {
+                "duct_config": duct_config,
+                "heating_fuel": heating_fuel,
+                "assumptions_collected": True
+            },
+            session
+        )
+        
+        # Resume the job by triggering the event
+        if success:
+            await self.resume_project(project_id)
+        
+        return success
+    
+    async def register_job_event(self, project_id: str) -> asyncio.Event:
+        """Register an event for job resumption"""
+        event = asyncio.Event()
+        self._job_events[project_id] = event
+        return event
+    
+    async def resume_project(self, project_id: str) -> bool:
+        """Resume a paused project by triggering its event"""
+        if project_id in self._job_events:
+            self._job_events[project_id].set()
+            return True
+        return False
+    
+    async def wait_for_assumptions(self, project_id: str, timeout: float = 900.0) -> bool:
+        """Wait for assumptions to be collected with timeout"""
+        event = await self.register_job_event(project_id)
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+        finally:
+            # Clean up the event
+            self._job_events.pop(project_id, None)
+
+# Global instance for easy access
+job_service = JobService()

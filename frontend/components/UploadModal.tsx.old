@@ -1,0 +1,224 @@
+import React, { useState } from 'react'
+import { useRouter } from 'next/router'
+import { apiHelpers, EmailVerificationError, PaymentRequiredError } from '../lib/fetcher'
+
+interface UploadModalProps {
+  isOpen: boolean
+  onClose: () => void
+}
+
+export default function UploadModal({ isOpen, onClose }: UploadModalProps) {
+  const router = useRouter()
+  const [email, setEmail] = useState('')
+  const [projectLabel, setProjectLabel] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setFile(e.target.files[0])
+    }
+  }
+
+  const handleUpload = async () => {
+    console.log('🔼 handleUpload start', { email, fileName: file?.name, projectLabel })
+    
+    if (!file || !email || !projectLabel.trim()) {
+      setUploadError('Please fill in all required fields')
+      return
+    }
+
+    setUploading(true)
+    setUploadError(null)
+    
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('email', email)
+    formData.append('project_label', projectLabel.trim())
+
+    try {
+      const response = await apiHelpers.uploadBlueprint(formData)
+      console.log('✅ Upload successful', { jobId: response.job_id })
+      
+      // Redirect to analyzing page
+      router.push(`/analyzing/${response.job_id}`)
+      onClose()
+      
+    } catch (error) {
+      console.error('🛑 Upload error', { error })
+      
+      if (error instanceof EmailVerificationError) {
+        setUploadError('Please check your email for a verification link before uploading.')
+      } else if (error instanceof PaymentRequiredError) {
+        // Redirect to Stripe checkout
+        window.location.href = error.checkoutUrl
+      } else if (error.response?.status === 429) {
+        setUploadError('Rate limit exceeded. Please wait before uploading again.')
+      } else if (error.response?.status === 403) {
+        setUploadError('Email verification required. Please check your email for a verification link.')
+      } else if (error.response?.status === 400) {
+        setUploadError(error.response.data?.detail || 'Invalid file or request.')
+      } else if (error.response) {
+        setUploadError(`Server error: ${error.response.status} - ${error.response.data?.detail || error.message}`)
+      } else if (error.request) {
+        setUploadError(`Cannot connect to server. Please ensure the backend is running.`)
+      } else {
+        setUploadError(`Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      }
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const resetModal = () => {
+    setEmail('')
+    setProjectLabel('')
+    setFile(null)
+    setUploading(false)
+    setUploadError(null)
+  }
+
+  const handleClose = () => {
+    resetModal()
+    onClose()
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="card max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-100">
+          <h2 className="text-2xl font-semibold text-brand-700">
+            Upload Your Blueprint
+          </h2>
+          <button
+            onClick={handleClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 space-y-6">
+          {/* Email Input */}
+          <div>
+            <label className="block text-sm font-medium text-brand-700 mb-2">
+              Email Address
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="your@email.com"
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+            />
+            <p className="mt-2 text-sm text-gray-500">
+              ✨ Your first blueprint analysis is completely free!
+            </p>
+          </div>
+
+          {/* Project Label Input */}
+          <div>
+            <label className="block text-sm font-medium text-brand-700 mb-2">
+              Project Name
+            </label>
+            <input
+              type="text"
+              value={projectLabel}
+              onChange={(e) => setProjectLabel(e.target.value)}
+              placeholder="e.g., Smith Residence, Downtown Office Building"
+              maxLength={255}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+            />
+            <p className="mt-2 text-sm text-gray-500">
+              Give your project a memorable name for easy identification.
+            </p>
+          </div>
+
+          {/* File Upload */}
+          <div>
+            <label className="block text-sm font-medium text-brand-700 mb-2">
+              Blueprint File
+            </label>
+            <div className="relative">
+              <input
+                type="file"
+                onChange={handleFileChange}
+                accept=".pdf,.png,.jpg,.jpeg"
+                className="hidden"
+                id="file-upload"
+              />
+              <label
+                htmlFor="file-upload"
+                className="w-full border-2 border-dashed border-brand-200 rounded-xl p-8 text-center hover:border-brand-500 transition-colors cursor-pointer block"
+              >
+                {file ? (
+                  <div className="flex items-center justify-center">
+                    <svg className="w-8 h-8 text-brand-700 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span className="text-brand-700 font-medium">{file.name}</span>
+                  </div>
+                ) : (
+                  <div>
+                    <svg className="w-12 h-12 text-brand-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <p className="text-brand-700 font-medium mb-2">
+                      Drop your blueprint here or click to browse
+                    </p>
+                    <p className="text-gray-500 text-sm">
+                      Supports PDF, PNG, JPG, JPEG files (max 50MB)
+                    </p>
+                  </div>
+                )}
+              </label>
+            </div>
+          </div>
+
+          {/* Error Display */}
+          {uploadError && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+              <div className="flex items-start">
+                <svg className="w-5 h-5 text-red-500 mt-0.5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div className="flex-1">
+                  <h4 className="text-sm font-medium text-red-800 mb-1">Upload Failed</h4>
+                  <p className="text-sm text-red-700">{uploadError}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Upload Button */}
+          <button
+            onClick={handleUpload}
+            disabled={!file || !email || !projectLabel.trim() || uploading}
+            className="w-full btn-primary text-lg py-4 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {uploading ? (
+              <div className="flex items-center justify-center">
+                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Processing Blueprint...
+              </div>
+            ) : uploadError ? (
+              'Retry Upload'
+            ) : (
+              'Analyze Blueprint'
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
