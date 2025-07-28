@@ -486,6 +486,8 @@ pytest --cov=app --cov=services --cov=tasks tests/
 3. Set environment variables in Render dashboard
 4. Deploy automatically triggers on push to main
 
+**Important**: Render must stay on CPython ≤3.12 until all binary deps ship cp313 wheels.
+
 ### Required Environment Variables (Production)
 ```bash
 OPENAI_API_KEY=sk-...

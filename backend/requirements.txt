@@ -1,3 +1,8 @@
+# ensure build isolation has the build backend
+setuptools>=68
+wheel>=0.43
+pip>=24
+
 # Pillow wheels only published up to CPython 3.12 today – keep range-pin until cp313 wheels exist
 # Render must stay on Python ≤3.11 until Pillow ships cp313 wheels to avoid source builds
 fastapi==0.104.1
