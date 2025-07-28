@@ -14,6 +14,7 @@ services:
   - type: web
     name: autohvac-backend
     env: python
+    runtime: python-3.11.9
     buildCommand: cd backend && pip install --only-binary=:all: -r requirements.txt
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
@@ -40,6 +41,7 @@ services:
   - type: worker
     name: autohvac-worker
     env: python
+    runtime: python-3.11.9
     buildCommand: cd backend && pip install --only-binary=:all: -r requirements.txt
     startCommand: cd backend && celery -A tasks.parse_blueprint worker --loglevel=info --concurrency=1
     envVars:

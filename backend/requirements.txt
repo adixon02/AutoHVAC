@@ -10,8 +10,8 @@ stripe==7.8.0
 pymupdf==1.24.11
 pytesseract==0.3.13
 openai==1.3.0
-Pillow==10.3.0
-numpy==1.26.4
+Pillow==10.0.1
+numpy==1.24.4
 sqlmodel==0.0.14
 alembic==1.13.1
 psycopg2-binary==2.9.9
