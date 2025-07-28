@@ -3,10 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from datetime import datetime
-from routes import blueprint, job, billing, auth, jobs
+from routes import blueprint, job, billing, auth, jobs, admin
 from app.middleware.error_handler import traceback_exception_handler, CORSMiddleware as CustomCORSMiddleware
 from app.config import DEBUG, DEV_VERIFIED_EMAILS
+from services.database_rate_limiter import database_rate_limiter
 import logging
+import asyncio
 
 # Debug startup logging
 print("▶ DEBUG =", DEBUG, "  DEV_VERIFIED_EMAILS =", DEV_VERIFIED_EMAILS)
@@ -64,6 +66,51 @@ app.include_router(job.router, prefix="/api/v1/job")
 app.include_router(billing.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1/auth")
 app.include_router(jobs.router, prefix="/api/v1/jobs")
+app.include_router(admin.router, prefix="/api/v1/admin")
+
+# Background task for periodic cleanup
+cleanup_task = None
+
+@app.on_event("startup")
+async def startup_event():
+    """Run on application startup"""
+    logger.info("Starting AutoHVAC API...")
+    
+    # Clean up any stuck jobs on startup
+    try:
+        cleaned = await database_rate_limiter.cleanup_stuck_jobs(older_than_minutes=60)
+        if cleaned > 0:
+            logger.warning(f"Cleaned up {cleaned} stuck jobs on startup")
+    except Exception as e:
+        logger.error(f"Error cleaning up stuck jobs on startup: {e}")
+    
+    # Start periodic cleanup task
+    async def periodic_cleanup():
+        while True:
+            try:
+                await asyncio.sleep(3600)  # Run every hour
+                cleaned = await database_rate_limiter.cleanup_stuck_jobs(older_than_minutes=60)
+                if cleaned > 0:
+                    logger.info(f"Periodic cleanup: cleaned {cleaned} stuck jobs")
+            except Exception as e:
+                logger.error(f"Error in periodic cleanup: {e}")
+    
+    global cleanup_task
+    cleanup_task = asyncio.create_task(periodic_cleanup())
+    logger.info("Started periodic job cleanup task")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Run on application shutdown"""
+    logger.info("Shutting down AutoHVAC API...")
+    
+    # Cancel cleanup task
+    if cleanup_task:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
 
 @app.get("/")
 async def root():

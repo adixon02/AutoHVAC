@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_async_session
 from services.job_service import job_service
 from services.user_service import user_service
-from services.rate_limiter import rate_limiter
+from services.database_rate_limiter import database_rate_limiter as rate_limiter
 from core.email import email_service
 from models.schemas import JobResponse, PaymentRequiredResponse, UploadResponse
 from models.enums import DuctConfig, HeatingFuel
