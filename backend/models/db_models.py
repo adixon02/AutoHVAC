@@ -1,5 +1,5 @@
 from sqlmodel import SQLModel, Field, Relationship, Column
-from sqlalchemy import JSON
+from sqlalchemy import JSON, Integer, String
 from typing import Optional, List, Any
 from datetime import datetime, timezone
 from pydantic import EmailStr
@@ -62,8 +62,15 @@ class Project(SQLModel, table=True):
     parsed_schema_json: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     
     # Progress tracking
-    progress_percent: int = Field(default=0)
-    current_stage: str = Field(default="initializing", max_length=50)
+    progress_percent: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default="0")
+    )
+    current_stage: str = Field(
+        default="initializing",
+        max_length=64,
+        sa_column=Column(String(64), nullable=False, server_default="initializing")
+    )
     
     # Relationships
     user: Optional[User] = Relationship(back_populates="projects")

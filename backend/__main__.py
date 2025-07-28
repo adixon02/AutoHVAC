@@ -92,12 +92,15 @@ def start_server():
 def main():
     """Main entry point"""
     logger.info("🎯 AutoHVAC Backend Starting...")
+    logger.info("🔄 Running alembic upgrade head before starting server...")
     
-    # Run migrations first
+    # Run migrations first - this is CRITICAL for production
     if not run_migrations():
         logger.error("❌ Cannot start server - database migration failed")
+        logger.error("❌ This usually means the database schema is outdated")
         sys.exit(1)
     
+    logger.info("✅ Database migrations completed - starting server")
     # Start the server
     start_server()
 
