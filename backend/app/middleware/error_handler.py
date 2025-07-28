@@ -32,7 +32,8 @@ async def traceback_exception_handler(request: Request, exc: Exception):
         error_type = "InternalServerError"
         status_code = 500
     
-    if os.getenv("DEBUG") == "true":
+    # Temporarily show detailed errors to debug production issues
+    if os.getenv("DEBUG") == "true" or True:  # Always show details for debugging
         content = create_error_response(error_type, tb, status_code)
     else:
         content = create_error_response(error_type, "Internal server error", status_code)
