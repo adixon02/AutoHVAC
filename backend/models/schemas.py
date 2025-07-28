@@ -20,6 +20,8 @@ class JobStatus(BaseModel):
     result: Optional[Any] = None
     error: Optional[str] = None
     assumptions_collected: Optional[bool] = None
+    progress_percent: Optional[int] = None
+    current_stage: Optional[str] = None
 
 class ComponentDetection(BaseModel):
     type: str

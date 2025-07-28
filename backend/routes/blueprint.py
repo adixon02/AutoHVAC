@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 #       but simple processor jumps directly to completion. Consider updating UI copy for dev mode.
 USE_CELERY = False
 from services.simple_job_processor import process_job_async
+import aiofiles
+import os
 
 router = APIRouter()
 
@@ -217,6 +219,7 @@ async def upload_blueprint(
                 session=session
             )
             logger.info(f"✅ Step 6 PASSED: Project {project_id} created successfully for user {email}")
+        logger.info("job_created", extra={"jobId": project_id, "email": email})
         except HTTPException as e:
             # Database creation failed - return the error to user
             logger.error(f"❌ Step 6 FAILED: Database creation failed for user {email}: {e.detail}")
@@ -233,27 +236,46 @@ async def upload_blueprint(
         if can_use_free:
             await user_service.mark_free_report_used(email, session)
         
+        # Set status to processing immediately
+        await job_service.set_project_processing(project_id, session)
+        await job_service.update_project(project_id, {"progress_percent": 1}, session)
+        
         # Track active job for rate limiting
         await rate_limiter.increment_active_jobs(email, project_id)
         
-        logger.info("🔍 Step 7: Reading and processing file content")
+        logger.info("🔍 Step 7: Streaming file to disk")
         try:
-            file_content = await file.read()
-            logger.info(f"🔍 File content read: {len(file_content)} bytes")
+            # Stream file to disk for memory efficiency
+            temp_path = f"/tmp/{project_id}.pdf"
             
-            # Validate file content (basic checks)
-            if len(file_content) == 0:
+            async with aiofiles.open(temp_path, 'wb') as f:
+                chunk_size = 1024 * 1024  # 1MB chunks
+                total_size = 0
+                while chunk := await file.read(chunk_size):
+                    await f.write(chunk)
+                    total_size += len(chunk)
+            
+            logger.info(f"🔍 Saved PDF to {temp_path}, size={total_size} bytes")
+            
+            # Validate file exists and has content
+            if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
                 raise HTTPException(status_code=400, detail="File is empty")
             
-            # Check MIME type from content
-            if file_ext == '.pdf' and not file_content.startswith(b'%PDF'):
-                raise HTTPException(status_code=400, detail="Invalid PDF file")
+            # Quick PDF validation
+            with open(temp_path, 'rb') as f:
+                header = f.read(4)
+                if file_ext == '.pdf' and header != b'%PDF':
+                    os.unlink(temp_path)
+                    raise HTTPException(status_code=400, detail="Invalid PDF file")
             
             logger.info("🔍 Step 8: Starting background job processor")
+            logger.info(f"Starting background thread for job {project_id}")
             if USE_CELERY:
-                process_blueprint.delay(project_id, file_content, file.filename, email, "90210")
+                # For Celery, we'd need to pass file path instead of content
+                process_blueprint.delay(project_id, temp_path, file.filename, email, "90210")
             else:
-                process_job_async(project_id, file_content, file.filename, email, "90210")
+                process_job_async(project_id, temp_path, file.filename, email, "90210")
+            logger.info(f"Background thread started for job {project_id}")
             logger.info("🔍 Step 8 PASSED: Background job processor started")
                 
         except HTTPException:

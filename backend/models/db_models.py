@@ -61,6 +61,10 @@ class Project(SQLModel, table=True):
     # Parsed blueprint data
     parsed_schema_json: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     
+    # Progress tracking
+    progress_percent: int = Field(default=0)
+    current_stage: Optional[str] = Field(default="initializing")
+    
     # Relationships
     user: Optional[User] = Relationship(back_populates="projects")
 

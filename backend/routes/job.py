@@ -1,8 +1,11 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_async_session
 from services.job_service import job_service
-from models.schemas import JobStatus
+from models.schemas import JobStatus as JobStatusSchema
+from models.db_models import JobStatus
+from app.config import DEBUG, DEV_VERIFIED_EMAILS
 import logging
 
 router = APIRouter()
@@ -11,7 +14,36 @@ router = APIRouter()
 
 
 
-@router.get("/{job_id}", response_model=JobStatus)
+@router.get("/{job_id}/debug")
+async def get_job_debug(
+    job_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_async_session)
+):
+    # Check DEBUG mode or dev email list
+    user_email = request.headers.get("X-User-Email", "")
+    if not (DEBUG or user_email in DEV_VERIFIED_EMAILS):
+        raise HTTPException(status_code=403, detail="Debug access denied")
+    
+    project = await job_service.get_project(job_id, session)
+    if not project:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    return {
+        "id": project.id,
+        "status": project.status.value,
+        "progress_percent": project.progress_percent,
+        "current_stage": project.current_stage,
+        "error": project.error,
+        "created_at": project.created_at.isoformat(),
+        "completed_at": project.completed_at.isoformat() if project.completed_at else None,
+        "assumptions_collected": project.assumptions_collected,
+        "duct_config": project.duct_config,
+        "heating_fuel": project.heating_fuel,
+        "file_size": project.file_size
+    }
+
+@router.get("/{job_id}", response_model=JobStatusSchema)
 async def get_job_status(
     job_id: str,
     session: AsyncSession = Depends(get_async_session)
@@ -26,14 +58,33 @@ async def get_job_status(
         
         logging.info(f"✅ Successfully retrieved job status for {job_id}: status={project.status.value}, error={project.error}")
         
-        # Return normal 200 response with job status (including failed jobs)
-        return JobStatus(
-            job_id=job_id,
-            status=project.status.value,
-            result=project.result,
-            error=project.error,
-            assumptions_collected=project.assumptions_collected
-        )
+        # Build response data
+        response_data = {
+            "job_id": job_id,
+            "status": project.status.value,
+            "result": project.result,
+            "error": project.error,
+            "assumptions_collected": project.assumptions_collected,
+            "progress_percent": project.progress_percent,
+            "current_stage": project.current_stage
+        }
+        
+        # Return appropriate status codes
+        if project.status == JobStatus.FAILED:
+            return JSONResponse(
+                content=response_data,
+                status_code=500
+            )
+        
+        # Return 202 for in-progress jobs
+        if project.status in [JobStatus.PENDING, JobStatus.PROCESSING]:
+            return JSONResponse(
+                content=response_data,
+                status_code=202
+            )
+        
+        # Return 200 for completed
+        return JobStatusSchema(**response_data)
     
     except HTTPException:
         # Re-raise HTTP exceptions (like 404)

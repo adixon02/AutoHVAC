@@ -187,6 +187,7 @@ AutoHVAC/
   - In-memory job processing without Celery/Redis
   - Mock HVAC analysis results for testing
   - Threaded background processing for development
+  - Progress tracking: 1% → 5% → 25% → 60% → 90% → 100%
 
 #### **Test Suite (`backend/tests/`)**
 - **`test_parser.py`**: Comprehensive parser component tests
@@ -288,6 +289,25 @@ MINIO_SECRET_KEY=minioadmin
    - Backend API: http://localhost:8000
    - API Docs: http://localhost:8000/docs
    - MinIO Console: http://localhost:9001
+
+## Running Background Workers
+
+### Development (Simple Processor)
+The development setup uses threaded background processing:
+- Jobs process in background threads without Redis/Celery
+- Progress tracking from 1% to 100% with detailed stages
+- Check logs for thread lifecycle: "🧵 THREAD: Started", "🚀 THREAD: Job processor started"
+- Temporary files streamed to `/tmp/` for memory efficiency with large PDFs
+
+### Production (Celery)
+For production with high concurrency and reliability:
+```bash
+# Start Celery worker with optimal settings
+celery -A tasks.parse_blueprint worker --loglevel=info --concurrency=4 -Ofair
+```
+- `--concurrency=4`: Process 4 jobs in parallel
+- `-Ofair`: Distribute tasks fairly among workers
+- Requires Redis for task queue and result backend
 
 #### Option 2: Lightweight Local Server (No Docker Required)
 

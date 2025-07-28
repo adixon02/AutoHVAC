@@ -13,24 +13,37 @@ from app.parser.schema import BlueprintSchema, Room
 from database import AsyncSessionLocal
 import uuid
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
-async def process_job_sync(project_id: str, file_content: bytes, filename: str, email: str = "", zip_code: str = "90210"):
+async def update_progress(project_id: str, percent: int, stage: str, session):
+    """Update job progress in database"""
+    await job_service.update_project(
+        project_id, 
+        {"progress_percent": percent, "current_stage": stage}, 
+        session
+    )
+    logger.info(f"📊 Progress: {project_id} - {percent}% - {stage}")
+
+async def process_job_sync(project_id: str, file_path: str, filename: str, email: str = "", zip_code: str = "90210"):
     """Process a job synchronously (for development without Celery)"""
+    logger.info(f"🚀 THREAD: Job processor started for {project_id} (file={filename}, path={file_path}, email={email})")
     try:
-        logger.info(f"🚀 Job processor picked up project {project_id} (file={filename}, size={len(file_content)}, email={email})")
         async with AsyncSessionLocal() as session:
             try:
-                logger.debug(f"{project_id} – starting set_project_processing")
-                # Update job status
-                await job_service.set_project_processing(project_id, session)
-                logger.debug(f"{project_id} – finished set_project_processing")
+                # Job is already set to processing in upload endpoint
+                logger.debug(f"{project_id} – job already in processing state")
                 
-                logger.debug(f"{project_id} – starting blueprint parsing simulation")
-                # Simulate blueprint parsing time
+                # Open PDF and update progress (5%)
+                await update_progress(project_id, 5, "opened_pdf", session)
+                
+                # TODO: Add actual PDF parsing with PyMuPDF here
+                # For now, simulate with sleep
                 await asyncio.sleep(1)
-                logger.debug(f"{project_id} – finished blueprint parsing simulation")
+                
+                # After geometry parsing (25%)
+                await update_progress(project_id, 25, "geometry_complete", session)
                 
                 # Check if assumptions are already collected (new multi-step flow)
                 project = await job_service.get_project(project_id, session)
@@ -52,9 +65,9 @@ async def process_job_sync(project_id: str, file_content: bytes, filename: str, 
                 else:
                     # New multi-step flow - assumptions already collected
                     logger.debug(f"{project_id} – assumptions already collected in multi-step flow")
-                # Simulate additional processing time
+                # Simulate AI analysis (60%)
                 await asyncio.sleep(1)
-                logger.debug(f"{project_id} – finished final processing")
+                await update_progress(project_id, 60, "ai_analysis_complete", session)
                 
             except Exception as e:
                 logger.exception(f"{project_id} – error in job processing setup: {e}")
@@ -98,6 +111,9 @@ async def process_job_sync(project_id: str, file_content: bytes, filename: str, 
             )
             logger.info(f"{project_id} – Manual J calculation completed")
             
+            # Update progress after calculations (90%)
+            await update_progress(project_id, 90, "calculations_complete", session)
+            
             # Format result for storage
             result = {
                 "heating_total": manualj_result["heating_total"],
@@ -131,6 +147,9 @@ async def process_job_sync(project_id: str, file_content: bytes, filename: str, 
                         job_result=result
                     )
                     
+                    # Update progress before completion (100%)
+                    await update_progress(project_id, 100, "completed", session)
+                    
                     # Update job with result and PDF path
                     await job_service.set_project_completed(project_id, result, pdf_path, session)
                     logger.info(f"{project_id} – SUCCESS: Job completed with PDF report: {pdf_path}")
@@ -139,39 +158,57 @@ async def process_job_sync(project_id: str, file_content: bytes, filename: str, 
                 except Exception as pdf_error:
                     logger.exception(f"{project_id} – error in PDF generation: {pdf_error}")
                     # Still mark as completed but without PDF
+                    await update_progress(project_id, 100, "completed", session)
                     await job_service.set_project_completed(project_id, result, session=session)
                     logger.info(f"{project_id} – SUCCESS: Job completed without PDF due to PDF generation error")
                 
-                logger.debug(f"{project_id} – starting rate limiter decrement")
+                logger.debug(f"{project_id} – starting cleanup")
+                # Cleanup temp file
+                if os.path.exists(file_path):
+                    os.unlink(file_path)
+                    logger.debug(f"{project_id} – deleted temp file {file_path}")
+                
                 # Release rate limiter
                 await rate_limiter.decrement_active_jobs(email, project_id)
-                logger.debug(f"{project_id} – finished rate limiter decrement")
+                logger.debug(f"{project_id} – finished cleanup")
                 
             except Exception as e:
                 logger.exception(f"{project_id} – error in job completion: {e}")
                 await job_service.set_project_failed(project_id, str(e), session)
                 await rate_limiter.decrement_active_jobs(email, project_id)
+                if os.path.exists(file_path):
+                    os.unlink(file_path)
                 return
         
     except Exception as e:
-        logger.exception(f"{project_id} – fatal error in process_job_sync: {e}")
+        logger.exception(f"💥 FATAL: Job {project_id} crashed: {type(e).__name__}: {str(e)}")
         async with AsyncSessionLocal() as session:
-            await job_service.set_project_failed(project_id, str(e), session)
+            error_msg = f"{type(e).__name__}: {str(e)[:200]}"
+            await job_service.set_project_failed(project_id, error_msg, session)
             await rate_limiter.decrement_active_jobs(email, project_id)
+        if os.path.exists(file_path):
+            os.unlink(file_path)
 
-def process_job_async(project_id: str, file_content: bytes, filename: str, email: str = "", zip_code: str = "90210"):
+def process_job_async(project_id: str, file_path: str, filename: str, email: str = "", zip_code: str = "90210"):
     """Process a job in a background thread (for development without Celery)"""
+    logger.info(f"🧵 THREAD: Creating background thread for job {project_id}")
+    
     def run_async_job():
-        # Create new event loop for the thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        logger.info(f"🧵 THREAD: Started background thread for job {project_id}")
         try:
+            # Create new event loop for the thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             loop.run_until_complete(
-                process_job_sync(project_id, file_content, filename, email, zip_code)
+                process_job_sync(project_id, file_path, filename, email, zip_code)
             )
+        except Exception as e:
+            logger.exception(f"🧵 THREAD: Fatal error in thread for job {project_id}")
         finally:
+            logger.info(f"🧵 THREAD: Finished background thread for job {project_id}")
             loop.close()
     
-    thread = threading.Thread(target=run_async_job)
+    thread = threading.Thread(target=run_async_job, name=f"job-{project_id[:8]}")
     thread.daemon = True
     thread.start()
+    logger.info(f"🧵 THREAD: Background thread launched for job {project_id}")

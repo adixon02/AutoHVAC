@@ -9,7 +9,7 @@ from httpx import AsyncClient
 from fastapi.testclient import TestClient
 import io
 
-from main import app
+from app.main import app
 from database import get_async_session
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
