@@ -103,7 +103,7 @@ class UserService:
         """Create email verification token"""
         # Generate secure token
         token = secrets.token_urlsafe(32)
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+        expires_at = datetime.utcnow() + timedelta(hours=24)
         
         # Ensure user exists
         await UserService.get_or_create_user(email, session)
@@ -136,7 +136,7 @@ class UserService:
             return None
         
         # Check if token is expired
-        if email_token.expires_at < datetime.now(timezone.utc):
+        if email_token.expires_at < datetime.utcnow():
             await session.delete(email_token)
             await session.commit()
             return None
@@ -154,7 +154,7 @@ class UserService:
     @staticmethod
     async def cleanup_expired_tokens(session: AsyncSession) -> int:
         """Clean up expired email tokens"""
-        statement = select(EmailToken).where(EmailToken.expires_at < datetime.now(timezone.utc))
+        statement = select(EmailToken).where(EmailToken.expires_at < datetime.utcnow())
         result = await session.execute(statement)
         expired_tokens = result.scalars().all()
         

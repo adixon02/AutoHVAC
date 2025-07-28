@@ -140,7 +140,7 @@ class JobService:
         
         # Set completion time if status changed to completed
         if updates.get("status") == JobStatus.COMPLETED:
-            project.completed_at = datetime.now(timezone.utc)
+            project.completed_at = datetime.utcnow()
         
         session.add(project)
         await session.commit()

@@ -22,7 +22,7 @@ class User(SQLModel, table=True):
     free_report_used: bool = Field(default=False)
     stripe_customer_id: Optional[str] = Field(default=None, max_length=255)
     active_subscription: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
     
     # Relationships
     projects: List["Project"] = Relationship(back_populates="user")
@@ -34,7 +34,7 @@ class EmailToken(SQLModel, table=True):
     token: str = Field(primary_key=True, max_length=255)
     user_email: str = Field(foreign_key="users.email", index=True, max_length=255)
     expires_at: datetime
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
     
     # Relationships
     user: Optional[User] = Relationship(back_populates="email_tokens")
@@ -51,7 +51,7 @@ class Project(SQLModel, table=True):
     result: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     error: Optional[str] = Field(default=None)
     pdf_report_path: Optional[str] = Field(default=None, max_length=255)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
     completed_at: Optional[datetime] = Field(default=None)
     
     # Manual J assumptions
