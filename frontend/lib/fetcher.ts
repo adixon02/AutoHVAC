@@ -132,20 +132,26 @@ export const apiHelpers = {
   // File upload
   uploadBlueprint: async (formData: FormData) => {
     try {
-      const apiBase = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8000';
-      const response = await fetch(`${apiBase}/api/v1/blueprint/upload`, {
-        method: 'POST',
-        body: formData,
-      });
-      const text = await response.text();
-      if (!response.ok) {
-        console.error(`Upload failed: ${response.status}`, text);
-        throw new Error(`API ${response.status}: ${text}`);
-      }
-      return JSON.parse(text);
+      const response = await api.post('/api/v1/blueprint/upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+      return response.data
     } catch (error) {
-      console.error('Upload error:', error);
-      throw error;
+      // Handle specific error cases
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 403 && error.response?.headers?.['x-verification-required']) {
+          throw new EmailVerificationError(error.response.data.detail)
+        }
+        if (error.response?.status === 402 && error.response?.headers?.['x-checkout-url']) {
+          throw new PaymentRequiredError(error.response.data.detail, error.response.headers['x-checkout-url'])
+        }
+        console.error(`Upload failed: ${error.response?.status}`, error.response?.data)
+        throw new Error(`API ${error.response?.status}: ${JSON.stringify(error.response?.data)}`)
+      }
+      console.error('Upload error:', error)
+      throw error
     }
   },
   

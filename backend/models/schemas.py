@@ -1,9 +1,18 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, Any, Literal
 
 class JobResponse(BaseModel):
     job_id: str
     status: str
+
+class UploadResponse(BaseModel):
+    job_id: str = Field(..., alias="jobId")
+    status: str
+    project_label: str = Field(..., alias="projectLabel")
+    
+    class Config:
+        populate_by_name = True
+        by_alias = True
 
 class JobStatus(BaseModel):
     job_id: str

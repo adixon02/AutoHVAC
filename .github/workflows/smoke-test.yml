@@ -1,0 +1,109 @@
+name: Smoke Test - Upload Flow
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: autohvac_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        cd backend
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio httpx aiosqlite
+    
+    - name: Run backend tests
+      env:
+        DATABASE_URL: postgresql://test:test@localhost:5432/autohvac_test
+        JWT_SECRET: test-secret
+        STRIPE_SECRET_KEY: sk_test_dummy
+        STRIPE_PRICE_ID: price_test_dummy
+        SENDGRID_API_KEY: SG.dummy
+        EMAIL_FROM: test@example.com
+      run: |
+        cd backend
+        # Run contract test
+        pytest tests/test_upload_contract.py -v
+    
+    - name: Start backend server
+      env:
+        DATABASE_URL: postgresql://test:test@localhost:5432/autohvac_test
+        JWT_SECRET: test-secret
+        STRIPE_SECRET_KEY: sk_test_dummy
+        STRIPE_PRICE_ID: price_test_dummy
+        SENDGRID_API_KEY: SG.dummy
+        EMAIL_FROM: test@example.com
+      run: |
+        cd backend
+        # Run migrations
+        alembic upgrade head
+        # Start server in background
+        uvicorn main:app --host 0.0.0.0 --port 8000 &
+        # Wait for server to start
+        sleep 10
+    
+    - name: Test upload flow with curl
+      run: |
+        # Create a simple PDF file
+        echo "%PDF-1.4" > test.pdf
+        
+        # Upload the file
+        RESPONSE=$(curl -s -X POST http://localhost:8000/api/v1/blueprint/upload \
+          -F "file=@test.pdf" \
+          -F "email=smoke@test.com" \
+          -F "project_label=Smoke Test" \
+          -F "duct_config=ducted_attic" \
+          -F "heating_fuel=gas")
+        
+        echo "Upload response: $RESPONSE"
+        
+        # Extract jobId using jq
+        JOB_ID=$(echo $RESPONSE | jq -r '.jobId')
+        
+        if [ "$JOB_ID" == "null" ] || [ -z "$JOB_ID" ]; then
+          echo "ERROR: No jobId in response"
+          exit 1
+        fi
+        
+        echo "Got jobId: $JOB_ID"
+        
+        # Check job status
+        STATUS_RESPONSE=$(curl -s http://localhost:8000/api/v1/job/$JOB_ID)
+        echo "Status response: $STATUS_RESPONSE"
+        
+        # Verify we get a 200 response (not 404)
+        STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/job/$JOB_ID)
+        
+        if [ "$STATUS_CODE" != "200" ]; then
+          echo "ERROR: Job status returned $STATUS_CODE instead of 200"
+          exit 1
+        fi
+        
+        echo "✅ Smoke test passed: Upload returned jobId and status lookup succeeded"

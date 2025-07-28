@@ -180,11 +180,16 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
       // Use the existing API helper that has proper endpoint and error handling
       const result = await apiHelpers.uploadBlueprint(formData)
       
+      // Runtime guard: Ensure jobId is present
+      if (!result.jobId) {
+        throw new Error('Upload route returned no jobId - API contract violation')
+      }
+      
       // Set user email cookie so dashboard recognizes the user
       Cookies.set('user_email', projectData.email, { expires: 30 }) // 30 days
       
       // Redirect to analyzing page
-      router.push(`/analyzing/${result.job_id}`)
+      router.push(`/analyzing/${result.jobId}`)
       handleClose()
       
     } catch (error) {

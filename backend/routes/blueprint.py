@@ -13,7 +13,7 @@ from services.job_service import job_service
 from services.user_service import user_service
 from services.rate_limiter import rate_limiter
 from core.email import email_service
-from models.schemas import JobResponse, PaymentRequiredResponse
+from models.schemas import JobResponse, PaymentRequiredResponse, UploadResponse
 from models.enums import DuctConfig, HeatingFuel
 from core.stripe_config import get_stripe_client, STRIPE_PRICE_ID
 from app.config import DEBUG, DEV_VERIFIED_EMAILS
@@ -67,7 +67,7 @@ async def test_upload(
         print("❌ test-upload error:", repr(e))
         raise
 
-@router.post("/upload")
+@router.post("/upload", response_model=UploadResponse)
 async def upload_blueprint(
     email: str = Form(...),
     project_label: str = Form(...),
@@ -267,13 +267,10 @@ async def upload_blueprint(
             raise HTTPException(status_code=500, detail="Failed to process upload")
         
         logger.info(f"✅ UPLOAD SUCCESS: Returning jobId {project_id} for {email}")
-        return JSONResponse(
-            content={
-                "job_id": project_id, 
-                "status": "pending",
-                "project_label": project_label.strip()
-            },
-            headers={"X-Request-ID": request_id}
+        return UploadResponse(
+            job_id=project_id,
+            status="pending",
+            project_label=project_label.strip()
         )
         
     except HTTPException as e:
