@@ -61,8 +61,8 @@ class DatabaseRateLimiter:
                         Project.status == JobStatus.PROCESSING
                     )
                 )
-                result = await session.exec(stmt)
-                active_count = result.one()
+                result = await session.execute(stmt)
+                active_count = result.scalar() or 0
                 
                 if active_count >= burst_limit:
                     return {
@@ -138,8 +138,8 @@ class DatabaseRateLimiter:
                     Project.status == JobStatus.PROCESSING
                 )
             )
-            active_result = await session.exec(active_stmt)
-            active_jobs = active_result.one()
+            active_result = await session.execute(active_stmt)
+            active_jobs = active_result.scalar() or 0
             
             # Count recent requests from Redis (if available)
             recent_requests = 0
@@ -168,8 +168,8 @@ class DatabaseRateLimiter:
                     Project.created_at < cutoff_time
                 )
             )
-            result = await session.exec(stmt)
-            stuck_jobs = result.all()
+            result = await session.execute(stmt)
+            stuck_jobs = result.scalars().all()
             
             # Mark them as failed
             cleaned_count = 0
