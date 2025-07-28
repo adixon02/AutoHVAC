@@ -8,9 +8,17 @@ import logging
 import os
 import subprocess
 import sys
-from alembic.config import Config
-from alembic import command
-from database import sync_engine, DATABASE_URL
+
+# Add the backend directory to the Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+try:
+    from alembic.config import Config
+    from alembic import command
+    from database import sync_engine, DATABASE_URL
+except Exception as e:
+    logging.error(f"Failed to import required modules: {e}")
+    sys.exit(1)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
