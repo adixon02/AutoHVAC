@@ -20,13 +20,14 @@ from app.config import DEBUG, DEV_VERIFIED_EMAILS
 
 logger = logging.getLogger(__name__)
 
-# Use simple processor for now (Celery task needs database integration updates)
-# TODO: Update Celery task to use database instead of in-memory store
-USE_CELERY = False
 from services.simple_job_processor import process_job_async
 from tasks.parse_blueprint import process_blueprint
 import aiofiles
 import os
+
+# Use simple processor for now (Celery task needs database integration updates)
+# TODO: Update Celery task to use database instead of in-memory store
+USE_CELERY = False
 
 router = APIRouter()
 
@@ -78,6 +79,8 @@ async def upload_blueprint(
     session: AsyncSession = Depends(get_async_session)
 ):
     request_id = f"req_{uuid.uuid4().hex[:8]}"
+    print(f">>> UPLOAD ENDPOINT HIT: email={email}, file={file.filename}, size={file.size}")
+    logger.error(f">>> UPLOAD ENDPOINT HIT: email={email}, file={file.filename}, size={file.size}")
     logger.info(f"🔍 UPLOAD STARTED: email={email}, file={file.filename}, size={file.size}, project={project_label}")
     
     try:
@@ -267,17 +270,28 @@ async def upload_blueprint(
                     os.unlink(temp_path)
                     raise HTTPException(status_code=400, detail="Invalid PDF file")
             
-            logger.info("🔍 Step 8: Starting background job processor")
-            logger.info(f"Starting background thread for job {project_id}")
+            logger.error("🔍 Step 8: Starting background job processor")
+            logger.error(f"Starting background thread for job {project_id}")
+            print(f">>> BLUEPRINT UPLOAD: About to start background job for {project_id}")
+            print(f">>> USE_CELERY = {USE_CELERY}")
+            
             if USE_CELERY:
                 # Read file content for Celery task
                 async with aiofiles.open(temp_path, 'rb') as f:
                     file_content = await f.read()
                 process_blueprint.delay(project_id, file_content, file.filename, email, "90210")
             else:
-                process_job_async(project_id, temp_path, file.filename, email, "90210")
-            logger.info(f"Background thread started for job {project_id}")
-            logger.info("🔍 Step 8 PASSED: Background job processor started")
+                print(f">>> Calling process_job_async for {project_id}")
+                try:
+                    process_job_async(project_id, temp_path, file.filename, email, "90210")
+                    print(f">>> process_job_async called successfully for {project_id}")
+                except Exception as thread_error:
+                    logger.exception(f">>> ERROR starting thread: {thread_error}")
+                    print(f">>> ERROR starting thread: {thread_error}")
+                    raise
+                    
+            logger.error(f"Background thread started for job {project_id}")
+            logger.error("🔍 Step 8 PASSED: Background job processor started")
                 
         except HTTPException:
             # Re-raise HTTP exceptions

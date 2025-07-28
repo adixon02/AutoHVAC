@@ -375,6 +375,8 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
 
 def process_job_async(project_id: str, file_path: str, filename: str, email: str = "", zip_code: str = "90210"):
     """Process a job in a background thread (for development without Celery)"""
+    print(f">>> process_job_async CALLED: project_id={project_id}, file_path={file_path}")
+    logger.error(f"🧵 THREAD: Creating background thread for job {project_id}")
     logger.info(f"🧵 THREAD: Creating background thread for job {project_id}")
     
     def run_async_job():
