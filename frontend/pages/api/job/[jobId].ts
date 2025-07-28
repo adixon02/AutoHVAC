@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import axios from 'axios'
-import { API_URL, API_ENDPOINTS } from '../../../constants/api'
+import { API_URL, API_ENDPOINTS } from '@/constants/api'
 
 export default async function handler(
   req: NextApiRequest,

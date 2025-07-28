@@ -1,5 +1,5 @@
 import React from 'react'
-import { downloadProjectReport } from '../lib/fetcher'
+import { downloadProjectReport } from '@/lib/fetcher'
 
 interface ProjectCardProps {
   project: {

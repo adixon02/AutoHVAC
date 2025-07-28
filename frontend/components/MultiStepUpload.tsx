@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useRouter } from 'next/router'
-import { apiHelpers } from '../lib/fetcher'
+import { apiHelpers } from '@/lib/fetcher'
 import Cookies from 'js-cookie'
 
 interface ProjectData {
