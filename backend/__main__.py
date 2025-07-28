@@ -14,20 +14,38 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def run_migrations():
-    """Run database migrations"""
+    """Run database migrations with fallback to direct table creation"""
     try:
         logger.info("🔧 Running database migrations...")
         from init_db import initialize_database
         
-        if not initialize_database():
-            logger.error("❌ Database initialization failed")
-            return False
+        if initialize_database():
+            logger.info("✅ Database migrations completed")
+            return True
+        else:
+            logger.warning("⚠️ Alembic migrations failed, trying direct table creation...")
+            return create_tables_directly()
             
-        logger.info("✅ Database migrations completed")
+    except Exception as e:
+        logger.exception(f"❌ Migration error: {e}")
+        logger.warning("⚠️ Trying direct table creation as fallback...")
+        return create_tables_directly()
+
+def create_tables_directly():
+    """Create tables directly using SQLModel as fallback"""
+    try:
+        logger.info("🔧 Creating tables directly with SQLModel...")
+        
+        from sqlmodel import SQLModel
+        from database import sync_engine
+        from models.db_models import User, EmailToken, Project, RateLimit
+        
+        SQLModel.metadata.create_all(sync_engine)
+        logger.info("✅ Tables created directly with SQLModel!")
         return True
         
     except Exception as e:
-        logger.exception(f"❌ Migration error: {e}")
+        logger.exception(f"❌ Direct table creation failed: {e}")
         return False
 
 def start_server():
