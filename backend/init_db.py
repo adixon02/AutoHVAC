@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Initialize database schema using Alembic migrations
+Initialize database schema by creating tables directly
 Run this script to create all tables in production
 """
 import asyncio
@@ -12,36 +12,33 @@ import sys
 # Add the backend directory to the Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-try:
-    from alembic.config import Config
-    from alembic import command
-    from database import sync_engine, DATABASE_URL
-except Exception as e:
-    logging.error(f"Failed to import required modules: {e}")
-    sys.exit(1)
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def run_migrations():
-    """Run Alembic migrations to create database schema"""
+try:
+    from sqlmodel import SQLModel
+    from database import sync_engine, DATABASE_URL
+    # Import all models to register them with SQLModel
+    from models.db_models import User, EmailToken, Project, RateLimit
+except Exception as e:
+    logger.exception(f"Failed to import required modules: {e}")
+    sys.exit(1)
+
+def create_tables():
+    """Create all tables using SQLModel metadata"""
     try:
-        logger.info(f"Initializing database schema...")
+        logger.info(f"Creating database tables...")
         logger.info(f"Database URL: {DATABASE_URL}")
         
-        # Create Alembic configuration
-        alembic_cfg = Config("alembic.ini")
-        alembic_cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
+        # Create all tables
+        logger.info("Creating tables using SQLModel.metadata.create_all...")
+        SQLModel.metadata.create_all(sync_engine)
         
-        # Run migrations
-        logger.info("Running Alembic migrations...")
-        command.upgrade(alembic_cfg, "head")
-        
-        logger.info("✅ Database schema initialized successfully!")
+        logger.info("✅ Database tables created successfully!")
         return True
         
     except Exception as e:
-        logger.exception(f"❌ Failed to initialize database: {e}")
+        logger.exception(f"❌ Failed to create tables: {e}")
         return False
 
 def check_database_connection():
@@ -62,7 +59,7 @@ if __name__ == "__main__":
     if not check_database_connection():
         sys.exit(1)
     
-    if not run_migrations():
+    if not create_tables():
         sys.exit(1)
     
     logger.info("🎉 Database initialization completed!")
