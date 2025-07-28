@@ -72,7 +72,11 @@ class TestConcurrentProgress:
                                 mock_blueprint.dict = MagicMock(return_value={"rooms": [{"name": "Living Room"}]})
                                 mock_cleanup.return_value = mock_blueprint
                                 
-                                mock_envelope.return_value = MagicMock(__dict__={"wall_r_value": 13.0})
+                                # Create a simple object with __dict__ attribute
+                                class MockEnvelope:
+                                    def __init__(self):
+                                        self.wall_r_value = 13.0
+                                mock_envelope.return_value = MockEnvelope()
                                 
                                 # Mock rate limiter
                                 with patch('services.rate_limiter.rate_limiter') as mock_rate_limiter:
@@ -135,9 +139,16 @@ class TestConcurrentProgress:
                                         mock_job_service.set_project_completed = AsyncMock(return_value=True)
                                         mock_job_service.wait_for_assumptions = AsyncMock(return_value=True)
                                         
-                                        # Start background job processor
+                                        # Start background job processor with mock session
+                                        mock_session = AsyncMock()
+                                        mock_result = AsyncMock()
+                                        mock_scalars = AsyncMock()
+                                        mock_scalars.first = AsyncMock(return_value=None)
+                                        mock_result.scalars = AsyncMock(return_value=mock_scalars) 
+                                        mock_session.execute = AsyncMock(return_value=mock_result)
+                                        
                                         job_task = asyncio.create_task(
-                                            process_job_sync(project_id, sample_pdf_path, "test.pdf", "test@example.com")
+                                            process_job_sync(project_id, sample_pdf_path, "test.pdf", "test@example.com", "90210", mock_session)
                                         )
                                         
                                         # Wait a bit for job to start

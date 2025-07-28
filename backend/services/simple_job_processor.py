@@ -15,6 +15,7 @@ from app.parser.text_parser import TextParser
 from app.parser.ai_cleanup import cleanup, AICleanupError
 from services.envelope_extractor import extract_envelope_data, EnvelopeExtractorError
 from database import AsyncSessionLocal
+from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
 import logging
 import os
@@ -41,13 +42,16 @@ class PDFTooLargeError(Exception):
     pass
 
 async def update_progress(project_id: str, percent: int, stage: str):
-    """Update job progress in database with retry logic"""
+    """Update job progress in database with retry logic and isolated session"""
     for attempt in range(2):
         try:
-            await job_service.update_project(
-                project_id, 
-                {"progress_percent": percent, "current_stage": stage}
-            )
+            # Create isolated session for each progress update
+            async with AsyncSessionLocal() as session:
+                await job_service.update_project(
+                    project_id, 
+                    {"progress_percent": percent, "current_stage": stage},
+                    session
+                )
             logger.info(f"📊 Progress: {project_id} - {percent}% - {stage}")
             return
         except Exception as e:
@@ -58,7 +62,7 @@ async def update_progress(project_id: str, percent: int, stage: str):
                 logger.exception(f"Failed to update progress after 2 attempts: {e}", extra={"jobId": project_id})
                 raise
 
-async def run_ai_analysis(project_id: str, file_path: str):
+async def run_ai_analysis(project_id: str, file_path: str, session: AsyncSession):
     """
     Run AI analysis on the PDF with comprehensive error handling and safeguards
     
@@ -207,15 +211,15 @@ async def run_ai_analysis(project_id: str, file_path: str):
             AICleanupError, EnvelopeExtractorError) as e:
         logger.exception("AI_ANALYSIS_CRASH", extra={"jobId": project_id})
         error_msg = f"{type(e).__name__}: {str(e)[:200]}"
-        await job_service.set_project_failed(project_id, error_msg)
+        await job_service.set_project_failed(project_id, error_msg, session)
         raise
     except Exception as e:
         logger.exception("AI_ANALYSIS_UNEXPECTED_ERROR", extra={"jobId": project_id})
         error_msg = f"Unexpected AI analysis error: {type(e).__name__}: {str(e)[:200]}"
-        await job_service.set_project_failed(project_id, error_msg)
+        await job_service.set_project_failed(project_id, error_msg, session)
         raise AICleanupError(error_msg)
 
-async def process_job_sync(project_id: str, file_path: str, filename: str, email: str = "", zip_code: str = "90210"):
+async def process_job_sync(project_id: str, file_path: str, filename: str, email: str = "", zip_code: str = "90210", session: AsyncSession = None):
     """Process a job synchronously (for development without Celery)"""
     logger.info(f"🚀 THREAD: Job processor started for {project_id} (file={filename}, path={file_path}, email={email})")
     try:
@@ -233,7 +237,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
         await update_progress(project_id, 25, "geometry_complete")
         
         # Check if assumptions are already collected (new multi-step flow)
-        project = await job_service.get_project(project_id)
+        project = await job_service.get_project(project_id, session)
         if not project:
             raise Exception("Project not found")
         
@@ -254,10 +258,10 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
             logger.debug(f"{project_id} – assumptions already collected in multi-step flow")
         
         # Real AI analysis (65% -> 90%)
-        await run_ai_analysis(project_id, file_path)
+        await run_ai_analysis(project_id, file_path, session)
         
         # Get the updated project with assumptions
-        project = await job_service.get_project(project_id)
+        project = await job_service.get_project(project_id, session)
         if not project:
             raise Exception("Project not found")
         
@@ -313,7 +317,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
         try:
             logger.debug(f"{project_id} – starting get_project")
             # Get project details for PDF generation
-            project = await job_service.get_project(project_id)
+            project = await job_service.get_project(project_id, session)
             if not project:
                 raise Exception("Project not found")
             logger.debug(f"{project_id} – finished get_project")
@@ -332,7 +336,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
                 await update_progress(project_id, 100, "completed")
                 
                 # Update job with result and PDF path
-                await job_service.set_project_completed(project_id, result, pdf_path)
+                await job_service.set_project_completed(project_id, result, pdf_path, session)
                 logger.info(f"{project_id} – SUCCESS: Job completed with PDF report: {pdf_path}")
                 logger.debug(f"{project_id} – finished PDF generation")
                 
@@ -340,7 +344,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
                 logger.exception(f"{project_id} – error in PDF generation: {pdf_error}")
                 # Still mark as completed but without PDF
                 await update_progress(project_id, 100, "completed")
-                await job_service.set_project_completed(project_id, result)
+                await job_service.set_project_completed(project_id, result, session=session)
                 logger.info(f"{project_id} – SUCCESS: Job completed without PDF due to PDF generation error")
             
             logger.debug(f"{project_id} – starting cleanup")
@@ -355,7 +359,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
             
         except Exception as e:
             logger.exception(f"{project_id} – error in job completion: {e}")
-            await job_service.set_project_failed(project_id, str(e))
+            await job_service.set_project_failed(project_id, str(e), session)
             await rate_limiter.decrement_active_jobs(email, project_id)
             if os.path.exists(file_path):
                 os.unlink(file_path)
@@ -364,7 +368,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
     except Exception as e:
         logger.exception(f"💥 FATAL: Job {project_id} crashed: {type(e).__name__}: {str(e)}")
         error_msg = f"{type(e).__name__}: {str(e)[:200]}"
-        await job_service.set_project_failed(project_id, error_msg)
+        await job_service.set_project_failed(project_id, error_msg, session)
         await rate_limiter.decrement_active_jobs(email, project_id)
         if os.path.exists(file_path):
             os.unlink(file_path)
@@ -376,17 +380,16 @@ def process_job_async(project_id: str, file_path: str, filename: str, email: str
     def run_async_job():
         logger.info(f"🧵 THREAD: Started background thread for job {project_id}")
         try:
-            # Create new event loop for the thread
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(
-                process_job_sync(project_id, file_path, filename, email, zip_code)
-            )
+            async def run_job():
+                async with AsyncSessionLocal() as session:
+                    await process_job_sync(project_id, file_path, filename, email, zip_code, session)
+            
+            # Create fresh event loop for the thread
+            asyncio.run(run_job())
         except Exception as e:
             logger.exception(f"🧵 THREAD: Fatal error in thread for job {project_id}")
         finally:
             logger.info(f"🧵 THREAD: Finished background thread for job {project_id}")
-            loop.close()
     
     thread = threading.Thread(target=run_async_job, name=f"job-{project_id[:8]}")
     thread.daemon = True
