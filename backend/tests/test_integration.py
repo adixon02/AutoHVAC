@@ -9,10 +9,13 @@ import tempfile
 import os
 from unittest.mock import Mock, AsyncMock, patch
 from uuid import uuid4
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from tasks.parse_blueprint import process_blueprint
 from services.store import job_store
 from app.parser.schema import BlueprintSchema, Room
+from models.db_models import Project, JobStatus
 
 
 class TestFullPipeline:
@@ -382,6 +385,50 @@ class TestErrorHandling:
         final_job = job_store.get_job(job_id)
         assert final_job["status"] == "failed"
         assert "error" in final_job
+
+
+class TestDatabaseSchema:
+    """Test database schema consistency"""
+    
+    def test_project_model_with_progress_fields(self):
+        """Test that Project model can be instantiated with progress tracking fields"""
+        # Test that we can create a Project instance with all required fields
+        project = Project(
+            user_email="test@example.com",
+            project_label="Test Project",
+            filename="test.pdf",
+            file_size=1024,
+            status=JobStatus.PENDING,
+            progress_percent=0,
+            current_stage="initializing",
+            duct_config="ducted_attic",
+            heating_fuel="gas",
+            assumptions_collected=True
+        )
+        
+        # Verify fields are set correctly
+        assert project.progress_percent == 0
+        assert project.current_stage == "initializing"
+        assert project.status == JobStatus.PENDING
+        assert project.user_email == "test@example.com"
+        assert project.project_label == "Test Project"
+        assert project.filename == "test.pdf"
+        assert project.file_size == 1024
+        assert project.duct_config == "ducted_attic"
+        assert project.heating_fuel == "gas"
+        assert project.assumptions_collected is True
+        
+        # Verify that required fields have proper defaults
+        project_with_defaults = Project(
+            user_email="test2@example.com",
+            project_label="Test Project 2", 
+            filename="test2.pdf"
+        )
+        
+        assert project_with_defaults.progress_percent == 0
+        assert project_with_defaults.current_stage == "initializing"
+        assert project_with_defaults.status == JobStatus.PENDING
+        assert project_with_defaults.assumptions_collected is False
 
 
 if __name__ == "__main__":

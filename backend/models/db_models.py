@@ -63,7 +63,7 @@ class Project(SQLModel, table=True):
     
     # Progress tracking
     progress_percent: int = Field(default=0)
-    current_stage: Optional[str] = Field(default="initializing")
+    current_stage: str = Field(default="initializing", max_length=50)
     
     # Relationships
     user: Optional[User] = Relationship(back_populates="projects")
