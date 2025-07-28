@@ -46,6 +46,36 @@ async def force_migration():
             "message": str(e)
         }
 
+@router.post("/create-enum-types")
+async def create_enum_types(
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Create PostgreSQL enum types directly via SQL"""
+    try:
+        import logging
+        
+        logging.info("🔧 Creating enum types directly...")
+        
+        # Create enum types that PostgreSQL expects
+        await session.execute("CREATE TYPE IF NOT EXISTS ductconfig AS ENUM ('ducted_attic', 'ducted_crawl', 'ductless')")
+        await session.execute("CREATE TYPE IF NOT EXISTS heatingfuel AS ENUM ('gas', 'heat_pump', 'electric')")
+        await session.execute("CREATE TYPE IF NOT EXISTS jobstatus AS ENUM ('pending', 'processing', 'completed', 'failed')")
+        
+        await session.commit()
+        
+        logging.info("✅ Enum types created successfully")
+        return {
+            "status": "success",
+            "message": "Enum types created successfully"
+        }
+            
+    except Exception as e:
+        logging.exception(f"Enum creation error: {e}")
+        return {
+            "status": "error", 
+            "message": str(e)
+        }
+
 @router.post("/debug-create-project")
 async def debug_create_project(
     session: AsyncSession = Depends(get_async_session)
