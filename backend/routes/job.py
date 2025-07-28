@@ -16,6 +16,23 @@ async def test_route():
         logging.exception(f"Test route failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/create-tables")
+async def create_tables_endpoint():
+    """Emergency endpoint to create database tables"""
+    try:
+        from sqlmodel import SQLModel
+        from database import sync_engine
+        from models.db_models import User, EmailToken, Project, RateLimit
+        
+        logging.info("Creating database tables...")
+        SQLModel.metadata.create_all(sync_engine)
+        logging.info("✅ Tables created successfully!")
+        
+        return {"status": "success", "message": "Database tables created"}
+    except Exception as e:
+        logging.exception(f"Failed to create tables: {e}")
+        return {"status": "error", "message": str(e)}
+
 @router.get("/db-test/{job_id}")
 async def test_db_connection(
     job_id: str,
