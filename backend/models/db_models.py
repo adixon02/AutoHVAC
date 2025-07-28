@@ -55,8 +55,8 @@ class Project(SQLModel, table=True):
     completed_at: Optional[datetime] = Field(default=None)
     
     # Manual J assumptions
-    duct_config: Optional[DuctConfig] = Field(default=None)
-    heating_fuel: Optional[HeatingFuel] = Field(default=None)
+    duct_config: Optional[str] = Field(default=None)
+    heating_fuel: Optional[str] = Field(default=None)
     assumptions_collected: bool = Field(default=False)
     
     # Parsed blueprint data
