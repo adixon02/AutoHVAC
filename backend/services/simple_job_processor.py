@@ -219,7 +219,7 @@ async def run_ai_analysis(project_id: str, file_path: str, session: AsyncSession
         await job_service.set_project_failed(project_id, error_msg, session)
         raise AICleanupError(error_msg)
 
-async def process_job_sync(project_id: str, file_path: str, filename: str, email: str = "", zip_code: str = "90210", session: AsyncSession = None):
+async def process_job_sync(project_id: str, file_path: str, filename: str, email: str = "", zip_code: str = "90210"):
     """Process a job synchronously (for development without Celery)"""
     logger.info(f"🚀 THREAD: Job processor started for {project_id} (file={filename}, path={file_path}, email={email})")
     try:
@@ -237,7 +237,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
         await update_progress(project_id, 25, "geometry_complete")
         
         # Check if assumptions are already collected (new multi-step flow)
-        project = await job_service.get_project(project_id, session)
+        project = await job_service.get_project(project_id)
         if not project:
             raise Exception("Project not found")
         
@@ -258,10 +258,11 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
             logger.debug(f"{project_id} – assumptions already collected in multi-step flow")
         
         # Real AI analysis (65% -> 90%)
-        await run_ai_analysis(project_id, file_path, session)
+        async with AsyncSessionLocal() as ai_session:
+            await run_ai_analysis(project_id, file_path, ai_session)
         
         # Get the updated project with assumptions
-        project = await job_service.get_project(project_id, session)
+        project = await job_service.get_project(project_id)
         if not project:
             raise Exception("Project not found")
         
@@ -317,7 +318,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
         try:
             logger.debug(f"{project_id} – starting get_project")
             # Get project details for PDF generation
-            project = await job_service.get_project(project_id, session)
+            project = await job_service.get_project(project_id)
             if not project:
                 raise Exception("Project not found")
             logger.debug(f"{project_id} – finished get_project")
@@ -336,7 +337,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
                 await update_progress(project_id, 100, "completed")
                 
                 # Update job with result and PDF path
-                await job_service.set_project_completed(project_id, result, pdf_path, session)
+                await job_service.set_project_completed(project_id, result, pdf_path)
                 logger.info(f"{project_id} – SUCCESS: Job completed with PDF report: {pdf_path}")
                 logger.debug(f"{project_id} – finished PDF generation")
                 
@@ -344,7 +345,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
                 logger.exception(f"{project_id} – error in PDF generation: {pdf_error}")
                 # Still mark as completed but without PDF
                 await update_progress(project_id, 100, "completed")
-                await job_service.set_project_completed(project_id, result, session=session)
+                await job_service.set_project_completed(project_id, result)
                 logger.info(f"{project_id} – SUCCESS: Job completed without PDF due to PDF generation error")
             
             logger.debug(f"{project_id} – starting cleanup")
@@ -359,7 +360,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
             
         except Exception as e:
             logger.exception(f"{project_id} – error in job completion: {e}")
-            await job_service.set_project_failed(project_id, str(e), session)
+            await job_service.set_project_failed(project_id, str(e))
             await rate_limiter.decrement_active_jobs(email, project_id)
             if os.path.exists(file_path):
                 os.unlink(file_path)
@@ -368,7 +369,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
     except Exception as e:
         logger.exception(f"💥 FATAL: Job {project_id} crashed: {type(e).__name__}: {str(e)}")
         error_msg = f"{type(e).__name__}: {str(e)[:200]}"
-        await job_service.set_project_failed(project_id, error_msg, session)
+        await job_service.set_project_failed(project_id, error_msg)
         await rate_limiter.decrement_active_jobs(email, project_id)
         if os.path.exists(file_path):
             os.unlink(file_path)
@@ -383,13 +384,20 @@ def process_job_async(project_id: str, file_path: str, filename: str, email: str
         logger.info(f"🧵 THREAD: Started background thread for job {project_id}")
         try:
             async def run_job():
-                async with AsyncSessionLocal() as session:
-                    await process_job_sync(project_id, file_path, filename, email, zip_code, session)
+                await process_job_sync(project_id, file_path, filename, email, zip_code)
             
             # Create fresh event loop for the thread
             asyncio.run(run_job())
         except Exception as e:
-            logger.exception(f"🧵 THREAD: Fatal error in thread for job {project_id}")
+            logger.exception(f"🧵 THREAD: Fatal error in thread for job {project_id}: {str(e)}")
+            # Ensure job is marked as failed if thread crashes
+            try:
+                async def cleanup():
+                    await job_service.set_project_failed(project_id, f"Thread crashed: {str(e)}")
+                    await rate_limiter.decrement_active_jobs(email, project_id)
+                asyncio.run(cleanup())
+            except Exception as cleanup_error:
+                logger.error(f"Failed to cleanup after thread crash: {cleanup_error}")
         finally:
             logger.info(f"🧵 THREAD: Finished background thread for job {project_id}")
     
