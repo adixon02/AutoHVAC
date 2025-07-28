@@ -2,7 +2,7 @@ from typing import Optional, List, Dict, Any
 from sqlmodel import Session, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from models.db_models import Project, JobStatus, User
-from database import get_async_session
+from database import AsyncSessionLocal
 from datetime import datetime, timezone
 import uuid
 import asyncio
@@ -28,7 +28,7 @@ class JobService:
     ) -> str:
         """Create a new project and return its ID"""
         if session is None:
-            async with get_async_session() as session:
+            async with AsyncSessionLocal() as session:
                 return await JobService.create_project(user_email, project_label, filename, file_size, session)
         
         project_id = str(uuid.uuid4())
@@ -59,7 +59,7 @@ class JobService:
     ) -> str:
         """Create a new project with Manual J assumptions already collected"""
         if session is None:
-            async with get_async_session() as session:
+            async with AsyncSessionLocal() as session:
                 return await JobService.create_project_with_assumptions(
                     user_email, project_label, filename, file_size, 
                     duct_config, heating_fuel, session
@@ -112,7 +112,7 @@ class JobService:
     async def get_project(project_id: str, session: Optional[AsyncSession] = None) -> Optional[Project]:
         """Get project by ID"""
         if session is None:
-            async with get_async_session() as session:
+            async with AsyncSessionLocal() as session:
                 return await JobService.get_project(project_id, session)
         
         statement = select(Project).where(Project.id == project_id)
@@ -127,7 +127,7 @@ class JobService:
     ) -> bool:
         """Update project with given data"""
         if session is None:
-            async with get_async_session() as session:
+            async with AsyncSessionLocal() as session:
                 return await JobService.update_project(project_id, updates, session)
         
         project = await JobService.get_project(project_id)
@@ -154,7 +154,7 @@ class JobService:
     ) -> List[Project]:
         """Get all projects for a user"""
         if session is None:
-            async with get_async_session() as session:
+            async with AsyncSessionLocal() as session:
                 return await JobService.get_user_projects(user_email, limit, session)
         
         statement = select(Project).where(Project.user_email == user_email).order_by(Project.created_at.desc())
@@ -169,7 +169,7 @@ class JobService:
     async def delete_project(project_id: str, session: Optional[AsyncSession] = None) -> bool:
         """Delete a project"""
         if session is None:
-            async with get_async_session() as session:
+            async with AsyncSessionLocal() as session:
                 return await JobService.delete_project(project_id, session)
         
         project = await JobService.get_project(project_id)
@@ -188,7 +188,7 @@ class JobService:
     ) -> Optional[Project]:
         """Get project only if it belongs to the specified user"""
         if session is None:
-            async with get_async_session() as session:
+            async with AsyncSessionLocal() as session:
                 return await JobService.get_project_by_user_and_id(project_id, user_email, session)
         
         statement = select(Project).where(
@@ -202,7 +202,7 @@ class JobService:
     async def count_user_projects(user_email: str, session: Optional[AsyncSession] = None) -> int:
         """Count total projects for a user"""
         if session is None:
-            async with get_async_session() as session:
+            async with AsyncSessionLocal() as session:
                 return await JobService.count_user_projects(user_email, session)
         
         statement = select(Project).where(Project.user_email == user_email)
@@ -217,7 +217,7 @@ class JobService:
     ) -> List[Project]:
         """Get projects by status (useful for processing queue)"""
         if session is None:
-            async with get_async_session() as session:
+            async with AsyncSessionLocal() as session:
                 return await JobService.get_projects_by_status(status, limit, session)
         
         statement = select(Project).where(Project.status == status).order_by(Project.created_at)
