@@ -1,7 +1,7 @@
 import { useRouter } from 'next/router'
 import { useState, useEffect } from 'react'
 import useSWR from 'swr'
-import { apiHelpers } from '@/lib/fetcher'
+import { apiHelpers } from '../../lib/fetcher'
 import Head from 'next/head'
 import AssumptionModal from '../../components/AssumptionModal'
 
