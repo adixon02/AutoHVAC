@@ -97,7 +97,7 @@ export const apiHelpers = {
   },
   
   // Job status
-  getJobStatus: (jobId: string) => fetcher(`/api/v1/job/${jobId}`),
+  getJobStatus: (jobId: string) => fetcher(`/api/job/${jobId}`),
   
   // Project details
   getProjectDetails: (projectId: string, email: string) => {
