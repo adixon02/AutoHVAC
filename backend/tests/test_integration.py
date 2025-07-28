@@ -11,6 +11,7 @@ from unittest.mock import Mock, AsyncMock, patch
 from uuid import uuid4
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import IntegrityError
 
 from tasks.parse_blueprint import process_blueprint
 from services.store import job_store
@@ -429,6 +430,53 @@ class TestDatabaseSchema:
         assert project_with_defaults.current_stage == "initializing"
         assert project_with_defaults.status == JobStatus.PENDING
         assert project_with_defaults.assumptions_collected is False
+    
+    def test_project_database_transaction(self):
+        """Test that Project with progress fields can be committed to database without IntegrityError"""
+        try:
+            # Create a test project with progress tracking fields
+            project = Project(
+                id="test-schema-validation-project",
+                user_email="schema_test@example.com",
+                project_label="Schema Validation Test",
+                filename="test_schema.pdf",
+                file_size=2048,
+                status=JobStatus.PENDING,
+                progress_percent=25,
+                current_stage="extracting_geometry",
+                duct_config="ducted_attic",
+                heating_fuel="gas",
+                assumptions_collected=True
+            )
+            
+            # Use an in-memory SQLite database for this test
+            engine = create_engine("sqlite:///:memory:")
+            
+            # Create tables (this should work with our current schema)
+            from sqlmodel import SQLModel
+            SQLModel.metadata.create_all(engine)
+            
+            # Test database transaction
+            Session = sessionmaker(bind=engine)
+            with Session() as session:
+                with session.begin():
+                    session.add(project)
+                    # Commit should succeed without IntegrityError
+                    session.commit()
+                    
+                # Verify the project was saved with correct values
+                saved_project = session.get(Project, "test-schema-validation-project")
+                assert saved_project is not None
+                assert saved_project.progress_percent == 25
+                assert saved_project.current_stage == "extracting_geometry"
+                assert saved_project.user_email == "schema_test@example.com"
+                
+            print("✅ Database transaction test passed - schema is consistent")
+            
+        except IntegrityError as e:
+            pytest.fail(f"Database IntegrityError: {e}. This indicates a schema mismatch between SQLModel and database.")
+        except Exception as e:
+            pytest.fail(f"Unexpected error in database transaction: {e}")
 
 
 if __name__ == "__main__":

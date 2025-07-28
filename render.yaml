@@ -12,7 +12,7 @@ services:
     name: autohvac-backend
     env: python
     buildCommand: cd backend && pip install --only-binary=:all: -r requirements.txt
-    startCommand: cd backend && python -m backend
+    startCommand: cd backend && ./start_with_migrations.sh
     envVars:
       - key: REDIS_URL
         fromService:
