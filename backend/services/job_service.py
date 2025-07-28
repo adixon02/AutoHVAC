@@ -130,7 +130,7 @@ class JobService:
             async with get_async_session() as session:
                 return await JobService.update_project(project_id, updates, session)
         
-        project = await JobService.get_project(project_id, session)
+        project = await JobService.get_project(project_id)
         if not project:
             return False
         
@@ -172,7 +172,7 @@ class JobService:
             async with get_async_session() as session:
                 return await JobService.delete_project(project_id, session)
         
-        project = await JobService.get_project(project_id, session)
+        project = await JobService.get_project(project_id)
         if not project:
             return False
         

@@ -40,16 +40,25 @@ class PDFTooLargeError(Exception):
     """Raised when PDF exceeds size limits"""
     pass
 
-async def update_progress(project_id: str, percent: int, stage: str, session):
-    """Update job progress in database"""
-    await job_service.update_project(
-        project_id, 
-        {"progress_percent": percent, "current_stage": stage}, 
-        session
-    )
-    logger.info(f"📊 Progress: {project_id} - {percent}% - {stage}")
+async def update_progress(project_id: str, percent: int, stage: str):
+    """Update job progress in database with retry logic"""
+    for attempt in range(2):
+        try:
+            await job_service.update_project(
+                project_id, 
+                {"progress_percent": percent, "current_stage": stage}
+            )
+            logger.info(f"📊 Progress: {project_id} - {percent}% - {stage}")
+            return
+        except Exception as e:
+            if attempt == 0:  # First attempt failed, retry once
+                await asyncio.sleep(0.1)  # 100ms backoff
+                continue
+            else:
+                logger.exception(f"Failed to update progress after 2 attempts: {e}", extra={"jobId": project_id})
+                raise
 
-async def run_ai_analysis(project_id: str, file_path: str, session):
+async def run_ai_analysis(project_id: str, file_path: str):
     """
     Run AI analysis on the PDF with comprehensive error handling and safeguards
     
@@ -74,7 +83,7 @@ async def run_ai_analysis(project_id: str, file_path: str, session):
             raise MissingAIKeyError("OPENAI_API_KEY environment variable is missing or blank")
         
         # 2. Check PDF size constraints
-        await update_progress(project_id, 65, "ai_analysis", session)
+        await update_progress(project_id, 65, "ai_analysis")
         
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"PDF file not found: {file_path}")
@@ -97,7 +106,7 @@ async def run_ai_analysis(project_id: str, file_path: str, session):
             raise AICleanupError(f"Invalid or corrupted PDF file: {e}")
         
         # 3. Extract geometry with timeout protection
-        await update_progress(project_id, 70, "extracting_geometry", session)
+        await update_progress(project_id, 70, "extracting_geometry")
         
         try:
             geometry_parser = GeometryParser()
@@ -113,7 +122,7 @@ async def run_ai_analysis(project_id: str, file_path: str, session):
             raise AICleanupError(f"Geometry extraction failed: {e}")
         
         # 4. Extract text with timeout protection
-        await update_progress(project_id, 75, "extracting_text", session)
+        await update_progress(project_id, 75, "extracting_text")
         
         try:
             text_parser = TextParser()
@@ -129,7 +138,7 @@ async def run_ai_analysis(project_id: str, file_path: str, session):
             raise AICleanupError(f"Text extraction failed: {e}")
         
         # 5. AI cleanup with timeout protection
-        await update_progress(project_id, 80, "ai_processing", session)
+        await update_progress(project_id, 80, "ai_processing")
         
         try:
             blueprint_schema = await asyncio.wait_for(
@@ -146,7 +155,7 @@ async def run_ai_analysis(project_id: str, file_path: str, session):
             raise AICleanupError(f"AI cleanup failed: {e}")
         
         # 6. Envelope extraction with timeout protection  
-        await update_progress(project_id, 85, "envelope_analysis", session)
+        await update_progress(project_id, 85, "envelope_analysis")
         
         try:
             # Extract text content for envelope analysis
@@ -180,7 +189,7 @@ async def run_ai_analysis(project_id: str, file_path: str, session):
             raise EnvelopeExtractorError(f"Envelope extraction failed: {e}")
         
         # 7. Store parsed data in project
-        await update_progress(project_id, 90, "storing_analysis", session)
+        await update_progress(project_id, 90, "storing_analysis")
         
         # Store the blueprint schema in the project for later use
         await job_service.update_project(
@@ -198,35 +207,33 @@ async def run_ai_analysis(project_id: str, file_path: str, session):
             AICleanupError, EnvelopeExtractorError) as e:
         logger.exception("AI_ANALYSIS_CRASH", extra={"jobId": project_id})
         error_msg = f"{type(e).__name__}: {str(e)[:200]}"
-        await job_service.set_project_failed(project_id, error_msg, session)
+        await job_service.set_project_failed(project_id, error_msg)
         raise
     except Exception as e:
         logger.exception("AI_ANALYSIS_UNEXPECTED_ERROR", extra={"jobId": project_id})
         error_msg = f"Unexpected AI analysis error: {type(e).__name__}: {str(e)[:200]}"
-        await job_service.set_project_failed(project_id, error_msg, session)
+        await job_service.set_project_failed(project_id, error_msg)
         raise AICleanupError(error_msg)
 
 async def process_job_sync(project_id: str, file_path: str, filename: str, email: str = "", zip_code: str = "90210"):
     """Process a job synchronously (for development without Celery)"""
     logger.info(f"🚀 THREAD: Job processor started for {project_id} (file={filename}, path={file_path}, email={email})")
     try:
-        async with AsyncSessionLocal() as session:
-            try:
                 # Job is already set to processing in upload endpoint
                 logger.debug(f"{project_id} – job already in processing state")
                 
                 # Open PDF and update progress (5%)
-                await update_progress(project_id, 5, "opened_pdf", session)
+                await update_progress(project_id, 5, "opened_pdf")
                 
                 # TODO: Add actual PDF parsing with PyMuPDF here
                 # For now, simulate with sleep
                 await asyncio.sleep(1)
                 
                 # After geometry parsing (25%)
-                await update_progress(project_id, 25, "geometry_complete", session)
+                await update_progress(project_id, 25, "geometry_complete")
                 
                 # Check if assumptions are already collected (new multi-step flow)
-                project = await job_service.get_project(project_id, session)
+                project = await job_service.get_project(project_id)
                 if not project:
                     raise Exception("Project not found")
                 
@@ -237,7 +244,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
                     
                     if not assumptions_received:
                         logger.warning(f"{project_id} – timeout waiting for assumptions")
-                        await job_service.set_project_failed(project_id, "Timeout waiting for user assumptions", session)
+                        await job_service.set_project_failed(project_id, "Timeout waiting for user assumptions")
                         await rate_limiter.decrement_active_jobs(email, project_id)
                         return
                     
@@ -246,16 +253,16 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
                     # New multi-step flow - assumptions already collected
                     logger.debug(f"{project_id} – assumptions already collected in multi-step flow")
                 # Real AI analysis (65% -> 90%)
-                await run_ai_analysis(project_id, file_path, session)
+                await run_ai_analysis(project_id, file_path)
                 
             except Exception as e:
                 logger.exception(f"{project_id} – error in job processing setup: {e}")
-                await job_service.set_project_failed(project_id, str(e), session)
+                await job_service.set_project_failed(project_id, str(e))
                 await rate_limiter.decrement_active_jobs(email, project_id)
                 return
             
             # Get the updated project with assumptions
-            project = await job_service.get_project(project_id, session)
+            project = await job_service.get_project(project_id)
             if not project:
                 raise Exception("Project not found")
             
@@ -291,7 +298,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
             logger.info(f"{project_id} – Manual J calculation completed")
             
             # Update progress after calculations (95%)
-            await update_progress(project_id, 95, "calculations_complete", session)
+            await update_progress(project_id, 95, "calculations_complete")
             
             # Format result for storage
             result = {
@@ -311,7 +318,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
             try:
                 logger.debug(f"{project_id} – starting get_project")
                 # Get project details for PDF generation
-                project = await job_service.get_project(project_id, session)
+                project = await job_service.get_project(project_id)
                 if not project:
                     raise Exception("Project not found")
                 logger.debug(f"{project_id} – finished get_project")
@@ -327,17 +334,17 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
                     )
                     
                     # Update progress before completion (100%)
-                    await update_progress(project_id, 100, "completed", session)
+                    await update_progress(project_id, 100, "completed")
                     
                     # Update job with result and PDF path
-                    await job_service.set_project_completed(project_id, result, pdf_path, session)
+                    await job_service.set_project_completed(project_id, result, pdf_path)
                     logger.info(f"{project_id} – SUCCESS: Job completed with PDF report: {pdf_path}")
                     logger.debug(f"{project_id} – finished PDF generation")
                     
                 except Exception as pdf_error:
                     logger.exception(f"{project_id} – error in PDF generation: {pdf_error}")
                     # Still mark as completed but without PDF
-                    await update_progress(project_id, 100, "completed", session)
+                    await update_progress(project_id, 100, "completed")
                     await job_service.set_project_completed(project_id, result, session=session)
                     logger.info(f"{project_id} – SUCCESS: Job completed without PDF due to PDF generation error")
                 
@@ -353,7 +360,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
                 
             except Exception as e:
                 logger.exception(f"{project_id} – error in job completion: {e}")
-                await job_service.set_project_failed(project_id, str(e), session)
+                await job_service.set_project_failed(project_id, str(e))
                 await rate_limiter.decrement_active_jobs(email, project_id)
                 if os.path.exists(file_path):
                     os.unlink(file_path)
@@ -363,7 +370,7 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
         logger.exception(f"💥 FATAL: Job {project_id} crashed: {type(e).__name__}: {str(e)}")
         async with AsyncSessionLocal() as session:
             error_msg = f"{type(e).__name__}: {str(e)[:200]}"
-            await job_service.set_project_failed(project_id, error_msg, session)
+            await job_service.set_project_failed(project_id, error_msg)
             await rate_limiter.decrement_active_jobs(email, project_id)
         if os.path.exists(file_path):
             os.unlink(file_path)

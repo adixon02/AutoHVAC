@@ -21,7 +21,12 @@ if async_database_url.startswith("postgresql://"):
 elif async_database_url.startswith("sqlite://"):
     async_database_url = async_database_url.replace("sqlite://", "sqlite+aiosqlite://", 1)
 
-async_engine = create_async_engine(async_database_url, echo=False)
+async_engine = create_async_engine(
+    async_database_url, 
+    echo=False,
+    pool_size=5,
+    max_overflow=10
+)
 
 # Create session makers
 AsyncSessionLocal = sessionmaker(
