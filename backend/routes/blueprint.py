@@ -170,7 +170,7 @@ async def upload_blueprint(
         has_subscription = await user_service.has_active_subscription(email, session)
     
         # Bypass subscription check in debug mode for whitelisted emails
-        if DEBUG and email in DEV_VERIFIED_EMAILS:
+        if DEBUG or email in DEV_VERIFIED_EMAILS:
             can_use_free = True
         
         if not can_use_free and not has_subscription:
