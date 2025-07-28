@@ -2,10 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies for Pillow source builds (libjpeg, zlib, freetype)
+# Install system dependencies for Pillow source builds (libjpeg, zlib, freetype, build tools)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        libjpeg-dev zlib1g-dev libfreetype6-dev \
+        libjpeg-dev zlib1g-dev libfreetype6-dev build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
