@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 async def process_job_sync(project_id: str, file_content: bytes, filename: str, email: str = "", zip_code: str = "90210"):
     """Process a job synchronously (for development without Celery)"""
     try:
-        logger.debug(f"{project_id} – starting job processing")
+        logger.info(f"{project_id} – starting job processing (file={filename}, size={len(file_content)}, email={email})")
         async with AsyncSessionLocal() as session:
             try:
                 logger.debug(f"{project_id} – starting set_project_processing")
@@ -90,11 +90,13 @@ async def process_job_sync(project_id: str, file_content: bytes, filename: str, 
                 )
             
             # Calculate Manual J loads with user assumptions
+            logger.info(f"{project_id} – starting Manual J calculation (duct_config={project.duct_config}, heating_fuel={project.heating_fuel})")
             manualj_result = calculate_manualj(
                 blueprint_schema, 
                 duct_config=project.duct_config or "ducted_attic",
                 heating_fuel=project.heating_fuel or "gas"
             )
+            logger.info(f"{project_id} – Manual J calculation completed")
             
             # Format result for storage
             result = {
@@ -131,13 +133,14 @@ async def process_job_sync(project_id: str, file_content: bytes, filename: str, 
                     
                     # Update job with result and PDF path
                     await job_service.set_project_completed(project_id, result, pdf_path, session)
-                    logger.info(f"PDF report generated and saved: {pdf_path}")
+                    logger.info(f"{project_id} – SUCCESS: Job completed with PDF report: {pdf_path}")
                     logger.debug(f"{project_id} – finished PDF generation")
                     
                 except Exception as pdf_error:
                     logger.exception(f"{project_id} – error in PDF generation: {pdf_error}")
                     # Still mark as completed but without PDF
                     await job_service.set_project_completed(project_id, result, session=session)
+                    logger.info(f"{project_id} – SUCCESS: Job completed without PDF due to PDF generation error")
                 
                 logger.debug(f"{project_id} – starting rate limiter decrement")
                 # Release rate limiter

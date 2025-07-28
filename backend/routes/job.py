@@ -18,36 +18,11 @@ async def get_job_status(
         
         if not project:
             logging.warning(f"Job not found: {job_id}")
-            from app.middleware.error_handler import create_error_response
-            from fastapi.responses import JSONResponse
-            return JSONResponse(
-                status_code=404,
-                content=create_error_response("JobNotFound", "Job not found", 404),
-                headers={
-                    "Access-Control-Allow-Origin": "http://localhost:3000",
-                    "Access-Control-Allow-Credentials": "true",
-                    "Access-Control-Allow-Methods": "*",
-                    "Access-Control-Allow-Headers": "*"
-                }
-            )
+            raise HTTPException(status_code=404, detail="Job not found")
         
-        logging.info(f"Successfully retrieved job status for {job_id}: {project.status.value}")
+        logging.info(f"Successfully retrieved job status for {job_id}: status={project.status.value}, error={project.error}")
         
-        # Return HTTP 500 for failed jobs with structured error
-        if project.status.value == "error" and project.error:
-            from app.middleware.error_handler import create_error_response
-            from fastapi.responses import JSONResponse
-            return JSONResponse(
-                status_code=500,
-                content=create_error_response("PipelineError", project.error, 500),
-                headers={
-                    "Access-Control-Allow-Origin": "http://localhost:3000",
-                    "Access-Control-Allow-Credentials": "true",
-                    "Access-Control-Allow-Methods": "*",
-                    "Access-Control-Allow-Headers": "*"
-                }
-            )
-        
+        # Return normal 200 response with job status (including failed jobs)
         return JobStatus(
             job_id=job_id,
             status=project.status.value,
@@ -60,6 +35,8 @@ async def get_job_status(
         # Re-raise HTTP exceptions (like 404)
         raise
     except Exception as exc:
-        logging.error(f"Unexpected error fetching job status for {job_id}: {type(exc).__name__}: {str(exc)}")
-        # Let the global exception handler deal with this
-        raise
+        logging.exception(f"Unexpected error fetching job status for {job_id}: {type(exc).__name__}: {str(exc)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Internal server error: {str(exc)}"
+        )
