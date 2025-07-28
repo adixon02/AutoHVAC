@@ -38,6 +38,14 @@ jobs:
         cd backend
         pip install -r requirements.txt
         pip install pytest pytest-asyncio httpx aiosqlite
+        
+    - name: Check dependencies and syntax
+      run: |
+        cd backend
+        # Check for missing dependencies
+        python -m pip check
+        # Check syntax of all Python files
+        python -m py_compile $(find . -name "*.py" -not -path "./venv/*" -not -path "./.venv/*")
     
     - name: Run backend tests
       env:
