@@ -35,14 +35,14 @@ async def get_job_status(
     session: AsyncSession = Depends(get_async_session)
 ):
     try:
-        logging.info(f"Fetching job status for job_id: {job_id}")
+        logging.info(f"🔍 Fetching job status for job_id: {job_id}")
         project = await job_service.get_project(job_id, session)
         
         if not project:
-            logging.warning(f"Job not found: {job_id}")
+            logging.warning(f"❌ Job not found in database: {job_id}")
             raise HTTPException(status_code=404, detail="Job not found")
         
-        logging.info(f"Successfully retrieved job status for {job_id}: status={project.status.value}, error={project.error}")
+        logging.info(f"✅ Successfully retrieved job status for {job_id}: status={project.status.value}, error={project.error}")
         
         # Return normal 200 response with job status (including failed jobs)
         return JobStatus(

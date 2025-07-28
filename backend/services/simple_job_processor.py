@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 async def process_job_sync(project_id: str, file_content: bytes, filename: str, email: str = "", zip_code: str = "90210"):
     """Process a job synchronously (for development without Celery)"""
     try:
-        logger.info(f"{project_id} – starting job processing (file={filename}, size={len(file_content)}, email={email})")
+        logger.info(f"🚀 Job processor picked up project {project_id} (file={filename}, size={len(file_content)}, email={email})")
         async with AsyncSessionLocal() as session:
             try:
                 logger.debug(f"{project_id} – starting set_project_processing")

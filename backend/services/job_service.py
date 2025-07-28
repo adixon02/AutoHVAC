@@ -6,6 +6,10 @@ from database import get_async_session
 from datetime import datetime, timezone
 import uuid
 import asyncio
+import logging
+from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 class JobService:
     """PostgreSQL-backed job service replacing InMemoryJobStore"""
@@ -62,23 +66,47 @@ class JobService:
                 )
         
         project_id = str(uuid.uuid4())
-        project = Project(
-            id=project_id,
-            user_email=user_email,
-            project_label=project_label,
-            filename=filename,
-            file_size=file_size,
-            status=JobStatus.PENDING,
-            duct_config=duct_config,
-            heating_fuel=heating_fuel,
-            assumptions_collected=True  # Already collected in multi-step flow
-        )
+        logger.info(f"Creating project {project_id} for user {user_email}")
         
-        session.add(project)
-        await session.commit()
-        await session.refresh(project)
-        
-        return project_id
+        try:
+            # Ensure user exists first to prevent foreign key constraint failures
+            from services.user_service import user_service
+            await user_service.get_or_create_user(user_email, session)
+            logger.debug(f"User {user_email} confirmed/created for project {project_id}")
+            
+            project = Project(
+                id=project_id,
+                user_email=user_email,
+                project_label=project_label,
+                filename=filename,
+                file_size=file_size,
+                status=JobStatus.PENDING,
+                duct_config=duct_config,
+                heating_fuel=heating_fuel,
+                assumptions_collected=True  # Already collected in multi-step flow
+            )
+            
+            session.add(project)
+            logger.debug(f"Project {project_id} added to session, committing...")
+            
+            await session.commit()
+            await session.refresh(project)
+            
+            logger.info(f"✅ Project {project_id} created and committed successfully (status={project.status})")
+            return project_id
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to create project {project_id}: {str(e)}")
+            try:
+                await session.rollback()
+                logger.debug(f"Session rolled back for project {project_id}")
+            except Exception as rollback_error:
+                logger.error(f"Failed to rollback session: {rollback_error}")
+            
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Database error: Failed to create project - {str(e)}"
+            )
     
     @staticmethod
     async def get_project(project_id: str, session: Optional[AsyncSession] = None) -> Optional[Project]:

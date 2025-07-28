@@ -194,15 +194,28 @@ async def upload_blueprint(
             )
     
     # Create project in database with assumptions
-    project_id = await job_service.create_project_with_assumptions(
-        user_email=email,
-        project_label=project_label.strip(),
-        filename=file.filename,
-        file_size=file.size,
-        duct_config=duct_config,
-        heating_fuel=heating_fuel,
-        session=session
-    )
+    try:
+        project_id = await job_service.create_project_with_assumptions(
+            user_email=email,
+            project_label=project_label.strip(),
+            filename=file.filename,
+            file_size=file.size,
+            duct_config=duct_config,
+            heating_fuel=heating_fuel,
+            session=session
+        )
+        logger.info(f"✅ Project {project_id} created successfully for user {email}")
+    except HTTPException as e:
+        # Database creation failed - return the error to user
+        logger.error(f"❌ Failed to create project for user {email}: {e.detail}")
+        raise e
+    except Exception as e:
+        # Unexpected error during project creation
+        logger.error(f"❌ Unexpected error creating project for user {email}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create project: {str(e)}"
+        )
     
     # Mark free report as used if this is their first
     if can_use_free:
