@@ -12,15 +12,33 @@ async def force_migration():
     """Force database migration for debugging"""
     try:
         import logging
-        from init_db import initialize_database
+        import subprocess
         
         logging.info("🔧 Force running database migration...")
-        success = initialize_database()
         
-        return {
-            "status": "success" if success else "failed",
-            "message": "Migration completed" if success else "Migration failed"
-        }
+        # Run Alembic migration
+        result = subprocess.run(
+            ["python", "-m", "alembic", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+            cwd="/opt/render/project/src/backend" if "/opt/render" in __file__ else "."
+        )
+        
+        if result.returncode == 0:
+            logging.info("✅ Alembic migration successful")
+            return {
+                "status": "success",
+                "message": "Migration completed successfully",
+                "output": result.stdout
+            }
+        else:
+            logging.error(f"❌ Alembic migration failed: {result.stderr}")
+            return {
+                "status": "failed",
+                "message": f"Migration failed: {result.stderr}",
+                "output": result.stdout
+            }
+            
     except Exception as e:
         logging.exception(f"Migration error: {e}")
         return {
