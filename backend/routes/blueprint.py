@@ -219,7 +219,7 @@ async def upload_blueprint(
                 session=session
             )
             logger.info(f"✅ Step 6 PASSED: Project {project_id} created successfully for user {email}")
-        logger.info("job_created", extra={"jobId": project_id, "email": email})
+            logger.info("job_created", extra={"jobId": project_id, "email": email})
         except HTTPException as e:
             # Database creation failed - return the error to user
             logger.error(f"❌ Step 6 FAILED: Database creation failed for user {email}: {e.detail}")
