@@ -10,14 +10,17 @@ print("▶ DEBUG =", DEBUG, "  DEV_VERIFIED_EMAILS =", DEV_VERIFIED_EMAILS)
 
 app = FastAPI(title="AutoHVAC API", version="1.0.0")
 
-DEV_ORIGIN = "http://localhost:3000"
+allowed_origins = [
+    "http://localhost:3000",
+    "https://autohvac-frontend.onrender.com",
+]
 
 # Add custom CORS middleware that handles errors properly
 app.add_middleware(CustomCORSMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[DEV_ORIGIN],   # no '*'
+    allow_origins=allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=True,      # safe with explicit origin

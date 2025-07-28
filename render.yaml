@@ -6,10 +6,7 @@ services:
     startCommand: cd frontend && npm start
     envVars:
       - key: NEXT_PUBLIC_API_URL
-        fromService:
-          type: web
-          name: autohvac-backend
-          property: host
+        value: https://autohvac-backend.onrender.com
 
   - type: web
     name: autohvac-backend
