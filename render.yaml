@@ -11,7 +11,7 @@ services:
   - type: web
     name: autohvac-backend
     env: python
-    buildCommand: cd backend && pip install --only-binary=:all: -r requirements.txt
+    buildCommand: cd backend && pip install --only-binary=:all: -r requirements.txt && python init_db.py
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: REDIS_URL
