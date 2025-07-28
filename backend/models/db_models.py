@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from pydantic import EmailStr
 import uuid
 from enum import Enum
-from .enums import DuctConfig, HeatingFuel
 
 class JobStatus(str, Enum):
     PENDING = "pending"
