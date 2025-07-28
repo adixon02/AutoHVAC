@@ -19,6 +19,8 @@ export default async function handler(
   try {
     const endpoint = `${API_URL}${API_ENDPOINTS.jobStatus(jobId)}`
     console.log('[API Proxy] Getting job status:', endpoint)
+    console.log('[API Proxy] API_URL:', API_URL)
+    console.log('[API Proxy] API_ENDPOINTS.jobStatus(jobId):', API_ENDPOINTS.jobStatus(jobId))
     
     // Get job status from v1 API
     const statusResponse = await axios.get(endpoint)

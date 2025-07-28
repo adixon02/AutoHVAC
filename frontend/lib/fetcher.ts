@@ -10,6 +10,14 @@ const api = axios.create({
   },
 })
 
+// Debug logging for production issues
+console.log('🔧 API Configuration:', {
+  API_URL,
+  NODE_ENV: process.env.NODE_ENV,
+  NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+  baseURL: api.defaults.baseURL
+})
+
 // Add request interceptor for logging
 api.interceptors.request.use(
   (config) => {
@@ -75,10 +83,19 @@ export async function apiFetch(url: string, opts: RequestInit = {}) {
   return JSON.parse(txt || "{}");
 }
 
-// SWR fetcher function
+// SWR fetcher function for backend API
 export const fetcher = async (url: string): Promise<any> => {
   const response = await api.get(url)
   return response.data
+}
+
+// SWR fetcher function for Next.js API routes (relative URLs)
+export const nextApiFetcher = async (url: string): Promise<any> => {
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+  }
+  return response.json()
 }
 
 // Fetcher with POST data
@@ -96,8 +113,8 @@ export const apiHelpers = {
     return fetcher(`/api/v1/jobs/list?${params.toString()}`)
   },
   
-  // Job status
-  getJobStatus: (jobId: string) => fetcher(`/api/job/${jobId}`),
+  // Job status (uses Next.js API route)
+  getJobStatus: (jobId: string) => nextApiFetcher(`/api/job/${jobId}`),
   
   // Project details
   getProjectDetails: (projectId: string, email: string) => {
