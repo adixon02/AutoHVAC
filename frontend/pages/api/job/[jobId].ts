@@ -1,5 +1,4 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import axios from 'axios'
 import { API_URL, API_ENDPOINTS } from '../../../constants/api'
 
 export default async function handler(
@@ -18,23 +17,37 @@ export default async function handler(
 
   try {
     const endpoint = `${API_URL}${API_ENDPOINTS.jobStatus(jobId)}`
-    console.log('[API Proxy] Getting job status:', endpoint)
-    console.log('[API Proxy] API_URL:', API_URL)
-    console.log('[API Proxy] API_ENDPOINTS.jobStatus(jobId):', API_ENDPOINTS.jobStatus(jobId))
+    console.log('[API Proxy] Environment check:', {
+      NODE_ENV: process.env.NODE_ENV,
+      NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+      API_URL,
+      endpoint
+    })
     
-    // Get job status from v1 API
-    const statusResponse = await axios.get(endpoint)
+    // Get job status from backend API using fetch
+    const response = await fetch(endpoint, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
 
-    // v1 API returns the complete job status with results
-    const jobData = statusResponse.data
+    console.log('[API Proxy] Backend response:', response.status, response.statusText)
 
-    res.status(200).json(jobData)
-  } catch (error) {
-    console.error('Job status proxy error:', error)
-    if (axios.isAxiosError(error) && error.response) {
-      res.status(error.response.status).json(error.response.data)
-    } else {
-      res.status(500).json({ message: 'Internal server error' })
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('[API Proxy] Backend error:', response.status, errorText)
+      return res.status(response.status).json({ error: errorText })
     }
+
+    const jobData = await response.json()
+    console.log('[API Proxy] Success - returning job data')
+    res.status(200).json(jobData)
+    
+  } catch (error) {
+    console.error('[API Proxy] Fatal error:', error)
+    res.status(500).json({ 
+      error: `Proxy error: ${error instanceof Error ? error.message : 'Unknown error'}` 
+    })
   }
 }

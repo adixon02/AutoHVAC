@@ -255,12 +255,23 @@ export default function AnalyzingPage() {
   }
   
   if (error) {
+    const errorMessage = error?.message || 'Unknown error occurred'
+    const isBackendError = errorMessage.includes('HTTP 500') || errorMessage.includes('Backend error')
+    
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center max-w-md">
+        <div className="text-center max-w-2xl">
           <h1 className="text-2xl font-bold text-red-600 mb-4">Analysis Error</h1>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+            <p className="text-sm font-mono text-red-800 mb-2">
+              {isBackendError ? 'Backend 500 –' : 'Error –'} {errorMessage}
+            </p>
+            <p className="text-xs text-red-600">
+              Please copy this error message if you need support.
+            </p>
+          </div>
           <p className="text-gray-600 mb-6">
-            We encountered an error while processing your blueprint. Please try uploading again.
+            We encountered an error while processing your blueprint. You can retry or upload a new blueprint.
           </p>
           <div className="space-x-4">
             <button 
