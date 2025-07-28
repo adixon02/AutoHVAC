@@ -14,7 +14,7 @@ services:
   - type: web
     name: autohvac-backend
     env: python
-    buildCommand: cd backend && pip install -r requirements.txt
+    buildCommand: cd backend && pip install --only-binary=pymupdf -r requirements.txt
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: REDIS_URL
@@ -40,7 +40,7 @@ services:
   - type: worker
     name: autohvac-worker
     env: python
-    buildCommand: cd backend && pip install -r requirements.txt
+    buildCommand: cd backend && pip install --only-binary=pymupdf -r requirements.txt
     startCommand: cd backend && celery -A tasks.parse_blueprint worker --loglevel=info --concurrency=1
     envVars:
       - key: REDIS_URL
