@@ -6,9 +6,13 @@ Extracts walls, rooms, and duct outlines using pdfplumber + PyMuPDF
 import pdfplumber
 import fitz  # PyMuPDF
 import numpy as np
+import logging
+import time
 from typing import Dict, List, Any, Optional, Tuple
 import re
 from .schema import RawGeometry
+
+logger = logging.getLogger(__name__)
 
 
 class GeometryParser:
@@ -20,6 +24,12 @@ class GeometryParser:
             r'(\d+)\s*:\s*(\d+)',              # 1:240
             r'SCALE\s*[:\-]\s*(.+)',           # SCALE: 1/4" = 1'-0"
         ]
+        
+        # Defensive limits to prevent infinite processing
+        self.MAX_LINES = 10000
+        self.MAX_RECTANGLES = 5000
+        self.MAX_POLYLINES = 2000
+        self.MAX_DRAWING_ITEMS = 1000
     
     def parse(self, pdf_path: str) -> RawGeometry:
         """
@@ -31,29 +41,58 @@ class GeometryParser:
         Returns:
             RawGeometry with all extracted elements
         """
-        with pdfplumber.open(pdf_path) as pdf:
-            page = pdf.pages[0]  # Process first page
-            
-            # Extract basic page info
-            page_width = float(page.width)
-            page_height = float(page.height)
-            
-            # Detect scale
-            scale_factor = self._detect_scale(page)
-            
-            # Extract geometry elements
-            lines = self._extract_lines(page)
-            rectangles = self._extract_rectangles(page)
-            polylines = self._extract_polylines_pymupdf(pdf_path)
-            
-            return RawGeometry(
-                page_width=page_width,
-                page_height=page_height,
-                scale_factor=scale_factor,
-                lines=lines,
-                rectangles=rectangles,
-                polylines=polylines
-            )
+        logger.info(f"Starting geometry parsing for {pdf_path}")
+        
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                if not pdf.pages:
+                    raise ValueError("PDF has no pages")
+                
+                page = pdf.pages[0]  # Process first page
+                logger.info(f"Processing page 1 of {len(pdf.pages)}")
+                
+                # Extract basic page info
+                page_width = float(page.width)
+                page_height = float(page.height)
+                logger.info(f"Page dimensions: {page_width} x {page_height}")
+                
+                # Detect scale
+                logger.info("Detecting scale markers...")
+                scale_start = time.time()
+                scale_factor = self._detect_scale(page)
+                logger.info(f"Scale detection took {time.time() - scale_start:.2f}s, result: {scale_factor}")
+                
+                # Extract geometry elements with timing
+                logger.info("Extracting lines...")
+                lines_start = time.time()
+                lines = self._extract_lines(page)
+                logger.info(f"Line extraction took {time.time() - lines_start:.2f}s, found {len(lines)} lines")
+                
+                logger.info("Extracting rectangles...")
+                rects_start = time.time()
+                rectangles = self._extract_rectangles(page)
+                logger.info(f"Rectangle extraction took {time.time() - rects_start:.2f}s, found {len(rectangles)} rectangles")
+                
+                logger.info("Extracting polylines with PyMuPDF...")
+                poly_start = time.time()
+                polylines = self._extract_polylines_pymupdf(pdf_path)
+                logger.info(f"Polyline extraction took {time.time() - poly_start:.2f}s, found {len(polylines)} polylines")
+                
+                result = RawGeometry(
+                    page_width=page_width,
+                    page_height=page_height,
+                    scale_factor=scale_factor,
+                    lines=lines,
+                    rectangles=rectangles,
+                    polylines=polylines
+                )
+                
+                logger.info(f"Geometry parsing completed successfully")
+                return result
+                
+        except Exception as e:
+            logger.error(f"Geometry parsing failed: {type(e).__name__}: {str(e)}")
+            raise
     
     def _detect_scale(self, page) -> Optional[float]:
         """Detect scale markers in the blueprint"""
@@ -79,90 +118,180 @@ class GeometryParser:
     def _extract_lines(self, page) -> List[Dict[str, Any]]:
         """Extract line segments (walls, dimensions)"""
         lines = []
-        raw_lines = page.lines
         
-        for line in raw_lines:
-            x0, y0, x1, y1 = line['x0'], line['y0'], line['x1'], line['y1']
-            length = np.sqrt((x1 - x0)**2 + (y1 - y0)**2)
+        try:
+            raw_lines = page.lines
+            logger.info(f"Found {len(raw_lines)} raw lines to process")
             
-            # Classify line type
-            line_type = self._classify_line(line, length)
+            # Apply defensive limit
+            if len(raw_lines) > self.MAX_LINES:
+                logger.warning(f"Too many lines ({len(raw_lines)}), limiting to {self.MAX_LINES}")
+                raw_lines = raw_lines[:self.MAX_LINES]
             
-            lines.append({
-                'type': 'line',
-                'coords': [float(x0), float(y0), float(x1), float(y1)],
-                'x0': float(x0),
-                'y0': float(y0),
-                'x1': float(x1),
-                'y1': float(y1),
-                'width': float(line.get('width', 1.0)),
-                'length': float(length),
-                'line_type': line_type,
-                'orientation': self._get_orientation(x0, y0, x1, y1),
-                'wall_probability': self._calculate_wall_probability(line, length)
-            })
-        
-        return self._group_parallel_lines(lines)
+            for i, line in enumerate(raw_lines):
+                try:
+                    x0, y0, x1, y1 = line['x0'], line['y0'], line['x1'], line['y1']
+                    
+                    # Validate coordinates
+                    if any(coord is None for coord in [x0, y0, x1, y1]):
+                        logger.debug(f"Skipping line {i} with None coordinates")
+                        continue
+                    
+                    length = np.sqrt((x1 - x0)**2 + (y1 - y0)**2)
+                    
+                    # Skip degenerate lines
+                    if length < 0.1:
+                        continue
+                    
+                    # Classify line type
+                    line_type = self._classify_line(line, length)
+                    
+                    lines.append({
+                        'type': 'line',
+                        'coords': [float(x0), float(y0), float(x1), float(y1)],
+                        'x0': float(x0),
+                        'y0': float(y0),
+                        'x1': float(x1),
+                        'y1': float(y1),
+                        'width': float(line.get('width', 1.0)),
+                        'length': float(length),
+                        'line_type': line_type,
+                        'orientation': self._get_orientation(x0, y0, x1, y1),
+                        'wall_probability': self._calculate_wall_probability(line, length)
+                    })
+                    
+                except Exception as e:
+                    logger.debug(f"Error processing line {i}: {e}")
+                    continue
+            
+            logger.info(f"Successfully processed {len(lines)} valid lines")
+            return self._group_parallel_lines(lines)
+            
+        except Exception as e:
+            logger.error(f"Line extraction failed: {e}")
+            return []
     
     def _extract_rectangles(self, page) -> List[Dict[str, Any]]:
         """Extract rectangles (likely rooms)"""
         rectangles = []
-        raw_rects = page.rects
         
-        for rect in raw_rects:
-            width = float(rect['x1'] - rect['x0'])
-            height = float(rect['y1'] - rect['y0'])
-            area = width * height
+        try:
+            raw_rects = page.rects
+            logger.info(f"Found {len(raw_rects)} raw rectangles to process")
             
-            # Filter meaningful rectangles
-            if area > 500:  # Minimum room size
-                rectangles.append({
-                    'type': 'rect',
-                    'coords': [float(rect['x0']), float(rect['y0']), float(rect['x1']), float(rect['y1'])],
-                    'x0': float(rect['x0']),
-                    'y0': float(rect['y0']),
-                    'x1': float(rect['x1']),
-                    'y1': float(rect['y1']),
-                    'width': width,
-                    'height': height,
-                    'area': area,
-                    'center_x': float(rect['x0'] + width / 2),
-                    'center_y': float(rect['y0'] + height / 2),
-                    'aspect_ratio': width / height if height > 0 else 0,
-                    'room_probability': self._calculate_room_probability(width, height, area)
-                })
-        
-        return sorted(rectangles, key=lambda r: r['area'], reverse=True)
+            # Apply defensive limit
+            if len(raw_rects) > self.MAX_RECTANGLES:
+                logger.warning(f"Too many rectangles ({len(raw_rects)}), limiting to {self.MAX_RECTANGLES}")
+                raw_rects = raw_rects[:self.MAX_RECTANGLES]
+            
+            for i, rect in enumerate(raw_rects):
+                try:
+                    # Validate coordinates
+                    if any(coord is None for coord in [rect.get('x0'), rect.get('y0'), rect.get('x1'), rect.get('y1')]):
+                        logger.debug(f"Skipping rectangle {i} with None coordinates")
+                        continue
+                    
+                    width = float(rect['x1'] - rect['x0'])
+                    height = float(rect['y1'] - rect['y0'])
+                    
+                    # Skip degenerate rectangles
+                    if width <= 0 or height <= 0:
+                        continue
+                    
+                    area = width * height
+                    
+                    # Filter meaningful rectangles
+                    if area > 500:  # Minimum room size
+                        rectangles.append({
+                            'type': 'rect',
+                            'coords': [float(rect['x0']), float(rect['y0']), float(rect['x1']), float(rect['y1'])],
+                            'x0': float(rect['x0']),
+                            'y0': float(rect['y0']),
+                            'x1': float(rect['x1']),
+                            'y1': float(rect['y1']),
+                            'width': width,
+                            'height': height,
+                            'area': area,
+                            'center_x': float(rect['x0'] + width / 2),
+                            'center_y': float(rect['y0'] + height / 2),
+                            'aspect_ratio': width / height if height > 0 else 0,
+                            'room_probability': self._calculate_room_probability(width, height, area)
+                        })
+                    
+                except Exception as e:
+                    logger.debug(f"Error processing rectangle {i}: {e}")
+                    continue
+            
+            logger.info(f"Successfully processed {len(rectangles)} valid rectangles")
+            return sorted(rectangles, key=lambda r: r['area'], reverse=True)
+            
+        except Exception as e:
+            logger.error(f"Rectangle extraction failed: {e}")
+            return []
     
     def _extract_polylines_pymupdf(self, pdf_path: str) -> List[Dict[str, Any]]:
         """Extract polylines and complex paths using PyMuPDF"""
         polylines = []
+        doc = None
         
         try:
+            logger.info(f"Opening PDF with PyMuPDF: {pdf_path}")
             doc = fitz.open(pdf_path)
+            
+            if len(doc) == 0:
+                logger.warning("PDF has no pages for PyMuPDF processing")
+                return []
+            
             page = doc[0]
+            logger.info(f"Getting drawings from page 1")
             
-            # Get all drawing paths
+            # Get all drawing paths with timeout protection
             drawings = page.get_drawings()
+            logger.info(f"Found {len(drawings)} drawings to process")
             
-            for drawing in drawings:
-                if drawing and 'items' in drawing and len(drawing['items']) > 2:
+            # Apply defensive limit
+            if len(drawings) > self.MAX_POLYLINES:
+                logger.warning(f"Too many drawings ({len(drawings)}), limiting to {self.MAX_POLYLINES}")
+                drawings = drawings[:self.MAX_POLYLINES]
+            
+            for i, drawing in enumerate(drawings):
+                try:
+                    if not drawing or 'items' not in drawing:
+                        continue
+                        
+                    items = drawing['items']
+                    if not items or len(items) <= 2:
+                        continue
+                    
+                    # Apply limit on drawing complexity
+                    if len(items) > self.MAX_DRAWING_ITEMS:
+                        logger.debug(f"Skipping complex drawing {i} with {len(items)} items")
+                        continue
+                    
                     # Extract path points
                     points = []
-                    for item in drawing['items']:
-                        if item and len(item) >= 3:  # Has coordinates
-                            # Safely extract coordinates with null checks
-                            try:
-                                x, y = item[1], item[2]
-                                if x is not None and y is not None:
-                                    points.extend([float(x), float(y)])
-                            except (TypeError, ValueError, IndexError):
-                                continue  # Skip invalid coordinates
+                    for j, item in enumerate(items):
+                        if not item or len(item) < 3:
+                            continue
+                        
+                        # Safely extract coordinates with null checks
+                        try:
+                            x, y = item[1], item[2]
+                            if x is not None and y is not None and isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                                points.extend([float(x), float(y)])
+                        except (TypeError, ValueError, IndexError) as e:
+                            logger.debug(f"Error extracting coordinates from item {j}: {e}")
+                            continue
                     
                     if len(points) >= 6:  # At least 3 points
                         try:
                             stroke_width = float(drawing.get('width', 1.0)) if drawing.get('width') is not None else 1.0
-                            color = drawing.get('stroke', {}).get('color', 0) if drawing.get('stroke') else 0
+                            
+                            # Safely extract color
+                            color = 0
+                            if drawing.get('stroke') and isinstance(drawing['stroke'], dict):
+                                color = drawing['stroke'].get('color', 0)
+                            
                             closed = bool(drawing.get('closePath', False))
                             
                             polylines.append({
@@ -173,13 +302,26 @@ class GeometryParser:
                                 'duct_probability': self._calculate_duct_probability(points, drawing)
                             })
                         except (TypeError, ValueError) as e:
-                            print(f"Error processing drawing properties: {e}")
+                            logger.debug(f"Error processing drawing {i} properties: {e}")
                             continue
+                    
+                except Exception as e:
+                    logger.debug(f"Error processing drawing {i}: {e}")
+                    continue
             
-            doc.close()
+            logger.info(f"Successfully processed {len(polylines)} valid polylines")
             
         except Exception as e:
-            print(f"PyMuPDF extraction failed: {e}")
+            logger.error(f"PyMuPDF extraction failed: {type(e).__name__}: {str(e)}")
+            
+        finally:
+            # Ensure document is always closed
+            if doc is not None:
+                try:
+                    doc.close()
+                    logger.debug("PyMuPDF document closed")
+                except:
+                    pass
         
         return polylines
     

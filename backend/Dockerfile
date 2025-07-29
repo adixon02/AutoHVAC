@@ -9,6 +9,10 @@ RUN apt-get update && \
         tesseract-ocr tesseract-ocr-eng \
         libpoppler-utils poppler-utils \
         libgl1-mesa-glx libglib2.0-0 \
+        libmupdf-dev mupdf-tools \
+        fonts-liberation fonts-dejavu-core \
+        file \
+        psmisc \
         && rm -rf /var/lib/apt/lists/* && \
         apt-get clean
 

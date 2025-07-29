@@ -13,7 +13,7 @@ services:
     name: autohvac-backend
     env: python
     buildCommand: |
-      apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng libpoppler-utils poppler-utils libgl1-mesa-glx libglib2.0-0
+      apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng libpoppler-utils poppler-utils libgl1-mesa-glx libglib2.0-0 libmupdf-dev mupdf-tools fonts-liberation fonts-dejavu-core file psmisc
       cd backend && pip install --only-binary=:all: -r requirements.txt
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
@@ -46,7 +46,7 @@ services:
     name: autohvac-worker
     env: python
     buildCommand: |
-      apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng libpoppler-utils poppler-utils libgl1-mesa-glx libglib2.0-0
+      apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng libpoppler-utils poppler-utils libgl1-mesa-glx libglib2.0-0 libmupdf-dev mupdf-tools fonts-liberation fonts-dejavu-core file psmisc
       cd backend && pip install --only-binary=:all: -r requirements.txt
     startCommand: cd backend && celery -A tasks.calculate_hvac_loads worker --loglevel=info --concurrency=2 --max-tasks-per-child=50 --max-memory-per-child=512000 --time-limit=1800 --soft-time-limit=1740 --without-gossip --without-mingle --without-heartbeat
     disk:

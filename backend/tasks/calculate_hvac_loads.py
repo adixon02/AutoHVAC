@@ -27,7 +27,7 @@ from typing import Dict, Any, Optional
 from services.job_service import job_service
 from services.manualj import calculate_manualj_with_audit
 from services.climate_data import get_climate_data
-from app.parser.geometry_parser import GeometryParser
+from app.parser.geometry_parser_safe import create_safe_parser, GeometryParserTimeout
 from app.parser.text_parser import TextParser
 from app.parser.ai_cleanup import cleanup, AICleanupError
 from services.envelope_extractor import extract_envelope_data, EnvelopeExtractorError
@@ -148,12 +148,19 @@ def calculate_hvac_loads(
         audit_data['climate_data'] = climate_data
         logger.info(f"HVAC calculation started for {project_id} - {filename} - {zip_code}")
         
-        # Stage 2: Geometry extraction
+        # Stage 2: Geometry extraction with timeout protection
         update_progress_sync("extracting_geometry", 20, "Analyzing blueprint geometry")
         
         try:
-            geometry_parser = GeometryParser()
+            logger.info(f"Starting geometry extraction for {project_id}")
+            logger.info(f"PDF file: {temp_file_path}, size: {len(file_content)} bytes")
+            
+            # Create safe parser with 60-second timeout
+            geometry_parser = create_safe_parser(timeout=60)
+            
+            logger.info("Calling geometry parser with timeout protection...")
             raw_geometry = geometry_parser.parse(temp_file_path)
+            logger.info("Geometry parsing completed successfully")
             
             # Validate geometry extraction results
             if not raw_geometry or not hasattr(raw_geometry, 'lines'):
@@ -162,6 +169,7 @@ def calculate_hvac_loads(
             geometry_summary = {
                 'lines_found': len(getattr(raw_geometry, 'lines', [])),
                 'rectangles_found': len(getattr(raw_geometry, 'rectangles', [])),
+                'polylines_found': len(getattr(raw_geometry, 'polylines', [])),
                 'page_dimensions': [
                     getattr(raw_geometry, 'page_width', 0),
                     getattr(raw_geometry, 'page_height', 0)
@@ -172,10 +180,16 @@ def calculate_hvac_loads(
             
             logger.info(f"Geometry extraction completed: {geometry_summary}")
             
+        except GeometryParserTimeout as e:
+            error_msg = f"Geometry extraction timed out: {str(e)}"
+            logger.error(f"Geometry extraction timeout for {project_id}: {error_msg}")
+            audit_data['errors_encountered'].append({'stage': 'geometry', 'error': error_msg, 'error_type': 'timeout'})
+            update_progress_sync("failed", 0, "Geometry extraction timed out after 60 seconds")
+            raise ValueError(error_msg)
         except Exception as e:
             error_msg = f"Geometry extraction failed: {str(e)}"
             logger.error(f"Geometry extraction error for {project_id}: {error_msg}", exc_info=True)
-            audit_data['errors_encountered'].append({'stage': 'geometry', 'error': error_msg})
+            audit_data['errors_encountered'].append({'stage': 'geometry', 'error': error_msg, 'error_type': type(e).__name__})
             update_progress_sync("failed", 0, f"Geometry extraction failed: {str(e)[:100]}")
             raise ValueError(error_msg)
         
