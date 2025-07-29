@@ -80,25 +80,19 @@ cleanup_task = None
 async def startup_event():
     """Run on application startup"""
     logger.info("Starting AutoHVAC API...")
+    # DON'T access database here - it blocks port binding
     
-    # Clean up any stuck jobs on startup
-    try:
-        cleaned = await database_rate_limiter.cleanup_stuck_jobs(older_than_minutes=60)
-        if cleaned > 0:
-            logger.warning(f"Cleaned up {cleaned} stuck jobs on startup")
-    except Exception as e:
-        logger.error(f"Error cleaning up stuck jobs on startup: {e}")
-    
-    # Start periodic cleanup task
+    # Start periodic cleanup task WITHOUT immediate execution
     async def periodic_cleanup():
+        await asyncio.sleep(60)  # Wait 60s before first run
         while True:
             try:
-                await asyncio.sleep(3600)  # Run every hour
                 cleaned = await database_rate_limiter.cleanup_stuck_jobs(older_than_minutes=60)
                 if cleaned > 0:
                     logger.info(f"Periodic cleanup: cleaned {cleaned} stuck jobs")
             except Exception as e:
                 logger.error(f"Error in periodic cleanup: {e}")
+            await asyncio.sleep(3600)  # Run every hour
     
     global cleanup_task
     cleanup_task = asyncio.create_task(periodic_cleanup())
