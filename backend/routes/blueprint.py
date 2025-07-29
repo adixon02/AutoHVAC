@@ -74,10 +74,10 @@ async def upload_blueprint(
     email: str = Form(...),
     project_label: str = Form(...),
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks,
     duct_config: str = Form("ducted_attic"),
     heating_fuel: str = Form("gas"),
-    session: AsyncSession = Depends(get_async_session),
-    background_tasks: BackgroundTasks
+    session: AsyncSession = Depends(get_async_session)
 ):
     request_id = f"req_{uuid.uuid4().hex[:8]}"
     print(f">>> UPLOAD ENDPOINT HIT: email={email}, file={file.filename}, size={file.size}")
