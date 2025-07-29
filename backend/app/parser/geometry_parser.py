@@ -8,6 +8,8 @@ import fitz  # PyMuPDF
 import numpy as np
 import logging
 import time
+import traceback
+import threading
 from typing import Dict, List, Any, Optional, Tuple
 import re
 from .schema import RawGeometry
@@ -31,6 +33,41 @@ class GeometryParser:
         self.MAX_POLYLINES = 2000
         self.MAX_DRAWING_ITEMS = 1000
     
+    def _retry_on_document_closed(self, operation_func, operation_name: str, max_retries: int = 2):
+        """
+        Retry wrapper for operations that might fail due to document closed errors
+        
+        Args:
+            operation_func: Function to execute
+            operation_name: Name of operation for logging
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            Result of operation_func
+        """
+        thread_id = threading.get_ident()
+        thread_name = threading.current_thread().name
+        
+        for attempt in range(max_retries + 1):
+            try:
+                return operation_func()
+            except Exception as e:
+                error_str = str(e).lower()
+                if "document closed" in error_str or "seek of closed file" in error_str:
+                    logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR on attempt {attempt + 1}/{max_retries + 1} in {operation_name}: {type(e).__name__}: {str(e)}")
+                    logger.error(f"[Thread {thread_name}:{thread_id}] Call stack:\n{traceback.format_exc()}")
+                    
+                    if attempt < max_retries:
+                        logger.info(f"[Thread {thread_name}:{thread_id}] Retrying {operation_name} (attempt {attempt + 2}/{max_retries + 1})")
+                        time.sleep(0.1)  # Brief pause before retry
+                        continue
+                    else:
+                        logger.error(f"[Thread {thread_name}:{thread_id}] Max retries ({max_retries}) exceeded for {operation_name}")
+                        raise
+                else:
+                    # Not a document closed error, re-raise immediately
+                    raise
+    
     def parse(self, pdf_path: str) -> RawGeometry:
         """
         Extract comprehensive geometry from architectural PDF
@@ -41,42 +78,55 @@ class GeometryParser:
         Returns:
             RawGeometry with all extracted elements
         """
-        logger.info(f"Starting geometry parsing for {pdf_path}")
+        import threading
+        thread_id = threading.get_ident()
+        thread_name = threading.current_thread().name
+        logger.info(f"[Thread {thread_name}:{thread_id}] Starting geometry parsing for {pdf_path}")
         
         try:
+            # CRITICAL: Open PDF file INSIDE this thread - never pass handles between threads
+            logger.info(f"[Thread {thread_name}:{thread_id}] Opening PDF with pdfplumber: {pdf_path}")
             with pdfplumber.open(pdf_path) as pdf:
+                logger.info(f"[Thread {thread_name}:{thread_id}] PDF opened successfully")
+                
                 if not pdf.pages:
                     raise ValueError("PDF has no pages")
                 
                 page = pdf.pages[0]  # Process first page
-                logger.info(f"Processing page 1 of {len(pdf.pages)}")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Processing page 1 of {len(pdf.pages)}")
                 
                 # Extract basic page info
                 page_width = float(page.width)
                 page_height = float(page.height)
-                logger.info(f"Page dimensions: {page_width} x {page_height}")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Page dimensions: {page_width} x {page_height}")
                 
                 # Detect scale
-                logger.info("Detecting scale markers...")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Detecting scale markers...")
                 scale_start = time.time()
                 scale_factor = self._detect_scale(page)
-                logger.info(f"Scale detection took {time.time() - scale_start:.2f}s, result: {scale_factor}")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Scale detection took {time.time() - scale_start:.2f}s, result: {scale_factor}")
                 
                 # Extract geometry elements with timing
-                logger.info("Extracting lines...")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Extracting lines...")
                 lines_start = time.time()
                 lines = self._extract_lines(page)
-                logger.info(f"Line extraction took {time.time() - lines_start:.2f}s, found {len(lines)} lines")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Line extraction took {time.time() - lines_start:.2f}s, found {len(lines)} lines")
                 
-                logger.info("Extracting rectangles...")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Extracting rectangles...")
                 rects_start = time.time()
                 rectangles = self._extract_rectangles(page)
-                logger.info(f"Rectangle extraction took {time.time() - rects_start:.2f}s, found {len(rectangles)} rectangles")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Rectangle extraction took {time.time() - rects_start:.2f}s, found {len(rectangles)} rectangles")
                 
-                logger.info("Extracting polylines with PyMuPDF...")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Extracting polylines with PyMuPDF...")
                 poly_start = time.time()
-                polylines = self._extract_polylines_pymupdf(pdf_path)
-                logger.info(f"Polyline extraction took {time.time() - poly_start:.2f}s, found {len(polylines)} polylines")
+                polylines = self._retry_on_document_closed(
+                    lambda: self._extract_polylines_pymupdf(pdf_path),
+                    "polyline extraction"
+                )
+                logger.info(f"[Thread {thread_name}:{thread_id}] Polyline extraction took {time.time() - poly_start:.2f}s, found {len(polylines)} polylines")
+                
+                logger.info(f"[Thread {thread_name}:{thread_id}] Closing pdfplumber PDF handle")
+                # PDF will be closed automatically by context manager
                 
                 result = RawGeometry(
                     page_width=page_width,
@@ -87,11 +137,12 @@ class GeometryParser:
                     polylines=polylines
                 )
                 
-                logger.info(f"Geometry parsing completed successfully")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Geometry parsing completed successfully")
                 return result
                 
         except Exception as e:
-            logger.error(f"Geometry parsing failed: {type(e).__name__}: {str(e)}")
+            logger.error(f"[Thread {thread_name}:{thread_id}] Geometry parsing failed: {type(e).__name__}: {str(e)}")
+            logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
             raise
     
     def _detect_scale(self, page) -> Optional[float]:
@@ -231,23 +282,29 @@ class GeometryParser:
     
     def _extract_polylines_pymupdf(self, pdf_path: str) -> List[Dict[str, Any]]:
         """Extract polylines and complex paths using PyMuPDF"""
+        import threading
+        thread_id = threading.get_ident()
+        thread_name = threading.current_thread().name
+        
         polylines = []
         doc = None
         
         try:
-            logger.info(f"Opening PDF with PyMuPDF: {pdf_path}")
+            # CRITICAL: Open PyMuPDF document INSIDE this thread
+            logger.info(f"[Thread {thread_name}:{thread_id}] Opening PDF with PyMuPDF: {pdf_path}")
             doc = fitz.open(pdf_path)
+            logger.info(f"[Thread {thread_name}:{thread_id}] PyMuPDF document opened successfully")
             
             if len(doc) == 0:
-                logger.warning("PDF has no pages for PyMuPDF processing")
+                logger.warning(f"[Thread {thread_name}:{thread_id}] PDF has no pages for PyMuPDF processing")
                 return []
             
             page = doc[0]
-            logger.info(f"Getting drawings from page 1")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Getting drawings from page 1")
             
             # Get all drawing paths with timeout protection
             drawings = page.get_drawings()
-            logger.info(f"Found {len(drawings)} drawings to process")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Found {len(drawings)} drawings to process")
             
             # Apply defensive limit
             if len(drawings) > self.MAX_POLYLINES:
@@ -309,19 +366,26 @@ class GeometryParser:
                     logger.debug(f"Error processing drawing {i}: {e}")
                     continue
             
-            logger.info(f"Successfully processed {len(polylines)} valid polylines")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Successfully processed {len(polylines)} valid polylines")
             
         except Exception as e:
-            logger.error(f"PyMuPDF extraction failed: {type(e).__name__}: {str(e)}")
+            if "document closed" in str(e).lower() or "seek of closed file" in str(e).lower():
+                logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR detected in PyMuPDF: {type(e).__name__}: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF path: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Call stack:\n{traceback.format_exc()}")
+            else:
+                logger.error(f"[Thread {thread_name}:{thread_id}] PyMuPDF extraction failed: {type(e).__name__}: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
             
         finally:
-            # Ensure document is always closed
+            # Ensure document is always closed in the same thread that opened it
             if doc is not None:
                 try:
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Closing PyMuPDF document")
                     doc.close()
-                    logger.debug("PyMuPDF document closed")
-                except:
-                    pass
+                    logger.info(f"[Thread {thread_name}:{thread_id}] PyMuPDF document closed successfully")
+                except Exception as close_error:
+                    logger.error(f"[Thread {thread_name}:{thread_id}] Error closing PyMuPDF document: {close_error}")
         
         return polylines
     

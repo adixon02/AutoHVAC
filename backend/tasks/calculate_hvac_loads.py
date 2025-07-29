@@ -194,8 +194,8 @@ def calculate_hvac_loads(
             logger.info(f"Starting geometry extraction for {project_id}")
             logger.info(f"PDF file: {temp_file_path}, size: {len(file_content)} bytes")
             
-            # Create safe parser with 60-second timeout and complexity checks
-            geometry_parser = create_safe_parser(timeout=60, enable_complexity_checks=True)
+            # Create safe parser with 300-second timeout and complexity checks
+            geometry_parser = create_safe_parser(timeout=300, enable_complexity_checks=True)
             
             logger.info(f"Calling geometry parser for page {selected_page_number} with timeout protection...")
             raw_geometry = geometry_parser.parse(temp_file_path, page_number=selected_page_zero_based)
@@ -223,7 +223,7 @@ def calculate_hvac_loads(
             error_msg = f"Geometry extraction timed out for page {selected_page_number}: {str(e)}"
             logger.error(f"Geometry extraction timeout for {project_id}: {error_msg}")
             audit_data['errors_encountered'].append({'stage': 'geometry', 'error': error_msg, 'error_type': 'timeout'})
-            update_progress_sync("failed", 0, f"Page {selected_page_number} geometry extraction timed out after 60 seconds")
+            update_progress_sync("failed", 0, f"Page {selected_page_number} geometry extraction timed out after 300 seconds (5 minutes)")
             raise ValueError(error_msg)
         except GeometryParserComplexity as e:
             error_msg = f"Page {selected_page_number} is too complex to process: {str(e)}"

@@ -7,6 +7,7 @@ import os
 import time
 import logging
 import traceback
+import threading
 import psutil
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Optional, Dict, Any
@@ -36,7 +37,7 @@ class GeometryParserComplexity(Exception):
 class GeometryParserSafe:
     """Thread-safe geometry parser with timeout and resource monitoring"""
     
-    def __init__(self, timeout: int = 60, enable_complexity_checks: bool = True):
+    def __init__(self, timeout: int = 300, enable_complexity_checks: bool = True):
         self.timeout = timeout
         self.enable_complexity_checks = enable_complexity_checks
         self.parser = GeometryParser()
@@ -73,24 +74,27 @@ class GeometryParserSafe:
             ValueError: If PDF is invalid or unsupported
             Exception: For other parsing failures
         """
+        thread_id = threading.get_ident()
+        thread_name = threading.current_thread().name
+        
         start_time = time.time()
         process = psutil.Process()
         initial_memory = process.memory_info().rss / 1024 / 1024  # MB
         
-        logger.info(f"Starting geometry parsing for {pdf_path}")
-        logger.info(f"File size: {os.path.getsize(pdf_path) / 1024 / 1024:.2f} MB")
-        logger.info(f"Initial memory usage: {initial_memory:.2f} MB")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Starting geometry parsing for {pdf_path}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] File size: {os.path.getsize(pdf_path) / 1024 / 1024:.2f} MB")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Initial memory usage: {initial_memory:.2f} MB")
         
         # Validate PDF before processing
         try:
             self._validate_pdf(pdf_path)
         except Exception as e:
-            logger.error(f"PDF validation failed: {e}")
+            logger.error(f"[Thread {thread_name}:{thread_id}] PDF validation failed: {e}")
             raise ValueError(f"Invalid PDF file: {str(e)}")
         
         # Parse with timeout protection
         with ThreadPoolExecutor(max_workers=1) as executor:
-            logger.info(f"Submitting geometry parsing task with {self.timeout}s timeout")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Submitting geometry parsing task with {self.timeout}s timeout")
             future = executor.submit(self._parse_with_monitoring, pdf_path)
             
             try:
@@ -99,21 +103,21 @@ class GeometryParserSafe:
                 # Log success metrics
                 end_time = time.time()
                 final_memory = process.memory_info().rss / 1024 / 1024
-                logger.info(f"Geometry parsing completed successfully")
-                logger.info(f"Duration: {end_time - start_time:.2f}s")
-                logger.info(f"Memory delta: {final_memory - initial_memory:.2f} MB")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Geometry parsing completed successfully")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Duration: {end_time - start_time:.2f}s")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Memory delta: {final_memory - initial_memory:.2f} MB")
                 
                 return result
                 
             except FutureTimeoutError:
                 # Timeout occurred
-                logger.error(f"Geometry parsing timed out after {self.timeout}s")
-                logger.error(f"PDF file: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Geometry parsing timed out after {self.timeout}s")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
                 
                 # Try to get current memory usage
                 try:
                     current_memory = process.memory_info().rss / 1024 / 1024
-                    logger.error(f"Memory at timeout: {current_memory:.2f} MB (delta: {current_memory - initial_memory:.2f} MB)")
+                    logger.error(f"[Thread {thread_name}:{thread_id}] Memory at timeout: {current_memory:.2f} MB (delta: {current_memory - initial_memory:.2f} MB)")
                 except:
                     pass
                 
@@ -122,14 +126,14 @@ class GeometryParserSafe:
                 executor.shutdown(wait=False)
                 
                 raise GeometryParserTimeout(
-                    f"Geometry parsing exceeded {self.timeout}s timeout. "
+                    f"Geometry parsing exceeded {self.timeout}s timeout (5 minutes). "
                     f"PDF may be too complex or corrupted."
                 )
                 
             except Exception as e:
                 # Other exceptions from the parsing thread
-                logger.error(f"Geometry parsing failed with exception: {type(e).__name__}: {str(e)}")
-                logger.error(f"Full traceback:\n{traceback.format_exc()}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Geometry parsing failed with exception: {type(e).__name__}: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
                 
                 # Re-raise with additional context
                 raise Exception(f"Geometry parsing failed: {str(e)}") from e
@@ -189,7 +193,9 @@ class GeometryParserSafe:
         except Exception as e:
             raise ValueError(f"PDF validation failed: {str(e)}")
         
-        logger.info(f"PDF validation passed: {page_count} pages")
+        thread_id = threading.get_ident()
+        thread_name = threading.current_thread().name
+        logger.info(f"[Thread {thread_name}:{thread_id}] PDF validation passed: {page_count} pages")
     
     def parse_specific_page(self, pdf_path: str, page_number: int) -> RawGeometry:
         """
@@ -207,19 +213,22 @@ class GeometryParserSafe:
             GeometryParserComplexity: If page is too complex
             ValueError: If PDF is invalid or page doesn't exist
         """
+        thread_id = threading.get_ident()
+        thread_name = threading.current_thread().name
+        
         start_time = time.time()
         process = psutil.Process()
         initial_memory = process.memory_info().rss / 1024 / 1024  # MB
         
-        logger.info(f"Starting geometry parsing for page {page_number + 1} of {pdf_path}")
-        logger.info(f"File size: {os.path.getsize(pdf_path) / 1024 / 1024:.2f} MB")
-        logger.info(f"Initial memory usage: {initial_memory:.2f} MB")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Starting geometry parsing for page {page_number + 1} of {pdf_path}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] File size: {os.path.getsize(pdf_path) / 1024 / 1024:.2f} MB")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Initial memory usage: {initial_memory:.2f} MB")
         
         # Validate PDF and check page exists
         try:
             self._validate_pdf_and_page(pdf_path, page_number)
         except Exception as e:
-            logger.error(f"PDF/page validation failed: {e}")
+            logger.error(f"[Thread {thread_name}:{thread_id}] PDF/page validation failed: {e}")
             raise ValueError(f"Invalid PDF or page: {str(e)}")
         
         # Pre-check page complexity if enabled
@@ -227,12 +236,12 @@ class GeometryParserSafe:
             try:
                 self._check_page_complexity(pdf_path, page_number)
             except GeometryParserComplexity as e:
-                logger.error(f"Page complexity check failed: {e}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Page complexity check failed: {e}")
                 raise
         
         # Parse with timeout protection
         with ThreadPoolExecutor(max_workers=1) as executor:
-            logger.info(f"Submitting page {page_number + 1} geometry parsing task with {self.timeout}s timeout")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Submitting page {page_number + 1} geometry parsing task with {self.timeout}s timeout")
             future = executor.submit(self._parse_page_with_monitoring, pdf_path, page_number)
             
             try:
@@ -241,21 +250,21 @@ class GeometryParserSafe:
                 # Log success metrics
                 end_time = time.time()
                 final_memory = process.memory_info().rss / 1024 / 1024
-                logger.info(f"Page {page_number + 1} geometry parsing completed successfully")
-                logger.info(f"Duration: {end_time - start_time:.2f}s")
-                logger.info(f"Memory delta: {final_memory - initial_memory:.2f} MB")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Page {page_number + 1} geometry parsing completed successfully")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Duration: {end_time - start_time:.2f}s")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Memory delta: {final_memory - initial_memory:.2f} MB")
                 
                 return result
                 
             except FutureTimeoutError:
                 # Timeout occurred
-                logger.error(f"Geometry parsing timed out after {self.timeout}s for page {page_number + 1}")
-                logger.error(f"PDF file: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Geometry parsing timed out after {self.timeout}s for page {page_number + 1}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
                 
                 # Try to get current memory usage
                 try:
                     current_memory = process.memory_info().rss / 1024 / 1024
-                    logger.error(f"Memory at timeout: {current_memory:.2f} MB (delta: {current_memory - initial_memory:.2f} MB)")
+                    logger.error(f"[Thread {thread_name}:{thread_id}] Memory at timeout: {current_memory:.2f} MB (delta: {current_memory - initial_memory:.2f} MB)")
                 except:
                     pass
                 
@@ -264,14 +273,14 @@ class GeometryParserSafe:
                 executor.shutdown(wait=False)
                 
                 raise GeometryParserTimeout(
-                    f"Geometry parsing exceeded {self.timeout}s timeout for page {page_number + 1}. "
+                    f"Geometry parsing exceeded {self.timeout}s timeout (5 minutes) for page {page_number + 1}. "
                     f"Page may be too complex or corrupted."
                 )
                 
             except Exception as e:
                 # Other exceptions from the parsing thread
-                logger.error(f"Geometry parsing failed for page {page_number + 1}: {type(e).__name__}: {str(e)}")
-                logger.error(f"Full traceback:\n{traceback.format_exc()}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Geometry parsing failed for page {page_number + 1}: {type(e).__name__}: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
                 
                 # Re-raise with additional context
                 raise Exception(f"Geometry parsing failed for page {page_number + 1}: {str(e)}") from e
@@ -313,7 +322,9 @@ class GeometryParserSafe:
         except Exception as e:
             raise ValueError(f"Page validation failed: {str(e)}")
         
-        logger.info(f"Page {page_number + 1} validation passed")
+        thread_id = threading.get_ident()
+        thread_name = threading.current_thread().name
+        logger.info(f"[Thread {thread_name}:{thread_id}] Page {page_number + 1} validation passed")
     
     def _check_page_complexity(self, pdf_path: str, page_number: int) -> None:
         """
@@ -334,7 +345,9 @@ class GeometryParserSafe:
             drawings = page.get_drawings()
             element_count = len(drawings)
             
-            logger.info(f"Page {page_number + 1} complexity check: {element_count} drawing elements")
+            thread_id = threading.get_ident()
+            thread_name = threading.current_thread().name
+            logger.info(f"[Thread {thread_name}:{thread_id}] Page {page_number + 1} complexity check: {element_count} drawing elements")
             
             if element_count > MAX_ELEMENTS_PER_PAGE:
                 doc.close()
@@ -362,7 +375,7 @@ class GeometryParserSafe:
                 line_count = int(line_count * scale_factor)
                 rect_count = int(rect_count * scale_factor)
             
-            logger.info(f"Page {page_number + 1} estimated: {line_count} lines, {rect_count} rectangles")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Page {page_number + 1} estimated: {line_count} lines, {rect_count} rectangles")
             
             if line_count > MAX_LINES_PER_PAGE:
                 doc.close()
@@ -379,13 +392,13 @@ class GeometryParserSafe:
                 )
             
             doc.close()
-            logger.info(f"Page {page_number + 1} complexity check passed")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Page {page_number + 1} complexity check passed")
             
         except GeometryParserComplexity:
             # Re-raise complexity errors
             raise
         except Exception as e:
-            logger.warning(f"Complexity check failed for page {page_number + 1}: {e}")
+            logger.warning(f"[Thread {thread_name}:{thread_id}] Complexity check failed for page {page_number + 1}: {e}")
             # Don't fail on complexity check errors, just log and continue
     
     def _parse_with_monitoring(self, pdf_path: str) -> RawGeometry:
@@ -398,7 +411,9 @@ class GeometryParserSafe:
             import threading
             threading.current_thread().name = "GeometryParser"
             
-            logger.info("Starting geometry extraction in worker thread")
+            thread_id = threading.get_ident()
+            thread_name = threading.current_thread().name
+            logger.info(f"[Thread {thread_name}:{thread_id}] Starting geometry extraction in worker thread")
             
             # Add checkpoints throughout parsing
             checkpoint_start = time.time()
@@ -407,7 +422,7 @@ class GeometryParserSafe:
             result = self.parser.parse(pdf_path)
             
             checkpoint_end = time.time()
-            logger.info(f"Geometry extraction completed in {checkpoint_end - checkpoint_start:.2f}s")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Geometry extraction completed in {checkpoint_end - checkpoint_start:.2f}s")
             
             # Validate result
             if not result:
@@ -417,22 +432,19 @@ class GeometryParserSafe:
                 raise ValueError("Parser returned incomplete geometry data")
             
             # Log extraction summary
-            logger.info(f"Extracted geometry summary:")
-            logger.info(f"  - Lines: {len(result.lines)}")
-            logger.info(f"  - Rectangles: {len(result.rectangles)}")
-            logger.info(f"  - Polylines: {len(result.polylines)}")
-            logger.info(f"  - Page size: {result.page_width} x {result.page_height}")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Extracted geometry summary:")
+            logger.info(f"[Thread {thread_name}:{thread_id}]   - Lines: {len(result.lines)}")
+            logger.info(f"[Thread {thread_name}:{thread_id}]   - Rectangles: {len(result.rectangles)}")
+            logger.info(f"[Thread {thread_name}:{thread_id}]   - Polylines: {len(result.polylines)}")
+            logger.info(f"[Thread {thread_name}:{thread_id}]   - Page size: {result.page_width} x {result.page_height}")
             
             return result
             
         except Exception as e:
             # Log any exception with full context
-            logger.error(f"Exception in geometry parser thread: {type(e).__name__}: {str(e)}")
-            logger.error(f"Full traceback:\n{traceback.format_exc()}")
-            
-            # Add thread info
-            logger.error(f"Thread: {threading.current_thread().name}")
-            logger.error(f"PDF path: {pdf_path}")
+            logger.error(f"[Thread {thread_name}:{thread_id}] Exception in geometry parser thread: {type(e).__name__}: {str(e)}")
+            logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
+            logger.error(f"[Thread {thread_name}:{thread_id}] PDF path: {pdf_path}")
             
             # Re-raise for the main thread to handle
             raise
@@ -454,7 +466,9 @@ class GeometryParserSafe:
             import threading
             threading.current_thread().name = f"GeometryParser-Page{page_number + 1}"
             
-            logger.info(f"Starting geometry extraction for page {page_number + 1} in worker thread")
+            thread_id = threading.get_ident()
+            thread_name = threading.current_thread().name
+            logger.info(f"[Thread {thread_name}:{thread_id}] Starting geometry extraction for page {page_number + 1} in worker thread")
             
             # Add checkpoints throughout parsing
             checkpoint_start = time.time()
@@ -471,7 +485,7 @@ class GeometryParserSafe:
                 result = self.parser.parse(temp_single_page_path)
                 
                 checkpoint_end = time.time()
-                logger.info(f"Page {page_number + 1} geometry extraction completed in {checkpoint_end - checkpoint_start:.2f}s")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Page {page_number + 1} geometry extraction completed in {checkpoint_end - checkpoint_start:.2f}s")
                 
                 # Validate result
                 if not result:
@@ -481,11 +495,11 @@ class GeometryParserSafe:
                     raise ValueError("Parser returned incomplete geometry data")
                 
                 # Log extraction summary
-                logger.info(f"Extracted geometry summary for page {page_number + 1}:")
-                logger.info(f"  - Lines: {len(result.lines)}")
-                logger.info(f"  - Rectangles: {len(result.rectangles)}")
-                logger.info(f"  - Polylines: {len(result.polylines)}")
-                logger.info(f"  - Page size: {result.page_width} x {result.page_height}")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Extracted geometry summary for page {page_number + 1}:")
+                logger.info(f"[Thread {thread_name}:{thread_id}]   - Lines: {len(result.lines)}")
+                logger.info(f"[Thread {thread_name}:{thread_id}]   - Rectangles: {len(result.rectangles)}")
+                logger.info(f"[Thread {thread_name}:{thread_id}]   - Polylines: {len(result.polylines)}")
+                logger.info(f"[Thread {thread_name}:{thread_id}]   - Page size: {result.page_width} x {result.page_height}")
                 
                 return result
                 
@@ -493,19 +507,17 @@ class GeometryParserSafe:
                 # Clean up temporary file
                 if os.path.exists(temp_single_page_path):
                     try:
+                        logger.info(f"[Thread {thread_name}:{thread_id}] Cleaning up temporary file: {temp_single_page_path}")
                         os.unlink(temp_single_page_path)
                     except Exception as e:
-                        logger.warning(f"Failed to clean up temporary file {temp_single_page_path}: {e}")
+                        logger.warning(f"[Thread {thread_name}:{thread_id}] Failed to clean up temporary file {temp_single_page_path}: {e}")
             
         except Exception as e:
             # Log any exception with full context
-            logger.error(f"Exception in geometry parser thread for page {page_number + 1}: {type(e).__name__}: {str(e)}")
-            logger.error(f"Full traceback:\n{traceback.format_exc()}")
-            
-            # Add thread info
-            logger.error(f"Thread: {threading.current_thread().name}")
-            logger.error(f"PDF path: {pdf_path}")
-            logger.error(f"Page number: {page_number + 1}")
+            logger.error(f"[Thread {thread_name}:{thread_id}] Exception in geometry parser thread for page {page_number + 1}: {type(e).__name__}: {str(e)}")
+            logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
+            logger.error(f"[Thread {thread_name}:{thread_id}] PDF path: {pdf_path}")
+            logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
             
             # Re-raise for the main thread to handle
             raise
@@ -513,6 +525,7 @@ class GeometryParserSafe:
     def _extract_single_page(self, pdf_path: str, page_number: int) -> str:
         """
         Extract a single page to a temporary PDF file
+        CRITICAL: This runs in the worker thread, ensuring file operations happen in correct thread
         
         Args:
             pdf_path: Original PDF path
@@ -523,35 +536,66 @@ class GeometryParserSafe:
         """
         import tempfile
         
+        thread_id = threading.get_ident()
+        thread_name = threading.current_thread().name
+        
         # Create temporary file
         temp_fd, temp_path = tempfile.mkstemp(suffix='.pdf', prefix=f'page_{page_number + 1}_')
         os.close(temp_fd)
         
+        source_doc = None
+        target_doc = None
+        
         try:
-            # Open source document
+            logger.info(f"[Thread {thread_name}:{thread_id}] Opening source PDF for page extraction: {pdf_path}")
+            # CRITICAL: Open source document in worker thread
             source_doc = fitz.open(pdf_path)
+            logger.info(f"[Thread {thread_name}:{thread_id}] Source document opened successfully")
             
             # Create new document with just the target page
+            logger.info(f"[Thread {thread_name}:{thread_id}] Creating single-page document for page {page_number + 1}")
             target_doc = fitz.open()
             target_doc.insert_pdf(source_doc, from_page=page_number, to_page=page_number)
             
             # Save to temporary file
+            logger.info(f"[Thread {thread_name}:{thread_id}] Saving single page to: {temp_path}")
             target_doc.save(temp_path)
             
-            # Clean up
-            target_doc.close()
-            source_doc.close()
-            
-            logger.debug(f"Extracted page {page_number + 1} to temporary file: {temp_path}")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Page {page_number + 1} extracted successfully to temporary file")
             return temp_path
             
         except Exception as e:
+            if "document closed" in str(e).lower() or "seek of closed file" in str(e).lower():
+                logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR in page extraction: {type(e).__name__}: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF path: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Call stack:\n{traceback.format_exc()}")
+            else:
+                logger.error(f"[Thread {thread_name}:{thread_id}] Failed to extract page {page_number + 1}: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
+            
             # Clean up on failure
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
             raise Exception(f"Failed to extract page {page_number + 1}: {str(e)}")
+            
+        finally:
+            # Clean up documents in the same thread that opened them
+            if target_doc is not None:
+                try:
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Closing target document")
+                    target_doc.close()
+                except Exception as e:
+                    logger.error(f"[Thread {thread_name}:{thread_id}] Error closing target document: {e}")
+                    
+            if source_doc is not None:
+                try:
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Closing source document")
+                    source_doc.close()
+                except Exception as e:
+                    logger.error(f"[Thread {thread_name}:{thread_id}] Error closing source document: {e}")
 
 
-def create_safe_parser(timeout: int = 60, enable_complexity_checks: bool = True) -> GeometryParserSafe:
+def create_safe_parser(timeout: int = 300, enable_complexity_checks: bool = True) -> GeometryParserSafe:
     """Factory function to create a safe geometry parser"""
     return GeometryParserSafe(timeout=timeout, enable_complexity_checks=enable_complexity_checks)
