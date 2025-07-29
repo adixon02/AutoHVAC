@@ -220,7 +220,8 @@ def process_blueprint(job_id: str, file_content: bytes, filename: str, email: st
         finally:
             # Clean up temporary file
             try:
-                os.unlink(temp_path)
+                from services.storage import storage_service
+                storage_service.cleanup(job_id)
             except:
                 pass
                 

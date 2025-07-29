@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -7,8 +7,13 @@ from routes import blueprint, job, billing, auth, jobs, admin
 from app.middleware.error_handler import traceback_exception_handler, CORSMiddleware as CustomCORSMiddleware
 from app.config import DEBUG, DEV_VERIFIED_EMAILS
 from services.database_rate_limiter import database_rate_limiter
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+from database import get_async_session
 import logging
 import asyncio
+import os
+import redis
 
 # Debug startup logging
 print("▶ DEBUG =", DEBUG, "  DEV_VERIFIED_EMAILS =", DEV_VERIFIED_EMAILS)
@@ -121,13 +126,52 @@ async def health():
     return {"status": "healthy"}
 
 @app.get("/healthz")
-async def healthz():
-    """Lightweight health check endpoint - no DB or external dependencies"""
-    return {
+async def healthz(session: AsyncSession = Depends(get_async_session)):
+    """Comprehensive health check endpoint"""
+    health_status = {
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat(),
-        "service": "autohvac-api"
+        "service": "autohvac-api",
+        "checks": {}
     }
+    
+    # Check database connectivity
+    try:
+        result = await session.execute(text("SELECT 1"))
+        health_status["checks"]["database"] = {"status": "healthy"}
+    except Exception as e:
+        health_status["checks"]["database"] = {"status": "unhealthy", "error": str(e)}
+        health_status["status"] = "degraded"
+    
+    # Check Redis connectivity
+    try:
+        r = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+        r.ping()
+        health_status["checks"]["redis"] = {"status": "healthy"}
+    except Exception as e:
+        health_status["checks"]["redis"] = {"status": "unhealthy", "error": str(e)}
+        health_status["status"] = "degraded"
+    
+    # Check Celery worker status (via Redis)
+    try:
+        from celery import Celery
+        celery_app = Celery('autohvac', broker=os.getenv('REDIS_URL'))
+        stats = celery_app.control.inspect().stats()
+        if stats:
+            health_status["checks"]["celery_workers"] = {
+                "status": "healthy",
+                "workers": len(stats)
+            }
+        else:
+            health_status["checks"]["celery_workers"] = {"status": "unhealthy", "error": "No workers found"}
+            health_status["status"] = "degraded"
+    except Exception as e:
+        health_status["checks"]["celery_workers"] = {"status": "unhealthy", "error": str(e)}
+        health_status["status"] = "degraded"
+    
+    # Return appropriate status code
+    status_code = 200 if health_status["status"] == "ok" else 503
+    return JSONResponse(content=health_status, status_code=status_code)
 
 # Catch-all route to debug unmatched requests
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])

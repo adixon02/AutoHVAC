@@ -4,6 +4,7 @@ services:
     env: node
     buildCommand: cd frontend && npm install && npm run build
     startCommand: cd frontend && npm start
+    healthCheckPath: /
     envVars:
       - key: NEXT_PUBLIC_API_URL
         value: https://autohvac-backend.onrender.com
@@ -11,8 +12,12 @@ services:
   - type: web
     name: autohvac-backend
     env: python
-    buildCommand: cd backend && pip install --only-binary=:all: -r requirements.txt
+    buildCommand: |
+      cd backend && 
+      pip install --only-binary=:all: -r requirements.txt &&
+      alembic upgrade head
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
     envVars:
       - key: REDIS_URL
         fromService:
@@ -33,12 +38,31 @@ services:
         sync: false
       - key: STRIPE_PRICE_ID
         sync: false
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: WEB_CONCURRENCY
+        value: "2"
 
   - type: worker
     name: autohvac-worker
     env: python
     buildCommand: cd backend && pip install --only-binary=:all: -r requirements.txt
-    startCommand: cd backend && celery -A tasks.parse_blueprint worker --loglevel=info --concurrency=1
+    startCommand: |
+      cd backend && 
+      celery -A tasks.parse_blueprint worker \
+        --loglevel=info \
+        --concurrency=2 \
+        --max-tasks-per-child=50 \
+        --max-memory-per-child=512000 \
+        --time-limit=600 \
+        --soft-time-limit=540 \
+        --without-gossip \
+        --without-mingle \
+        --without-heartbeat
+    disk:
+      name: worker-storage
+      mountPath: /var/data
+      sizeGB: 10
     envVars:
       - key: REDIS_URL
         fromService:
@@ -51,13 +75,22 @@ services:
           property: connectionString
       - key: OPENAI_API_KEY
         sync: false
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: C_FORCE_ROOT
+        value: "true"
+      - key: RENDER_DISK_PATH
+        value: /var/data/uploads
+    autoDeploy: false
 
   - type: redis
     name: autohvac-redis
     ipAllowList: []
     maxmemoryPolicy: allkeys-lru
+    plan: starter
 
 databases:
   - name: autohvac-postgres
     databaseName: autohvac
     user: autohvac
+    plan: starter

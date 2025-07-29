@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 # from services.simple_job_processor import process_job_background  # Not needed with Celery
 from tasks.parse_blueprint import process_blueprint
+from services.storage import storage_service
 import aiofiles
 import os
 
@@ -246,28 +247,21 @@ async def upload_blueprint(
         
         logger.info("🔍 Step 7: Streaming file to disk")
         try:
-            # Stream file to disk for memory efficiency
-            temp_path = f"/tmp/{project_id}.pdf"
+            # Read file content
+            file_content = await file.read()
             
-            async with aiofiles.open(temp_path, 'wb') as f:
-                chunk_size = 1024 * 1024  # 1MB chunks
-                total_size = 0
-                while chunk := await file.read(chunk_size):
-                    await f.write(chunk)
-                    total_size += len(chunk)
-            
-            logger.info(f"🔍 Saved PDF to {temp_path}, size={total_size} bytes")
+            # Save using storage service
+            temp_path = await storage_service.save_upload(project_id, file_content)
+            logger.info(f"🔍 Saved PDF to {temp_path}, size={len(file_content)} bytes")
             
             # Validate file exists and has content
             if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
                 raise HTTPException(status_code=400, detail="File is empty")
             
             # Quick PDF validation
-            with open(temp_path, 'rb') as f:
-                header = f.read(4)
-                if file_ext == '.pdf' and header != b'%PDF':
-                    os.unlink(temp_path)
-                    raise HTTPException(status_code=400, detail="Invalid PDF file")
+            if file_ext == '.pdf' and file_content[:4] != b'%PDF':
+                storage_service.cleanup(project_id)
+                raise HTTPException(status_code=400, detail="Invalid PDF file")
             
             logger.error("🔍 Step 8: Starting background job processor")
             logger.error(f"Adding background task for job {project_id}")
@@ -275,9 +269,7 @@ async def upload_blueprint(
             print(f">>> USE_CELERY = {USE_CELERY}")
             
             if USE_CELERY:
-                # Read file content for Celery task
-                async with aiofiles.open(temp_path, 'rb') as f:
-                    file_content = await f.read()
+                # Celery task already has file_content
                 process_blueprint.delay(project_id, file_content, file.filename, email, "90210")
             else:
                 print(f">>> ERROR: USE_CELERY is False but Celery is expected")

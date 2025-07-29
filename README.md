@@ -127,10 +127,11 @@ AutoHVAC/
 │   └── start_backend.sh               # Backend startup script
 │
 ├── .github/workflows/                 # CI/CD Pipeline
-│   └── ci.yaml                        # GitHub Actions workflow
-│       ├── frontend-test              # Node.js linting + type check + build
-│       ├── backend-test               # Python linting + type check + pytest
-│       └── api-smoke-test             # Live API endpoint testing
+│   ├── ci.yaml                        # Comprehensive GitHub Actions workflow
+│   │   ├── frontend-test              # Node.js linting + type check + build
+│   │   ├── backend-test               # Python linting + type check + pytest
+│   │   └── api-smoke-test             # Live API endpoint testing
+│   └── smoke-test.yml                 # Additional smoke testing configuration
 │
 ├── docker-compose.yml                 # Local Development Stack
 │   ├── frontend                       # Next.js dev server
@@ -183,11 +184,16 @@ AutoHVAC/
 - Stages: `extracting_geometry` (20%) → `extracting_text` (40%) → `ai_processing` (60%) → `calculating_loads` (80%) → `complete` (100%)
 
 #### **Development Services (`backend/services/`)**
-- **`simple_job_processor.py`**: Simplified development job processor
-  - In-memory job processing without Celery/Redis
-  - Mock HVAC analysis results for testing
-  - Threaded background processing for development
+- **`simple_job_processor.py`**: Simplified development job processor with FastAPI BackgroundTasks
+  - Async background processing without Celery/Redis for development
+  - Complete PDF processing pipeline with AI integration
+  - Database-backed progress tracking with isolated sessions
   - Progress tracking: 1% → 5% → 25% → 60% → 90% → 100%
+  - AI analysis safeguards: page limits, token limits, timeout handling
+- **`database_rate_limiter.py`**: Database-backed rate limiting service
+  - User-based rate limiting with configurable limits
+  - Job tracking and billing integration
+  - Async database operations with proper session management
 
 #### **Test Suite (`backend/tests/`)**
 - **`test_parser.py`**: Comprehensive parser component tests
@@ -293,10 +299,11 @@ MINIO_SECRET_KEY=minioadmin
 ## Running Background Workers
 
 ### Development (Simple Processor)
-The development setup uses threaded background processing:
-- Jobs process in background threads without Redis/Celery
+The development setup uses FastAPI BackgroundTasks for async processing:
+- Jobs process as FastAPI background tasks without Redis/Celery
 - Progress tracking from 1% to 100% with detailed stages
-- Check logs for thread lifecycle: "🧵 THREAD: Started", "🚀 THREAD: Job processor started"
+- Database-backed progress updates with isolated async sessions
+- AI analysis safeguards: page limits (50), token limits (16K), timeout handling (120s)
 - Temporary files streamed to `/tmp/` for memory efficiency with large PDFs
 
 ### Production (Celery)
@@ -506,7 +513,7 @@ pytest --cov=app --cov=services --cov=tasks tests/
 3. Set environment variables in Render dashboard
 4. Deploy automatically triggers on push to main
 
-**Important**: Render must stay on CPython ≤3.12 until all binary deps ship cp313 wheels.
+**Important**: Render deployment uses Python 3.11 with binary-only pip installs for optimal performance and reliability.
 
 ### Required Environment Variables (Production)
 ```bash
@@ -552,7 +559,16 @@ STRIPE_PRICE_ID=price_...
 
 ## Recent Updates
 
-### Enhanced HVAC Analysis & User Experience (Latest)
+### Architecture & Reliability Improvements (Latest)
+- **FastAPI BackgroundTasks Integration**: Replaced threading with FastAPI BackgroundTasks for better async job processing
+- **Database-Backed Rate Limiting**: Implemented `database_rate_limiter.py` for user-based rate limiting with proper billing integration
+- **AsyncSession Management**: Fixed concurrency issues with isolated async database sessions for progress updates
+- **AI Analysis Safeguards**: Added comprehensive error handling, timeouts, and limits for OpenAI API integration
+- **Improved Error Handling**: Enhanced error handling across the processing pipeline with proper logging and audit trails
+- **Render Deployment Optimization**: Updated `render.yaml` with proper build isolation and binary-only pip installs
+- **CI/CD Pipeline**: Comprehensive GitHub Actions workflow with frontend/backend testing and API smoke tests
+
+### Enhanced HVAC Analysis & User Experience (Previous)
 - **Advanced Manual J Implementation**: Added comprehensive ACCA Manual J load calculations with climate zone data, ASHRAE design temperatures, and county-based climate mapping
 - **Interactive User Assumptions**: New `AssumptionModal.tsx` component allows users to provide building envelope details (insulation R-values, window types, construction materials) for accurate load calculations
 - **Multi-Step Upload Process**: Enhanced `MultiStepUpload.tsx` with progress tracking and assumption collection workflow
