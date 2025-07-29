@@ -375,3 +375,6 @@ async def process_job_background(project_id: str, file_path: str, filename: str,
 
 # FastAPI's BackgroundTasks calls process_job_background directly
 # No threading or event loop management needed - everything runs in the main async loop
+
+# Backward compatibility alias for tests
+process_job_sync = process_job_background
