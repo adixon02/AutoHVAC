@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uuid
@@ -20,7 +20,7 @@ from app.config import DEBUG, DEV_VERIFIED_EMAILS
 
 logger = logging.getLogger(__name__)
 
-from services.simple_job_processor import process_job_async
+from services.simple_job_processor import process_job_background
 from tasks.parse_blueprint import process_blueprint
 import aiofiles
 import os
@@ -76,7 +76,8 @@ async def upload_blueprint(
     file: UploadFile = File(...),
     duct_config: str = Form("ducted_attic"),
     heating_fuel: str = Form("gas"),
-    session: AsyncSession = Depends(get_async_session)
+    session: AsyncSession = Depends(get_async_session),
+    background_tasks: BackgroundTasks = Depends()
 ):
     request_id = f"req_{uuid.uuid4().hex[:8]}"
     print(f">>> UPLOAD ENDPOINT HIT: email={email}, file={file.filename}, size={file.size}")
@@ -271,7 +272,7 @@ async def upload_blueprint(
                     raise HTTPException(status_code=400, detail="Invalid PDF file")
             
             logger.error("🔍 Step 8: Starting background job processor")
-            logger.error(f"Starting background thread for job {project_id}")
+            logger.error(f"Adding background task for job {project_id}")
             print(f">>> BLUEPRINT UPLOAD: About to start background job for {project_id}")
             print(f">>> USE_CELERY = {USE_CELERY}")
             
@@ -281,16 +282,19 @@ async def upload_blueprint(
                     file_content = await f.read()
                 process_blueprint.delay(project_id, file_content, file.filename, email, "90210")
             else:
-                print(f">>> Calling process_job_async for {project_id}")
-                try:
-                    process_job_async(project_id, temp_path, file.filename, email, "90210")
-                    print(f">>> process_job_async called successfully for {project_id}")
-                except Exception as thread_error:
-                    logger.exception(f">>> ERROR starting thread: {thread_error}")
-                    print(f">>> ERROR starting thread: {thread_error}")
-                    raise
+                print(f">>> Adding background task for {project_id}")
+                # Add job processing to background tasks
+                background_tasks.add_task(
+                    process_job_background,
+                    project_id,
+                    temp_path,
+                    file.filename,
+                    email,
+                    "90210"
+                )
+                print(f">>> Background task added successfully for {project_id}")
                     
-            logger.error(f"Background thread started for job {project_id}")
+            logger.error(f"Background task added for job {project_id}")
             logger.error("🔍 Step 8 PASSED: Background job processor started")
                 
         except HTTPException:

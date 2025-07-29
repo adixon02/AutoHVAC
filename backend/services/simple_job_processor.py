@@ -1,7 +1,6 @@
 """
 Simple in-memory job processor for development without Celery/Redis
 """
-import threading
 import time
 import asyncio
 from typing import Dict, Any
@@ -219,9 +218,9 @@ async def run_ai_analysis(project_id: str, file_path: str, session: AsyncSession
         await job_service.set_project_failed(project_id, error_msg, session)
         raise AICleanupError(error_msg)
 
-async def process_job_sync(project_id: str, file_path: str, filename: str, email: str = "", zip_code: str = "90210"):
-    """Process a job synchronously (for development without Celery)"""
-    logger.info(f"🚀 THREAD: Job processor started for {project_id} (file={filename}, path={file_path}, email={email})")
+async def process_job_background(project_id: str, file_path: str, filename: str, email: str = "", zip_code: str = "90210"):
+    """Process a job in the background using FastAPI's background tasks"""
+    logger.info(f"🚀 BACKGROUND: Job processor started for {project_id} (file={filename}, path={file_path}, email={email})")
     try:
         # Job is already set to processing in upload endpoint
         logger.debug(f"{project_id} – job already in processing state")
@@ -374,34 +373,5 @@ async def process_job_sync(project_id: str, file_path: str, filename: str, email
         if os.path.exists(file_path):
             os.unlink(file_path)
 
-def process_job_async(project_id: str, file_path: str, filename: str, email: str = "", zip_code: str = "90210"):
-    """Process a job in a background thread (for development without Celery)"""
-    print(f">>> process_job_async CALLED: project_id={project_id}, file_path={file_path}")
-    logger.error(f"🧵 THREAD: Creating background thread for job {project_id}")
-    logger.info(f"🧵 THREAD: Creating background thread for job {project_id}")
-    
-    def run_async_job():
-        logger.info(f"🧵 THREAD: Started background thread for job {project_id}")
-        try:
-            async def run_job():
-                await process_job_sync(project_id, file_path, filename, email, zip_code)
-            
-            # Create fresh event loop for the thread
-            asyncio.run(run_job())
-        except Exception as e:
-            logger.exception(f"🧵 THREAD: Fatal error in thread for job {project_id}: {str(e)}")
-            # Ensure job is marked as failed if thread crashes
-            try:
-                async def cleanup():
-                    await job_service.set_project_failed(project_id, f"Thread crashed: {str(e)}")
-                    await rate_limiter.decrement_active_jobs(email, project_id)
-                asyncio.run(cleanup())
-            except Exception as cleanup_error:
-                logger.error(f"Failed to cleanup after thread crash: {cleanup_error}")
-        finally:
-            logger.info(f"🧵 THREAD: Finished background thread for job {project_id}")
-    
-    thread = threading.Thread(target=run_async_job, name=f"job-{project_id[:8]}")
-    thread.daemon = True
-    thread.start()
-    logger.info(f"🧵 THREAD: Background thread launched for job {project_id}")
+# FastAPI's BackgroundTasks calls process_job_background directly
+# No threading or event loop management needed - everything runs in the main async loop
