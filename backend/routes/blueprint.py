@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, Depends, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uuid
@@ -20,14 +20,13 @@ from app.config import DEBUG, DEV_VERIFIED_EMAILS
 
 logger = logging.getLogger(__name__)
 
-from services.simple_job_processor import process_job_background
+# from services.simple_job_processor import process_job_background  # Not needed with Celery
 from tasks.parse_blueprint import process_blueprint
 import aiofiles
 import os
 
-# Use simple processor for now (Celery task needs database integration updates)
-# TODO: Update Celery task to use database instead of in-memory store
-USE_CELERY = False
+# Use Celery for production job processing
+USE_CELERY = True
 
 router = APIRouter()
 
@@ -74,7 +73,6 @@ async def upload_blueprint(
     email: str = Form(...),
     project_label: str = Form(...),
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks,
     duct_config: str = Form("ducted_attic"),
     heating_fuel: str = Form("gas"),
     session: AsyncSession = Depends(get_async_session)
@@ -282,19 +280,10 @@ async def upload_blueprint(
                     file_content = await f.read()
                 process_blueprint.delay(project_id, file_content, file.filename, email, "90210")
             else:
-                print(f">>> Adding background task for {project_id}")
-                # Add job processing to background tasks
-                background_tasks.add_task(
-                    process_job_background,
-                    project_id,
-                    temp_path,
-                    file.filename,
-                    email,
-                    "90210"
-                )
-                print(f">>> Background task added successfully for {project_id}")
+                print(f">>> ERROR: USE_CELERY is False but Celery is expected")
+                raise HTTPException(status_code=500, detail="Job processing not configured correctly")
                     
-            logger.error(f"Background task added for job {project_id}")
+            logger.error(f"Celery task started for job {project_id}")
             logger.error("🔍 Step 8 PASSED: Background job processor started")
                 
         except HTTPException:

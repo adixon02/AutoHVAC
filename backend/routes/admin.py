@@ -9,7 +9,7 @@ from sqlmodel import select, func, and_
 from database import get_async_session
 from sqlalchemy.ext.asyncio import AsyncSession
 from models.db_models import Project, JobStatus
-from services.rate_limiter import rate_limiter
+from services.database_rate_limiter import database_rate_limiter as rate_limiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

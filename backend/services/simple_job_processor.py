@@ -5,7 +5,7 @@ import time
 import asyncio
 from typing import Dict, Any
 from services.job_service import job_service
-from services.rate_limiter import rate_limiter
+from services.database_rate_limiter import database_rate_limiter as rate_limiter
 from services.pdf_service import pdf_service
 from services.manualj import calculate_manualj
 from app.parser.schema import BlueprintSchema, Room

@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
 
 from tasks.parse_blueprint import process_blueprint
-from services.store import job_store
+# from services.store import job_store  # DISABLED: Legacy in-memory store removed
 from app.parser.schema import BlueprintSchema, Room
 from models.db_models import Project, JobStatus
 
