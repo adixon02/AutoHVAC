@@ -55,6 +55,7 @@ AutoHVAC/
 │   │   └── parser/                    # Elite PDF parsing engine
 │   │       ├── __init__.py            # Parser module exports
 │   │       ├── geometry_parser.py     # pdfplumber + PyMuPDF geometry extraction
+│   │       ├── geometry_parser_safe.py # Production parser with timeouts and limits
 │   │       ├── text_parser.py         # OCR + text extraction with Tesseract
 │   │       ├── ai_cleanup.py          # OpenAI GPT-4 data structuring
 │   │       └── schema.py              # Pydantic models (Room, BlueprintSchema)
@@ -68,17 +69,17 @@ AutoHVAC/
 │   ├── services/                      # Business logic services
 │   │   ├── __init__.py
 │   │   ├── manualj.py                 # ACCA Manual J load calculations
-│   │   ├── job_service.py             # Job management service
+│   │   ├── job_service.py             # Core job management and orchestration
 │   │   ├── user_service.py            # User management with email verification
-│   │   ├── rate_limiter.py            # Rate limiting service
+│   │   ├── database_rate_limiter.py   # Database-backed rate limiting service
 │   │   ├── pdf_service.py             # PDF generation service
-│   │   ├── simple_job_processor.py    # Simplified job processing for development
+│   │   ├── page_scoring.py            # Advanced floor plan detection algorithms
+│   │   ├── pdf_page_analyzer.py       # Multi-page PDF analysis and page selection
 │   │   ├── audit_tracker.py           # Comprehensive audit logging system
 │   │   ├── climate_data.py            # ASHRAE climate zone and temperature data
 │   │   ├── envelope_extractor.py      # Building envelope analysis
 │   │   ├── cltd_clf.py               # Cooling Load Temperature Difference calculations
-│   │   ├── store.py                   # Data storage service
-│   │   └── user_store.py              # User data management
+│   │   └── storage.py                 # File storage and management service
 │   ├── data/                          # Climate and regional data
 │   │   ├── ashrae_design_temps.csv    # ASHRAE design temperature database
 │   │   ├── county_climate_zones.csv   # County-based climate zone mapping
@@ -88,7 +89,7 @@ AutoHVAC/
 │   │   └── local_server.py            # Standalone local development server
 │   ├── tasks/                         # Celery background tasks
 │   │   ├── __init__.py
-│   │   └── parse_blueprint.py         # 5-stage processing orchestration
+│   │   └── calculate_hvac_loads.py    # Complete HVAC pipeline processing
 │   ├── models/                        # Data models
 │   │   ├── __init__.py
 │   │   ├── db_models.py               # SQLModel database models
@@ -162,6 +163,10 @@ AutoHVAC/
 - **`geometry_parser.py`**: Advanced PDF geometry extraction using pdfplumber for basic shapes and PyMuPDF for complex paths, scale detection, and wall probability scoring
   - Returns standardized format: `List[{"type": "line"|"rect", "coords": [...]}]`
   - Includes orientation detection, wall classification, and parallel line grouping
+- **`geometry_parser_safe.py`**: Production-ready geometry parser with timeouts and complexity limits
+  - Implements `GeometryParserTimeout` and `GeometryParserComplexity` exceptions
+  - Memory-efficient processing with configurable limits and safeguards
+  - Handles complex PDFs with graceful degradation and error recovery
 - **`text_parser.py`**: Multi-layer text extraction with pdfplumber for clean text and Tesseract OCR for handwritten labels, with confidence scoring
   - Returns: `List[{"text": str, "x0": float, "top": float, "x1": float, "bottom": float}]`
   - Classifies text into room labels, dimensions, and notes
@@ -177,23 +182,34 @@ AutoHVAC/
 - Climate zone factors, room type multipliers, orientation adjustments
 - Equipment sizing recommendations with cost estimates and duct sizing
 
-#### **Task Orchestration (`backend/tasks/parse_blueprint.py`)**
-- 5-stage processing pipeline: geometry → text → AI cleanup → Manual J → finalization
-- Progress tracking, comprehensive error handling, async OpenAI integration
-- Temporary file management and result compilation
-- Stages: `extracting_geometry` (20%) → `extracting_text` (40%) → `ai_processing` (60%) → `calculating_loads` (80%) → `complete` (100%)
+#### **Task Orchestration (`backend/tasks/calculate_hvac_loads.py`)**
+- Complete HVAC load calculation pipeline from PDF blueprint to ACCA Manual J compliance
+- 8-stage processing with comprehensive audit trails and error handling
+- Multi-page PDF analysis with intelligent page selection and scoring
+- Stages: validation → geometry extraction → text extraction → AI cleanup → Manual J calculations → climate integration → audit creation → finalization
+- Advanced safeguards: geometry parser timeouts, complexity limits, AI token limits
+- Full auditability with detailed logging and progress tracking
 
-#### **Development Services (`backend/services/`)**
-- **`simple_job_processor.py`**: Simplified development job processor with FastAPI BackgroundTasks
-  - Async background processing without Celery/Redis for development
-  - Complete PDF processing pipeline with AI integration
-  - Database-backed progress tracking with isolated sessions
-  - Progress tracking: 1% → 5% → 25% → 60% → 90% → 100%
-  - AI analysis safeguards: page limits, token limits, timeout handling
+#### **Business Logic Services (`backend/services/`)**
+- **`job_service.py`**: Core job management and orchestration service
+  - Job lifecycle management with progress tracking
+  - Database operations with proper session handling
+  - Integration with audit tracking and error handling
 - **`database_rate_limiter.py`**: Database-backed rate limiting service
   - User-based rate limiting with configurable limits
   - Job tracking and billing integration
   - Async database operations with proper session management
+- **`page_scoring.py`**: Advanced page scoring algorithms for floor plan detection
+  - Geometric feature extraction and scoring for identifying architectural plans
+  - Line density analysis, room keyword detection, and dimension pattern matching
+  - Complex path analysis and drawing density calculations
+- **`pdf_page_analyzer.py`**: Multi-page PDF analysis and best page selection
+  - Handles complex multi-page PDFs with floor plan scoring
+  - Page complexity filtering and optimal page selection
+  - Room keyword detection and dimension pattern analysis
+- **`storage.py`**: File storage and management service
+  - Handles temporary file operations and cleanup
+  - Storage abstraction for different backends
 
 #### **Test Suite (`backend/tests/`)**
 - **`test_parser.py`**: Comprehensive parser component tests
@@ -298,23 +314,16 @@ MINIO_SECRET_KEY=minioadmin
 
 ## Running Background Workers
 
-### Development (Simple Processor)
-The development setup uses FastAPI BackgroundTasks for async processing:
-- Jobs process as FastAPI background tasks without Redis/Celery
-- Progress tracking from 1% to 100% with detailed stages
-- Database-backed progress updates with isolated async sessions
-- AI analysis safeguards: page limits (50), token limits (16K), timeout handling (120s)
-- Temporary files streamed to `/tmp/` for memory efficiency with large PDFs
-
 ### Production (Celery)
 For production with high concurrency and reliability:
 ```bash
 # Start Celery worker with optimal settings
-celery -A tasks.parse_blueprint worker --loglevel=info --concurrency=4 -Ofair
+celery -A tasks.calculate_hvac_loads worker --loglevel=info --concurrency=4 -Ofair
 ```
 - `--concurrency=4`: Process 4 jobs in parallel
 - `-Ofair`: Distribute tasks fairly among workers
 - Requires Redis for task queue and result backend
+- Uses `calculate_hvac_loads.py` task for complete HVAC pipeline processing
 
 #### Option 2: Lightweight Local Server (No Docker Required)
 
