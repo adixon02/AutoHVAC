@@ -3,19 +3,12 @@ import { useState, useEffect } from 'react'
 import useSWR from 'swr'
 import { apiHelpers } from '../../lib/fetcher'
 import Head from 'next/head'
-import AssumptionModal from '../../components/AssumptionModal'
 
 interface JobStatus {
   job_id: string
   status: 'pending' | 'processing' | 'completed' | 'failed'
   result?: any
   error?: string
-  assumptions_collected?: boolean
-}
-
-interface AssumptionValues {
-  duct_config: 'ducted_attic' | 'ducted_crawl' | 'ductless' | ''
-  heating_fuel: 'gas' | 'heat_pump' | 'electric' | ''
 }
 
 interface ProcessingStage {
@@ -128,8 +121,6 @@ export default function AnalyzingPage() {
   const { jobId } = router.query
   const [currentFactIndex, setCurrentFactIndex] = useState(0)
   const [startTime] = useState(Date.now())
-  const [showAssumptionModal, setShowAssumptionModal] = useState(false)
-  const [submittingAssumptions, setSubmittingAssumptions] = useState(false)
   
   // Poll job status every 2 seconds
   const { data: jobStatus, error, mutate } = useSWR<JobStatus>(
@@ -155,13 +146,6 @@ export default function AnalyzingPage() {
       return () => clearInterval(interval)
     }
   }, [jobStatus?.status])
-  
-  // Show assumption modal when processing and assumptions not collected
-  useEffect(() => {
-    if (jobStatus?.status === 'processing' && !jobStatus.assumptions_collected && !showAssumptionModal) {
-      setShowAssumptionModal(true)
-    }
-  }, [jobStatus?.status, jobStatus?.assumptions_collected, showAssumptionModal])
 
   
   const getProcessingStages = (status: string): ProcessingStage[] => {
@@ -208,34 +192,6 @@ export default function AnalyzingPage() {
     const minutes = Math.floor(elapsed / 60)
     const seconds = elapsed % 60
     return `${minutes}:${seconds.toString().padStart(2, '0')}`
-  }
-
-  const handleAssumptionSubmit = async (values: AssumptionValues) => {
-    if (!jobId) return
-    
-    setSubmittingAssumptions(true)
-    try {
-      const response = await fetch(`/api/jobs/${jobId}/assumptions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(values),
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to submit assumptions')
-      }
-
-      setShowAssumptionModal(false)
-      // Refresh job status to continue processing
-      mutate()
-    } catch (error) {
-      console.error('Error submitting assumptions:', error)
-      // TODO: Show error message to user
-    } finally {
-      setSubmittingAssumptions(false)
-    }
   }
   
   if (!jobId) {
@@ -453,14 +409,6 @@ export default function AnalyzingPage() {
           </div>
         </div>
       </div>
-
-      {/* Assumption Modal */}
-      <AssumptionModal
-        isOpen={showAssumptionModal}
-        onSubmit={handleAssumptionSubmit}
-        onClose={() => setShowAssumptionModal(false)}
-        isLoading={submittingAssumptions}
-      />
     </>
   )
 }
