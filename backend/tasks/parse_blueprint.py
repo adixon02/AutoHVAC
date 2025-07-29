@@ -9,6 +9,7 @@ import io
 import os
 import tempfile
 import asyncio
+import pdfplumber
 from typing import Dict, Any
 
 from services.job_service import job_service
@@ -38,22 +39,12 @@ def process_blueprint(job_id: str, file_content: bytes, filename: str, email: st
     5. Calculate Manual J loads
     6. Store complete results
     """
-    async def update_job_progress(project_id: str, updates: dict):
-        """Helper to update job progress in database"""
-        async with AsyncSessionLocal() as session:
-            await job_service.update_project(project_id, updates, session)
-    
-    def run_async_update(project_id: str, updates: dict):
-        """Run async update in event loop"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(update_job_progress(project_id, updates))
-        finally:
-            loop.close()
+    def update_job_progress(project_id: str, updates: dict):
+        """Helper to update job progress in database (sync for worker)"""
+        return job_service.sync_update_project(project_id, updates)
     
     try:
-        run_async_update(job_id, {
+        update_job_progress(job_id, {
             "status": "processing",
             "current_stage": "initializing",
             "progress_percent": 0
@@ -66,7 +57,7 @@ def process_blueprint(job_id: str, file_content: bytes, filename: str, email: st
         
         try:
             # Stage 1: Extract geometry
-            run_async_update(job_id, {
+            update_job_progress(job_id, {
                 "current_stage": "extracting_geometry",
                 "progress_percent": 20
             })
@@ -80,7 +71,7 @@ def process_blueprint(job_id: str, file_content: bytes, filename: str, email: st
                 print(f"DEBUG: {job_id} – error in extracting_geometry: {e}")
                 # REMOVE in production - debug stub to progress past geometry stage
                 if os.getenv("DEBUG") == "true":
-                    run_async_update(job_id, {
+                    update_job_progress(job_id, {
                         "status": "completed",
                         "current_stage": "complete",
                         "progress_percent": 100,
@@ -90,7 +81,7 @@ def process_blueprint(job_id: str, file_content: bytes, filename: str, email: st
                 raise
             
             # Stage 2: Extract text
-            run_async_update(job_id, {
+            update_job_progress(job_id, {
                 "current_stage": "extracting_text", 
                 "progress_percent": 40
             })
@@ -104,7 +95,7 @@ def process_blueprint(job_id: str, file_content: bytes, filename: str, email: st
                 print(f"DEBUG: {job_id} – error in extracting_text: {e}")
                 # REMOVE in production - debug stub to progress past text stage
                 if os.getenv("DEBUG") == "true":
-                    run_async_update(job_id, {
+                    update_job_progress(job_id, {
                         "status": "completed",
                         "current_stage": "complete",
                         "progress_percent": 100,
@@ -114,7 +105,7 @@ def process_blueprint(job_id: str, file_content: bytes, filename: str, email: st
                 raise
             
             # Stage 3: AI cleanup and structuring
-            run_async_update(job_id, {
+            update_job_progress(job_id, {
                 "current_stage": "ai_processing",
                 "progress_percent": 60
             })
@@ -136,7 +127,7 @@ def process_blueprint(job_id: str, file_content: bytes, filename: str, email: st
                 print(f"DEBUG: {job_id} – error in ai_processing: {e}")
                 # REMOVE in production - debug stub to progress past AI stage
                 if os.getenv("DEBUG") == "true":
-                    run_async_update(job_id, {
+                    update_job_progress(job_id, {
                         "status": "completed",
                         "current_stage": "complete",
                         "progress_percent": 100,
@@ -146,7 +137,7 @@ def process_blueprint(job_id: str, file_content: bytes, filename: str, email: st
                 raise
             
             # Stage 4: Manual J calculations
-            run_async_update(job_id, {
+            update_job_progress(job_id, {
                 "current_stage": "calculating_loads",
                 "progress_percent": 80
             })
@@ -159,7 +150,7 @@ def process_blueprint(job_id: str, file_content: bytes, filename: str, email: st
                 print(f"DEBUG: {job_id} – error in calculating_loads: {e}")
                 # REMOVE in production - debug stub to progress past calculations
                 if os.getenv("DEBUG") == "true":
-                    run_async_update(job_id, {
+                    update_job_progress(job_id, {
                         "status": "completed",
                         "current_stage": "complete",
                         "progress_percent": 100,
@@ -169,7 +160,7 @@ def process_blueprint(job_id: str, file_content: bytes, filename: str, email: st
                 raise
             
             # Stage 5: Finalize results
-            run_async_update(job_id, {
+            update_job_progress(job_id, {
                 "current_stage": "finalizing",
                 "progress_percent": 95
             })
@@ -209,7 +200,7 @@ def process_blueprint(job_id: str, file_content: bytes, filename: str, email: st
             }
             
             # Store final result
-            run_async_update(job_id, {
+            update_job_progress(job_id, {
                 "status": "completed",
                 "current_stage": "complete",
                 "progress_percent": 100,
@@ -227,7 +218,7 @@ def process_blueprint(job_id: str, file_content: bytes, filename: str, email: st
                 
     except AICleanupError as e:
         # AI-specific error handling
-        run_async_update(job_id, {
+        update_job_progress(job_id, {
             "status": "failed",
             "error": f"AI processing failed: {str(e)}",
             "current_stage": "ai_processing"
@@ -240,7 +231,7 @@ def process_blueprint(job_id: str, file_content: bytes, filename: str, email: st
         
         print(f"DEBUG: {job_id} – fatal error: {error_type}: {error_msg}")
         
-        run_async_update(job_id, {
+        update_job_progress(job_id, {
             "status": "failed", 
             "error": error_msg
         })
@@ -260,22 +251,12 @@ def health_check():
 def process_blueprint_legacy(job_id: str, file_content: bytes, filename: str):
     """Legacy processing for backward compatibility"""
     
-    async def update_job_progress(project_id: str, updates: dict):
-        """Helper to update job progress in database"""
-        async with AsyncSessionLocal() as session:
-            await job_service.update_project(project_id, updates, session)
-    
-    def run_async_update(project_id: str, updates: dict):
-        """Run async update in event loop"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(update_job_progress(project_id, updates))
-        finally:
-            loop.close()
+    def update_job_progress(project_id: str, updates: dict):
+        """Helper to update job progress in database (sync for worker)"""
+        return job_service.sync_update_project(project_id, updates)
     
     try:
-        run_async_update(job_id, {"status": "processing"})
+        update_job_progress(job_id, {"status": "processing"})
         
         rooms = []
         
@@ -305,13 +286,13 @@ def process_blueprint_legacy(job_id: str, file_content: bytes, filename: str):
             "loads": loads
         }
         
-        run_async_update(job_id, {
+        update_job_progress(job_id, {
             "status": "completed",
             "result": result
         })
         
     except Exception as e:
-        run_async_update(job_id, {
+        update_job_progress(job_id, {
             "status": "failed",
             "error": str(e)
         })

@@ -33,6 +33,9 @@ AsyncSessionLocal = sessionmaker(
     async_engine, class_=AsyncSession, expire_on_commit=False
 )
 
+# Sync session for Celery workers
+SyncSessionLocal = sessionmaker(sync_engine, expire_on_commit=False)
+
 def create_db_and_tables():
     """Create database tables (used in migrations)"""
     SQLModel.metadata.create_all(sync_engine)

@@ -2,7 +2,7 @@ from typing import Optional, List, Dict, Any
 from sqlmodel import Session, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from models.db_models import Project, JobStatus, User
-from database import AsyncSessionLocal
+from database import AsyncSessionLocal, SyncSessionLocal
 from datetime import datetime, timezone
 import uuid
 import asyncio
@@ -145,6 +145,30 @@ class JobService:
         session.add(project)
         await session.commit()
         return True
+    
+    @staticmethod
+    def sync_update_project(
+        project_id: str,
+        updates: Dict[str, Any]
+    ) -> bool:
+        """Sync version of update_project for Celery workers"""
+        with SyncSessionLocal() as session:
+            # Get project with sync query
+            project = session.get(Project, project_id)
+            if not project:
+                return False
+            
+            for key, value in updates.items():
+                if hasattr(project, key):
+                    setattr(project, key, value)
+            
+            # Set completion time if status changed to completed
+            if updates.get("status") == JobStatus.COMPLETED:
+                project.completed_at = datetime.utcnow()
+            
+            session.add(project)
+            session.commit()
+            return True
     
     @staticmethod
     async def get_user_projects(
