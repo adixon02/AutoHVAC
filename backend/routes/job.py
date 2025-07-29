@@ -64,7 +64,6 @@ async def get_job_status(
             "status": project.status.value,
             "result": project.result,
             "error": project.error,
-            "assumptions_collected": project.assumptions_collected,
             "progress_percent": project.progress_percent,
             "current_stage": project.current_stage
         }

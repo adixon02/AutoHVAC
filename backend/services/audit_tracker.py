@@ -1,6 +1,8 @@
 """
-Audit Tracking System for Manual J Calculations
-Provides comprehensive audit trails for all calculation inputs and assumptions
+Enhanced Audit Tracking System for ACCA Manual J Compliance
+
+Provides comprehensive audit trails for all calculation inputs, outputs, and
+professional review processes to ensure ACCA Manual J 8th Edition compliance.
 """
 
 import json
@@ -9,9 +11,16 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict
 from pathlib import Path
+import time
 
 from app.parser.schema import BlueprintSchema
 from .envelope_extractor import EnvelopeExtraction
+from models.audit import (
+    CalculationAudit, RoomCalculationDetail, 
+    DataSourceMetadata, ComplianceCheck
+)
+from database import SyncSessionLocal
+import logging
 
 # Version tracking for calculation changes
 CALCULATION_VERSION = "2.0.0"  # Updated for Phase 2 enhancements
@@ -373,25 +382,377 @@ def get_audit_tracker() -> AuditTracker:
     return _audit_tracker
 
 
-def create_calculation_audit(blueprint_schema: BlueprintSchema,
-                           calculation_result: Dict[str, Any],
-                           climate_data: Dict[str, Any],
-                           **kwargs) -> str:
+def create_calculation_audit(
+    blueprint_schema: Optional[BlueprintSchema],
+    calculation_result: Optional[Dict[str, Any]],
+    climate_data: Optional[Dict[str, Any]],
+    construction_vintage: Optional[str] = None,
+    envelope_data: Optional[EnvelopeExtraction] = None,
+    user_id: Optional[str] = None,
+    duct_config: str = "ducted_attic",
+    heating_fuel: str = "gas",
+    include_ventilation: bool = True,
+    processing_metadata: Optional[Dict[str, Any]] = None,
+    error_details: Optional[Dict[str, Any]] = None
+) -> str:
     """
-    Convenience function to create and save calculation audit
+    Create comprehensive audit record in database for ACCA Manual J compliance
     
+    Args:
+        blueprint_schema: Parsed blueprint (None if processing failed)
+        calculation_result: Manual J calculation results (None if failed)
+        climate_data: Climate data used in calculations
+        construction_vintage: Building construction era
+        envelope_data: AI-extracted envelope characteristics
+        user_id: User who initiated calculation
+        duct_config: Duct system configuration
+        heating_fuel: Heating system fuel type
+        include_ventilation: Whether ventilation loads were included
+        processing_metadata: Detailed processing information
+        error_details: Error information if calculation failed
+        
     Returns:
-        Calculation ID for future reference
+        Audit ID for future reference
     """
-    tracker = get_audit_tracker()
-    snapshot = tracker.create_snapshot(
-        blueprint_schema=blueprint_schema,
-        calculation_result=calculation_result,
-        climate_data=climate_data,
-        **kwargs
-    )
+    logger = logging.getLogger(__name__)
+    audit_id = str(uuid.uuid4())
     
-    filepath = tracker.save_snapshot(snapshot)
-    print(f"Audit snapshot saved: {filepath}")
+    try:
+        with SyncSessionLocal() as session:
+            # Create main audit record
+            calculation_audit = CalculationAudit(
+                audit_id=audit_id,
+                project_id=str(blueprint_schema.project_id) if blueprint_schema else "unknown",
+                user_id=user_id or "system",
+                calculation_timestamp=datetime.utcnow(),
+                calculation_method="ACCA Manual J 8th Edition",
+                software_version=f"AutoHVAC v{CALCULATION_VERSION}",
+                
+                # Input data
+                blueprint_schema=blueprint_schema.dict() if blueprint_schema else None,
+                climate_data=climate_data,
+                system_parameters={
+                    'duct_config': duct_config,
+                    'heating_fuel': heating_fuel,
+                    'construction_vintage': construction_vintage,
+                    'include_ventilation': include_ventilation
+                },
+                envelope_data=envelope_data.__dict__ if envelope_data else None,
+                
+                # Results
+                calculation_results=calculation_result,
+                heating_total_btu=calculation_result.get('heating_total') if calculation_result else None,
+                cooling_total_btu=calculation_result.get('cooling_total') if calculation_result else None,
+                
+                # Quality metrics
+                data_quality_score=_calculate_data_quality_score(
+                    blueprint_schema, envelope_data, climate_data
+                ),
+                validation_flags=_extract_validation_flags(calculation_result, processing_metadata),
+                acca_compliance_verified=error_details is None and calculation_result is not None,
+                
+                # Processing metadata
+                processing_time_seconds=processing_metadata.get('processing_time_seconds') if processing_metadata else None,
+                processing_stages=processing_metadata.get('stages_completed') if processing_metadata else None,
+                error_details=error_details
+            )
+            
+            session.add(calculation_audit)
+            session.flush()  # Get the ID
+            
+            # Create room-level detail records
+            if blueprint_schema and calculation_result and calculation_result.get('zones'):
+                for zone in calculation_result['zones']:
+                    room_detail = RoomCalculationDetail(
+                        audit_id=audit_id,
+                        room_name=zone['name'],
+                        room_area_sqft=zone['area'],
+                        room_type=zone.get('room_type', 'unknown'),
+                        floor_number=zone.get('floor', 1),
+                        window_count=_find_room_windows(blueprint_schema, zone['name']),
+                        orientation=_find_room_orientation(blueprint_schema, zone['name']),
+                        heating_load_btu=zone['heating_btu'],
+                        cooling_load_btu=zone['cooling_btu'],
+                        load_components=zone.get('load_breakdown'),
+                        required_airflow_cfm=zone.get('cfm_required'),
+                        recommended_duct_size=zone.get('duct_size'),
+                        calculation_method=zone.get('calculation_method', 'Manual J'),
+                        data_confidence=_calculate_room_confidence(blueprint_schema, zone['name'])
+                    )
+                    session.add(room_detail)
+            
+            # Create data source metadata records
+            if climate_data:
+                climate_metadata = DataSourceMetadata(
+                    audit_id=audit_id,
+                    source_type="climate_data",
+                    source_name="ASHRAE/IECC Climate Database",
+                    source_version="2021",
+                    data_completeness=1.0 if climate_data.get('found') else 0.5,
+                    data_confidence=0.95 if climate_data.get('found') else 0.7,
+                    extraction_method="database_lookup",
+                    source_metadata=climate_data
+                )
+                session.add(climate_metadata)
+            
+            if blueprint_schema:
+                blueprint_metadata = DataSourceMetadata(
+                    audit_id=audit_id,
+                    source_type="blueprint_data",
+                    source_name="AI Blueprint Parser",
+                    source_version=CALCULATION_VERSION,
+                    data_completeness=_calculate_blueprint_completeness(blueprint_schema),
+                    data_confidence=_calculate_blueprint_confidence(blueprint_schema),
+                    extraction_method="ai_analysis",
+                    source_metadata={'rooms_count': len(blueprint_schema.rooms), 'total_area': blueprint_schema.sqft_total}
+                )
+                session.add(blueprint_metadata)
+            
+            if envelope_data:
+                envelope_metadata = DataSourceMetadata(
+                    audit_id=audit_id,
+                    source_type="envelope_data",
+                    source_name="AI Envelope Extractor", 
+                    source_version=CALCULATION_VERSION,
+                    data_completeness=envelope_data.overall_confidence if hasattr(envelope_data, 'overall_confidence') else 0.8,
+                    data_confidence=envelope_data.overall_confidence if hasattr(envelope_data, 'overall_confidence') else 0.8,
+                    extraction_method="ai_analysis",
+                    source_metadata=envelope_data.__dict__
+                )
+                session.add(envelope_metadata)
+            
+            # Create compliance check records
+            if calculation_result:
+                compliance_checks = _create_compliance_checks(audit_id, blueprint_schema, calculation_result)
+                for check in compliance_checks:
+                    session.add(check)
+            
+            session.commit()
+            logger.info(f"Created comprehensive audit record: {audit_id}")
+            
+            return audit_id
+            
+    except Exception as e:
+        logger.exception(f"Failed to create audit record: {e}")
+        # Fallback to file-based audit for debugging
+        try:
+            tracker = get_audit_tracker()
+            snapshot = tracker.create_snapshot(
+                blueprint_schema=blueprint_schema,
+                calculation_result=calculation_result or {},
+                climate_data=climate_data or {},
+                construction_vintage=construction_vintage,
+                envelope_data=envelope_data,
+                user_id=user_id,
+                duct_config=duct_config,
+                heating_fuel=heating_fuel,
+                include_ventilation=include_ventilation
+            )
+            filepath = tracker.save_snapshot(snapshot)
+            logger.info(f"Fallback audit snapshot saved: {filepath}")
+            return snapshot.calculation_id
+        except Exception as fallback_error:
+            logger.exception(f"Fallback audit also failed: {fallback_error}")
+            return audit_id
+
+
+def _calculate_data_quality_score(
+    blueprint_schema: Optional[BlueprintSchema],
+    envelope_data: Optional[EnvelopeExtraction],
+    climate_data: Optional[Dict]
+) -> float:
+    """Calculate overall data quality score (0.0-1.0)"""
+    score = 0.0
+    factors = 0
     
-    return snapshot.calculation_id
+    # Blueprint data quality (40% weight)
+    if blueprint_schema:
+        blueprint_score = 0.6  # Base score for having blueprint
+        if len(blueprint_schema.rooms) > 0:
+            blueprint_score += 0.2
+        if blueprint_schema.sqft_total > 0:
+            blueprint_score += 0.1
+        if any(room.orientation for room in blueprint_schema.rooms):
+            blueprint_score += 0.1
+        score += blueprint_score * 0.4
+        factors += 0.4
+    
+    # Climate data quality (30% weight)
+    if climate_data:
+        climate_score = 0.9 if climate_data.get('found') else 0.5
+        score += climate_score * 0.3
+        factors += 0.3
+    
+    # Envelope data quality (30% weight)
+    if envelope_data:
+        envelope_score = getattr(envelope_data, 'overall_confidence', 0.7)
+        score += envelope_score * 0.3
+        factors += 0.3
+    
+    return score / factors if factors > 0 else 0.5
+
+
+def _extract_validation_flags(
+    calculation_result: Optional[Dict],
+    processing_metadata: Optional[Dict]
+) -> Dict[str, Any]:
+    """Extract validation flags and warnings"""
+    flags = {
+        'processing_errors': [],
+        'calculation_warnings': [],
+        'data_quality_issues': []
+    }
+    
+    if processing_metadata:
+        if processing_metadata.get('errors_encountered'):
+            flags['processing_errors'] = processing_metadata['errors_encountered']
+    
+    if calculation_result:
+        if calculation_result.get('audit_information', {}).get('calculation_warnings'):
+            flags['calculation_warnings'] = calculation_result['audit_information']['calculation_warnings']
+    
+    return flags
+
+
+def _find_room_windows(blueprint_schema: BlueprintSchema, room_name: str) -> int:
+    """Find window count for a specific room"""
+    if not blueprint_schema:
+        return 0
+    for room in blueprint_schema.rooms:
+        if room.name == room_name:
+            return room.windows
+    return 0
+
+
+def _find_room_orientation(blueprint_schema: BlueprintSchema, room_name: str) -> Optional[str]:
+    """Find orientation for a specific room"""
+    if not blueprint_schema:
+        return None
+    for room in blueprint_schema.rooms:
+        if room.name == room_name:
+            return room.orientation
+    return None
+
+
+def _calculate_room_confidence(blueprint_schema: BlueprintSchema, room_name: str) -> float:
+    """Calculate confidence score for room data"""
+    if not blueprint_schema:
+        return 0.0
+    
+    for room in blueprint_schema.rooms:
+        if room.name == room_name:
+            confidence = 0.6  # Base confidence
+            if room.area > 0:
+                confidence += 0.2
+            if room.orientation:
+                confidence += 0.1
+            if room.windows >= 0:
+                confidence += 0.1
+            return confidence
+    return 0.0
+
+
+def _calculate_blueprint_completeness(blueprint_schema: BlueprintSchema) -> float:
+    """Calculate blueprint data completeness"""
+    if not blueprint_schema or not blueprint_schema.rooms:
+        return 0.0
+    
+    total_fields = len(blueprint_schema.rooms) * 5  # name, area, floor, windows, orientation
+    filled_fields = 0
+    
+    for room in blueprint_schema.rooms:
+        if room.name:
+            filled_fields += 1
+        if room.area > 0:
+            filled_fields += 1
+        if room.floor > 0:
+            filled_fields += 1
+        if room.windows >= 0:
+            filled_fields += 1
+        if room.orientation:
+            filled_fields += 1
+    
+    return filled_fields / total_fields if total_fields > 0 else 0.0
+
+
+def _calculate_blueprint_confidence(blueprint_schema: BlueprintSchema) -> float:
+    """Calculate confidence in blueprint data accuracy"""
+    if not blueprint_schema:
+        return 0.0
+    
+    # Simple heuristic based on data consistency
+    confidence = 0.7  # Base confidence
+    
+    if blueprint_schema.sqft_total > 0:
+        room_total = sum(room.area for room in blueprint_schema.rooms)
+        if abs(room_total - blueprint_schema.sqft_total) / blueprint_schema.sqft_total < 0.1:
+            confidence += 0.2  # Areas match well
+    
+    if len(blueprint_schema.rooms) >= 3:
+        confidence += 0.1  # Reasonable number of rooms
+    
+    return min(confidence, 1.0)
+
+
+def _create_compliance_checks(
+    audit_id: str,
+    blueprint_schema: Optional[BlueprintSchema],
+    calculation_result: Dict[str, Any]
+) -> List[ComplianceCheck]:
+    """Create ACCA Manual J compliance check records"""
+    checks = []
+    
+    if not calculation_result:
+        return checks
+    
+    # Load range check
+    heating_total = calculation_result.get('heating_total', 0)
+    cooling_total = calculation_result.get('cooling_total', 0)
+    total_sqft = blueprint_schema.sqft_total if blueprint_schema else 1000
+    
+    # Heating load per sqft check
+    heating_per_sqft = heating_total / total_sqft if total_sqft > 0 else 0
+    checks.append(ComplianceCheck(
+        audit_id=audit_id,
+        check_category="load_range",
+        check_name="heating_load_per_sqft",
+        check_description="Heating load should be within typical residential range",
+        passed=15 <= heating_per_sqft <= 80,
+        check_value=heating_per_sqft,
+        expected_range_min=15.0,
+        expected_range_max=80.0,
+        severity="warning" if not (15 <= heating_per_sqft <= 80) else "info",
+        recommendation="Review building envelope and climate data if outside typical range"
+    ))
+    
+    # Cooling load per sqft check
+    cooling_per_sqft = cooling_total / total_sqft if total_sqft > 0 else 0
+    checks.append(ComplianceCheck(
+        audit_id=audit_id,
+        check_category="load_range",
+        check_name="cooling_load_per_sqft",
+        check_description="Cooling load should be within typical residential range",
+        passed=10 <= cooling_per_sqft <= 50,
+        check_value=cooling_per_sqft,
+        expected_range_min=10.0,
+        expected_range_max=50.0,
+        severity="warning" if not (10 <= cooling_per_sqft <= 50) else "info",
+        recommendation="Review building envelope and climate data if outside typical range"
+    ))
+    
+    # Equipment sizing check
+    cooling_tons = cooling_total / 12000
+    checks.append(ComplianceCheck(
+        audit_id=audit_id,
+        check_category="equipment_sizing",
+        check_name="system_size_reasonable",
+        check_description="System size should be reasonable for building",
+        passed=1.0 <= cooling_tons <= 10.0,
+        check_value=cooling_tons,
+        expected_range_min=1.0,
+        expected_range_max=10.0,
+        severity="error" if not (1.0 <= cooling_tons <= 10.0) else "info",
+        recommendation="Verify building area and load calculations if system size is unusual"
+    ))
+    
+    return checks

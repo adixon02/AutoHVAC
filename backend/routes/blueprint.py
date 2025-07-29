@@ -20,8 +20,8 @@ from app.config import DEBUG, DEV_VERIFIED_EMAILS
 
 logger = logging.getLogger(__name__)
 
-# from services.simple_job_processor import process_job_background  # Not needed with Celery
-from tasks.parse_blueprint import process_blueprint
+# New comprehensive Celery task for HVAC load calculations
+from tasks.calculate_hvac_loads import calculate_hvac_loads
 from services.storage import storage_service
 import aiofiles
 import os
@@ -31,9 +31,7 @@ USE_CELERY = True
 
 router = APIRouter()
 
-class AssumptionRequest(BaseModel):
-    duct_config: DuctConfig
-    heating_fuel: HeatingFuel
+# All parameters now collected upfront in upload endpoint
 
 @router.options("/upload")
 async def upload_options():
@@ -73,6 +71,7 @@ async def test_upload(
 async def upload_blueprint(
     email: str = Form(...),
     project_label: str = Form(...),
+    zip_code: str = Form(...),
     file: UploadFile = File(...),
     duct_config: str = Form("ducted_attic"),
     heating_fuel: str = Form("gas"),
@@ -137,7 +136,16 @@ async def upload_blueprint(
         
         if len(project_label) > 255:
             raise HTTPException(status_code=400, detail="Project label must be less than 255 characters")
-        logger.info("🔍 Step 2 PASSED: File validation successful")
+        
+        # Validate zip code
+        if not zip_code or not zip_code.strip():
+            raise HTTPException(status_code=400, detail="Zip code is required")
+        
+        zip_code = zip_code.strip()
+        if not zip_code.isdigit() or len(zip_code) != 5:
+            raise HTTPException(status_code=400, detail="Zip code must be exactly 5 digits")
+        
+        logger.info("🔍 Step 2 PASSED: File and input validation successful")
         
         # Check rate limits (5 concurrent jobs per user)
         logger.info("🔍 Step 3: Starting rate limit check")
@@ -208,7 +216,7 @@ async def upload_blueprint(
                 )
         logger.info("🔍 Step 5 PASSED: Subscription check successful")
         
-        # Create project in database with assumptions
+        # Create project in database with all parameters
         logger.info("🔍 Step 6: About to create project in database")
         try:
             project_id = await job_service.create_project_with_assumptions(
@@ -269,8 +277,16 @@ async def upload_blueprint(
             print(f">>> USE_CELERY = {USE_CELERY}")
             
             if USE_CELERY:
-                # Celery task already has file_content
-                process_blueprint.delay(project_id, file_content, file.filename, email, "90210")
+                # Start comprehensive HVAC load calculation task
+                calculate_hvac_loads.delay(
+                    project_id=project_id, 
+                    file_content=file_content, 
+                    filename=file.filename, 
+                    email=email, 
+                    zip_code=zip_code,
+                    duct_config=duct_config,
+                    heating_fuel=heating_fuel
+                )
             else:
                 print(f">>> ERROR: USE_CELERY is False but Celery is expected")
                 raise HTTPException(status_code=500, detail="Job processing not configured correctly")
@@ -302,35 +318,4 @@ async def upload_blueprint(
         logger.exception(f"❌ UPLOAD FATAL ERROR: {type(e).__name__}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
-@router.post("/jobs/{job_id}/assumptions")
-async def submit_assumptions(
-    job_id: str,
-    assumptions: AssumptionRequest,
-    session: AsyncSession = Depends(get_async_session)
-):
-    """Submit Manual J assumptions to continue processing"""
-    
-    try:
-        # Update project with assumptions and resume job
-        updated = await job_service.update_project_assumptions(
-            job_id, 
-            assumptions.duct_config.value, 
-            assumptions.heating_fuel.value, 
-            session
-        )
-        
-        if not updated:
-            raise HTTPException(status_code=404, detail="Job not found")
-        
-        return JSONResponse(
-            content={
-                "message": "Assumptions received, job resumed",
-                "job_id": job_id,
-                "duct_config": assumptions.duct_config.value,
-                "heating_fuel": assumptions.heating_fuel.value
-            }
-        )
-        
-    except Exception as e:
-        logger.error(f"Error updating assumptions for job {job_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to update assumptions")
+# Assumptions endpoint removed - all parameters now collected upfront in /upload

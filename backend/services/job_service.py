@@ -5,7 +5,6 @@ from models.db_models import Project, JobStatus, User
 from database import AsyncSessionLocal, SyncSessionLocal
 from datetime import datetime, timezone
 import uuid
-import asyncio
 import logging
 from fastapi import HTTPException
 
@@ -15,8 +14,8 @@ class JobService:
     """PostgreSQL-backed job service replacing InMemoryJobStore"""
     
     def __init__(self):
-        # Event registry for job resumption
-        self._job_events: Dict[str, asyncio.Event] = {}
+        # Simple job service for streamlined processing
+        pass
     
     @staticmethod
     async def create_project(
@@ -292,54 +291,7 @@ class JobService:
             session
         )
     
-    async def update_project_assumptions(
-        self,
-        project_id: str,
-        duct_config: str,
-        heating_fuel: str,
-        session: Optional[AsyncSession] = None
-    ) -> bool:
-        """Update project with Manual J assumptions"""
-        success = await JobService.update_project(
-            project_id,
-            {
-                "duct_config": duct_config,
-                "heating_fuel": heating_fuel,
-                "assumptions_collected": True
-            },
-            session
-        )
-        
-        # Resume the job by triggering the event
-        if success:
-            await self.resume_project(project_id)
-        
-        return success
-    
-    async def register_job_event(self, project_id: str) -> asyncio.Event:
-        """Register an event for job resumption"""
-        event = asyncio.Event()
-        self._job_events[project_id] = event
-        return event
-    
-    async def resume_project(self, project_id: str) -> bool:
-        """Resume a paused project by triggering its event"""
-        if project_id in self._job_events:
-            self._job_events[project_id].set()
-            return True
-        return False
-    
-    async def wait_for_assumptions(self, project_id: str, timeout: float = 900.0) -> bool:
-        """Wait for assumptions to be collected with timeout"""
-        event = await self.register_job_event(project_id)
-        try:
-            await asyncio.wait_for(event.wait(), timeout=timeout)
-            return True
-        except asyncio.TimeoutError:
-            return False
-        finally:
-            # Clean up the event
-            self._job_events.pop(project_id, None)
+    # Legacy assumption handling methods removed - all parameters now collected upfront
 
 # Global instance for easy access
 job_service = JobService()

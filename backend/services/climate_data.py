@@ -7,18 +7,21 @@ import csv
 import os
 import redis
 import json
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 from functools import lru_cache
 import math
 
-# Redis configuration for caching
+# Redis configuration for caching with fallback
 try:
-    redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+    redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+    redis_client = redis.from_url(redis_url, decode_responses=True)
     redis_client.ping()  # Test connection
     REDIS_AVAILABLE = True
-except:
+    print(f"Climate data service: Redis connected at {redis_url}")
+except Exception as e:
     REDIS_AVAILABLE = False
     redis_client = None
+    print(f"Climate data service: Redis unavailable ({e}), using in-memory cache only")
 
 # Data file paths
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
@@ -132,15 +135,17 @@ def get_climate_data(zip_code: str) -> Dict:
     """
     zip_code = zip_code.zfill(5)
     
-    # Check Redis cache first
+    # Check Redis cache first for production performance
     cache_key = f"climate:{zip_code}"
     if REDIS_AVAILABLE:
         try:
             cached = redis_client.get(cache_key)
             if cached:
-                return json.loads(cached)
-        except:
-            pass
+                result = json.loads(cached)
+                result['cache_hit'] = True
+                return result
+        except Exception as e:
+            print(f"Redis cache read error for {zip_code}: {e}")
     
     # Load data if not cached
     zip_county_data = load_zip_county_data()
@@ -181,12 +186,22 @@ def get_climate_data(zip_code: str) -> Dict:
         if nearest_temps:
             result.update(nearest_temps)
     
-    # Cache result for 24 hours
+    # Mark as cache miss and cache result for 24 hours
+    result['cache_hit'] = False
+    
     if REDIS_AVAILABLE:
         try:
+            # Cache for 24 hours (86400 seconds)
             redis_client.setex(cache_key, 86400, json.dumps(result))
-        except:
-            pass
+        except Exception as e:
+            print(f"Redis cache write error for {zip_code}: {e}")
+    
+    # Also warm up nearby zip codes for better performance
+    if result['found'] and result.get('state_abbr'):
+        try:
+            _warm_nearby_cache(zip_code, result)
+        except Exception as e:
+            print(f"Cache warming failed for {zip_code}: {e}")
     
     return result
 
@@ -303,3 +318,170 @@ def get_climate_zone_factors(climate_zone: str) -> Dict[str, float]:
     
     # Default fallback
     return CLIMATE_ZONE_FACTORS['4A']
+
+
+def _warm_nearby_cache(center_zip: str, center_data: Dict) -> None:
+    """
+    Warm up cache for nearby zip codes in the same state and climate zone
+    This improves performance for subsequent requests in the same area
+    """
+    if not REDIS_AVAILABLE or not center_data.get('state_abbr'):
+        return
+    
+    state_abbr = center_data['state_abbr']
+    climate_zone = center_data.get('climate_zone', '')
+    
+    # Load zip code data once
+    zip_county_data = load_zip_county_data()
+    county_climate_data = load_county_climate_data()
+    design_temp_data = load_design_temp_data()
+    
+    # Find nearby zip codes in same state (simple approach - same first 3 digits)
+    zip_prefix = center_zip[:3]
+    warmed_count = 0
+    
+    for zip_code, zip_info in zip_county_data.items():
+        if (zip_code.startswith(zip_prefix) and 
+            zip_info['state_abbr'] == state_abbr and 
+            zip_code != center_zip and
+            warmed_count < 10):  # Limit warming to avoid overload
+            
+            cache_key = f"climate:{zip_code}"
+            
+            # Check if already cached
+            try:
+                if redis_client.exists(cache_key):
+                    continue
+            except Exception:
+                continue
+            
+            # Build similar result for nearby zip code
+            nearby_result = {
+                'zip_code': zip_code,
+                'found': True,
+                'city': zip_info['city'],
+                'state': zip_info['state'],
+                'state_abbr': zip_info['state_abbr'],
+                'climate_zone': climate_zone,  # Use same climate zone
+                'cache_hit': False,
+                'pre_warmed': True
+            }
+            
+            # Use same design temps if in same climate zone, otherwise find nearest
+            if zip_code in design_temp_data:
+                nearby_result.update(design_temp_data[zip_code])
+            else:
+                # Use center_data temps as approximation for nearby locations
+                for key in ['heating_db_99', 'cooling_db_1', 'cooling_wb_1']:
+                    if key in center_data:
+                        nearby_result[key] = center_data[key]
+            
+            # Cache the warmed data
+            try:
+                redis_client.setex(cache_key, 86400, json.dumps(nearby_result))
+                warmed_count += 1
+            except Exception:
+                break
+
+
+def get_bulk_climate_data(zip_codes: List[str]) -> Dict[str, Dict]:
+    """
+    Get climate data for multiple zip codes efficiently
+    
+    Args:
+        zip_codes: List of 5-digit zip codes
+        
+    Returns:
+        Dict mapping zip codes to their climate data
+    """
+    results = {}
+    cache_misses = []
+    
+    # First pass: check cache for all zip codes
+    if REDIS_AVAILABLE:
+        try:
+            pipe = redis_client.pipeline()
+            for zip_code in zip_codes:
+                cache_key = f"climate:{zip_code.zfill(5)}"
+                pipe.get(cache_key)
+            
+            cached_results = pipe.execute()
+            
+            for i, cached in enumerate(cached_results):
+                zip_code = zip_codes[i].zfill(5)
+                if cached:
+                    result = json.loads(cached)
+                    result['cache_hit'] = True
+                    results[zip_code] = result
+                else:
+                    cache_misses.append(zip_code)
+                    
+        except Exception as e:
+            print(f"Bulk cache read error: {e}")
+            cache_misses = [z.zfill(5) for z in zip_codes]
+    else:
+        cache_misses = [z.zfill(5) for z in zip_codes]
+    
+    # Second pass: load missing data efficiently
+    if cache_misses:
+        # Load all data sources once
+        zip_county_data = load_zip_county_data()
+        county_climate_data = load_county_climate_data()
+        design_temp_data = load_design_temp_data()
+        
+        # Process each cache miss
+        for zip_code in cache_misses:
+            result = _build_climate_result(
+                zip_code, zip_county_data, county_climate_data, design_temp_data
+            )
+            result['cache_hit'] = False
+            results[zip_code] = result
+            
+            # Cache the result
+            if REDIS_AVAILABLE:
+                try:
+                    cache_key = f"climate:{zip_code}"
+                    redis_client.setex(cache_key, 86400, json.dumps(result))
+                except Exception:
+                    pass
+    
+    return results
+
+
+def _build_climate_result(zip_code: str, zip_county_data: Dict, county_climate_data: Dict, design_temp_data: Dict) -> Dict:
+    """Build climate result for a single zip code from loaded data sources"""
+    result = {
+        'zip_code': zip_code,
+        'found': False,
+        'climate_zone': '4A',  # Default fallback
+        'heating_db_99': 10,   # Default fallback
+        'cooling_db_1': 90,    # Default fallback
+        'cooling_wb_1': 75,    # Default fallback
+    }
+    
+    # Get county info from zip code
+    if zip_code in zip_county_data:
+        zip_info = zip_county_data[zip_code]
+        result['city'] = zip_info['city']
+        result['state'] = zip_info['state']
+        result['state_abbr'] = zip_info['state_abbr']
+        
+        # Get climate zone from county
+        county_key = f"{zip_info['state_abbr']}-{zip_info['county']}"
+        if county_key in county_climate_data:
+            climate_info = county_climate_data[county_key]
+            result['climate_zone'] = climate_info['iecc_zone'] + climate_info['iecc_moisture']
+            result['ba_climate_zone'] = climate_info['ba_zone']
+            result['found'] = True
+    
+    # Get design temperatures
+    if zip_code in design_temp_data:
+        temp_data = design_temp_data[zip_code]
+        result.update(temp_data)
+    else:
+        # Find nearest weather station by climate zone and state
+        nearest_temps = find_nearest_design_temps(result.get('state_abbr'), result.get('climate_zone'))
+        if nearest_temps:
+            result.update(nearest_temps)
+    
+    return result
