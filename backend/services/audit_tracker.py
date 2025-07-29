@@ -49,6 +49,12 @@ class AuditSnapshot:
     climate_zone: str = None
     design_temps: Dict[str, float] = None
     
+    # Page selection audit data (new for multi-page support)
+    page_selection_data: Optional[Dict[str, Any]] = None
+    selected_page_number: Optional[int] = None
+    total_pages_analyzed: Optional[int] = None
+    page_selection_score: Optional[float] = None
+    
     # Envelope data (if extracted)
     envelope_extraction: Optional[Dict[str, Any]] = None
     envelope_confidence_flags: List[str] = None
@@ -393,7 +399,8 @@ def create_calculation_audit(
     heating_fuel: str = "gas",
     include_ventilation: bool = True,
     processing_metadata: Optional[Dict[str, Any]] = None,
-    error_details: Optional[Dict[str, Any]] = None
+    error_details: Optional[Dict[str, Any]] = None,
+    page_selection_data: Optional[Dict[str, Any]] = None
 ) -> str:
     """
     Create comprehensive audit record in database for ACCA Manual J compliance
@@ -410,6 +417,7 @@ def create_calculation_audit(
         include_ventilation: Whether ventilation loads were included
         processing_metadata: Detailed processing information
         error_details: Error information if calculation failed
+        page_selection_data: Multi-page PDF analysis and selection data
         
     Returns:
         Audit ID for future reference
@@ -435,7 +443,8 @@ def create_calculation_audit(
                     'duct_config': duct_config,
                     'heating_fuel': heating_fuel,
                     'construction_vintage': construction_vintage,
-                    'include_ventilation': include_ventilation
+                    'include_ventilation': include_ventilation,
+                    'page_selection': page_selection_data
                 },
                 envelope_data=envelope_data.__dict__ if envelope_data else None,
                 

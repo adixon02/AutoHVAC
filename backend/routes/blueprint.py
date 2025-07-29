@@ -266,10 +266,67 @@ async def upload_blueprint(
             if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
                 raise HTTPException(status_code=400, detail="File is empty")
             
-            # Quick PDF validation
-            if file_ext == '.pdf' and file_content[:4] != b'%PDF':
-                storage_service.cleanup(project_id)
-                raise HTTPException(status_code=400, detail="Invalid PDF file")
+            # Enhanced PDF validation for multi-page support
+            if file_ext == '.pdf':
+                if file_content[:4] != b'%PDF':
+                    storage_service.cleanup(project_id)
+                    raise HTTPException(status_code=400, detail="Invalid PDF file")
+                
+                # Quick complexity check using PyMuPDF
+                try:
+                    import fitz
+                    doc = fitz.open(stream=file_content, filetype="pdf")
+                    
+                    if doc.is_encrypted:
+                        doc.close()
+                        storage_service.cleanup(project_id)
+                        raise HTTPException(
+                            status_code=400, 
+                            detail="PDF is password protected. Please upload an unprotected version."
+                        )
+                    
+                    page_count = len(doc)
+                    if page_count == 0:
+                        doc.close()
+                        storage_service.cleanup(project_id)
+                        raise HTTPException(status_code=400, detail="PDF contains no pages")
+                    
+                    if page_count > 100:
+                        doc.close()
+                        storage_service.cleanup(project_id)
+                        raise HTTPException(
+                            status_code=400, 
+                            detail=f"PDF has {page_count} pages. Please limit to 100 pages or fewer for processing."
+                        )
+                    
+                    # Quick complexity check on first few pages
+                    total_elements = 0
+                    for page_num in range(min(3, page_count)):
+                        try:
+                            page = doc[page_num]
+                            drawings = page.get_drawings()
+                            total_elements += len(drawings)
+                            
+                            if len(drawings) > 20000:
+                                doc.close()
+                                storage_service.cleanup(project_id)
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail=f"Blueprint is too complex to process (page {page_num + 1} has {len(drawings)} elements). Please try a simplified version or contact support."
+                                )
+                        except Exception:
+                            # If we can't check complexity, continue
+                            break
+                    
+                    doc.close()
+                    logger.info(f"PDF validation passed: {page_count} pages, estimated {total_elements} elements in first 3 pages")
+                    
+                except Exception as e:
+                    storage_service.cleanup(project_id)
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Cannot process this PDF file. It may be corrupted or in an unsupported format: {str(e)[:100]}"
+                    )
             
             logger.error("🔍 Step 8: Starting background job processor")
             logger.error(f"Adding background task for job {project_id}")

@@ -38,24 +38,28 @@ class TextParser:
             r"(\d+)\s*[xX]\s*(\d+)",            # 12 x 15
         ]
     
-    def parse(self, pdf_path: str) -> RawText:
+    def parse(self, pdf_path: str, page_number: int = 0) -> RawText:
         """
         Extract text elements from architectural PDF
         
         Args:
             pdf_path: Path to PDF file
+            page_number: Zero-based page number to parse (default: 0)
             
         Returns:
             RawText with all extracted text elements
         """
         with pdfplumber.open(pdf_path) as pdf:
-            page = pdf.pages[0]  # Process first page
+            if page_number >= len(pdf.pages) or page_number < 0:
+                raise ValueError(f"Page {page_number + 1} does not exist (PDF has {len(pdf.pages)} pages)")
+            
+            page = pdf.pages[page_number]  # Process specified page
             
             # Extract words using pdfplumber
             words = self._extract_words_pdfplumber(page)
             
             # Try OCR for any missed text
-            ocr_words = self._extract_words_ocr(pdf_path)
+            ocr_words = self._extract_words_ocr(pdf_path, page_number)
             
             # Combine and deduplicate
             all_words = self._merge_word_lists(words, ocr_words)
@@ -93,7 +97,7 @@ class TextParser:
         
         return words
     
-    def _extract_words_ocr(self, pdf_path: str) -> List[Dict[str, Any]]:
+    def _extract_words_ocr(self, pdf_path: str, page_number: int = 0) -> List[Dict[str, Any]]:
         """Extract words using OCR for handwritten/unclear text"""
         words = []
         
@@ -110,7 +114,12 @@ class TextParser:
             
             # Convert PDF page to image using PyMuPDF
             doc = fitz.open(pdf_path)
-            page = doc[0]
+            
+            if page_number >= len(doc) or page_number < 0:
+                doc.close()
+                return words
+                
+            page = doc[page_number]
             
             # Render page as image
             mat = fitz.Matrix(2, 2)  # 2x zoom for better OCR
@@ -352,3 +361,155 @@ class TextParser:
             lines.append(line)
         
         return lines
+    
+    def score_room_labels_for_floor_plan(self, words: List[Dict]) -> Dict[str, Any]:
+        """
+        Score the room labels found in text for floor plan likelihood
+        
+        Args:
+            words: List of word dictionaries from text extraction
+            
+        Returns:
+            Dictionary with room label scoring metrics
+        """
+        room_labels = self._identify_room_labels(words)
+        
+        # Count different types of room labels
+        room_types = {}
+        total_confidence = 0.0
+        
+        for label in room_labels:
+            room_type = label.get('room_type', 'other')
+            confidence = label.get('confidence', 0.5)
+            
+            if room_type not in room_types:
+                room_types[room_type] = {'count': 0, 'total_confidence': 0.0}
+            
+            room_types[room_type]['count'] += 1
+            room_types[room_type]['total_confidence'] += confidence
+            total_confidence += confidence
+        
+        # Calculate diversity score (more room types = better floor plan)
+        diversity_score = len(room_types) * 10
+        
+        # Calculate confidence score
+        avg_confidence = total_confidence / len(room_labels) if room_labels else 0.0
+        confidence_score = avg_confidence * 20
+        
+        # Essential room bonus (bedrooms, bathrooms, living areas)
+        essential_rooms = {'bedroom', 'bathroom', 'living', 'kitchen'}
+        essential_found = sum(1 for rt in essential_rooms if rt in room_types)
+        essential_bonus = essential_found * 15
+        
+        # Calculate total room label score
+        total_score = diversity_score + confidence_score + essential_bonus
+        
+        return {
+            'total_room_labels': len(room_labels),
+            'room_types_found': len(room_types),
+            'room_type_breakdown': room_types,
+            'average_confidence': round(avg_confidence, 3),
+            'diversity_score': diversity_score,
+            'confidence_score': round(confidence_score, 1),
+            'essential_bonus': essential_bonus,
+            'total_score': round(total_score, 1),
+            'floor_plan_probability': min(total_score / 100, 1.0)  # Normalize to 0-1
+        }
+    
+    def count_dimension_annotations(self, words: List[Dict]) -> Dict[str, Any]:
+        """
+        Count and analyze dimension annotations in text
+        
+        Args:
+            words: List of word dictionaries from text extraction
+            
+        Returns:
+            Dictionary with dimension analysis metrics
+        """
+        dimensions = self._identify_dimensions(words)
+        
+        # Categorize dimensions by pattern type
+        pattern_counts = {}
+        total_confidence = 0.0
+        
+        for dim in dimensions:
+            confidence = dim.get('confidence', 0.5)
+            text = dim.get('dimension_text', '')
+            
+            # Categorize by pattern
+            if "'" in text and '"' in text:
+                pattern_type = 'architectural'  # Feet and inches
+                confidence_weight = 1.0
+            elif "'" in text:
+                pattern_type = 'feet_only'
+                confidence_weight = 0.8
+            elif 'x' in text.lower():
+                pattern_type = 'area_dimensions'
+                confidence_weight = 0.7
+            else:
+                pattern_type = 'other'
+                confidence_weight = 0.5
+            
+            if pattern_type not in pattern_counts:
+                pattern_counts[pattern_type] = {'count': 0, 'total_confidence': 0.0}
+            
+            pattern_counts[pattern_type]['count'] += 1
+            pattern_counts[pattern_type]['total_confidence'] += confidence * confidence_weight
+            total_confidence += confidence * confidence_weight
+        
+        # Calculate dimension score
+        architectural_bonus = pattern_counts.get('architectural', {}).get('count', 0) * 8
+        dimension_score = len(dimensions) * 5 + architectural_bonus
+        
+        return {
+            'total_dimensions': len(dimensions),
+            'pattern_breakdown': pattern_counts,
+            'architectural_dimensions': pattern_counts.get('architectural', {}).get('count', 0),
+            'total_confidence': round(total_confidence, 2),
+            'dimension_score': dimension_score,
+            'floor_plan_probability': min(dimension_score / 50, 1.0)  # Normalize to 0-1
+        }
+    
+    def analyze_text_for_floor_plan(self, pdf_path: str, page_number: int = 0) -> Dict[str, Any]:
+        """
+        Comprehensive text analysis for floor plan detection
+        
+        Args:
+            pdf_path: Path to PDF file
+            page_number: Zero-based page number to analyze
+            
+        Returns:
+            Dictionary with complete text analysis for floor plan scoring
+        """
+        try:
+            # Extract text from specified page
+            raw_text = self.parse(pdf_path, page_number)
+            
+            # Perform various analyses
+            room_analysis = self.score_room_labels_for_floor_plan(raw_text.words)
+            dimension_analysis = self.count_dimension_annotations(raw_text.words)
+            
+            # Overall text score
+            text_score = room_analysis['total_score'] + dimension_analysis['dimension_score']
+            
+            return {
+                'page_number': page_number + 1,
+                'total_words': len(raw_text.words),
+                'room_analysis': room_analysis,
+                'dimension_analysis': dimension_analysis,
+                'text_score': round(text_score, 1),
+                'floor_plan_probability': round((room_analysis['floor_plan_probability'] + 
+                                               dimension_analysis['floor_plan_probability']) / 2, 3)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing text for page {page_number + 1}: {str(e)}")
+            return {
+                'page_number': page_number + 1,
+                'total_words': 0,
+                'room_analysis': {},
+                'dimension_analysis': {},
+                'text_score': 0.0,
+                'floor_plan_probability': 0.0,
+                'error': str(e)
+            }

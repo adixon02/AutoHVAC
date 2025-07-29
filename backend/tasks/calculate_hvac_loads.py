@@ -27,9 +27,10 @@ from typing import Dict, Any, Optional
 from services.job_service import job_service
 from services.manualj import calculate_manualj_with_audit
 from services.climate_data import get_climate_data
-from app.parser.geometry_parser_safe import create_safe_parser, GeometryParserTimeout
+from app.parser.geometry_parser_safe import create_safe_parser, GeometryParserTimeout, GeometryParserComplexity
 from app.parser.text_parser import TextParser
 from app.parser.ai_cleanup import cleanup, AICleanupError
+from services.pdf_page_analyzer import PDFPageAnalyzer
 from services.envelope_extractor import extract_envelope_data, EnvelopeExtractorError
 from services.audit_tracker import create_calculation_audit
 from database import AsyncSessionLocal
@@ -46,14 +47,14 @@ celery_app = Celery(
 MAX_PDF_SIZE_MB = 50
 MAX_PDF_PAGES = 100
 AI_TIMEOUT_SECONDS = 300
-MAX_PROCESSING_TIME = 1800  # 30 minutes max
+MAX_PROCESSING_TIME = 300   # 5 minutes max as requested
 
 
 @celery_app.task(
     acks_late=True, 
     reject_on_worker_lost=True, 
     time_limit=MAX_PROCESSING_TIME,
-    soft_time_limit=MAX_PROCESSING_TIME - 60
+    soft_time_limit=MAX_PROCESSING_TIME - 30  # 30 seconds before hard limit
 )
 def calculate_hvac_loads(
     project_id: str,
@@ -148,19 +149,57 @@ def calculate_hvac_loads(
         audit_data['climate_data'] = climate_data
         logger.info(f"HVAC calculation started for {project_id} - {filename} - {zip_code}")
         
+        # Stage 1.5: Multi-page analysis and best page selection
+        update_progress_sync("analyzing_pages", 10, "Analyzing PDF pages for floor plan")
+        
+        selected_page_number = None
+        page_analysis_summary = None
+        
+        try:
+            logger.info(f"Starting multi-page analysis for {project_id}")
+            
+            # Analyze all pages to find the best floor plan
+            page_analyzer = PDFPageAnalyzer(timeout_per_page=30, max_pages=20)
+            selected_page_number, page_analyses = page_analyzer.analyze_pdf_pages(temp_file_path)
+            
+            # Convert to 0-based for internal use
+            selected_page_zero_based = selected_page_number - 1
+            
+            # Generate analysis summary for audit
+            page_analysis_summary = page_analyzer.get_analysis_summary(page_analyses)
+            audit_data['page_analysis'] = page_analysis_summary
+            
+            logger.info(f"Multi-page analysis completed for {project_id}")
+            logger.info(f"Selected page {selected_page_number} out of {len(page_analyses)} pages")
+            logger.info(f"Best page score: {page_analysis_summary['best_score']}")
+            
+            # Update progress with page selection info
+            update_progress_sync("page_selected", 15, f"Selected page {selected_page_number} as best floor plan")
+            
+        except Exception as e:
+            error_msg = f"Multi-page analysis failed: {str(e)}"
+            logger.error(f"Multi-page analysis error for {project_id}: {error_msg}", exc_info=True)
+            audit_data['errors_encountered'].append({'stage': 'page_analysis', 'error': error_msg})
+            
+            # Fall back to first page
+            selected_page_zero_based = 0
+            selected_page_number = 1
+            logger.warning(f"Falling back to page 1 for {project_id}")
+            update_progress_sync("page_selected", 15, "Using first page (multi-page analysis failed)")
+
         # Stage 2: Geometry extraction with timeout protection
-        update_progress_sync("extracting_geometry", 20, "Analyzing blueprint geometry")
+        update_progress_sync("extracting_geometry", 20, f"Analyzing geometry from page {selected_page_number}")
         
         try:
             logger.info(f"Starting geometry extraction for {project_id}")
             logger.info(f"PDF file: {temp_file_path}, size: {len(file_content)} bytes")
             
-            # Create safe parser with 60-second timeout
-            geometry_parser = create_safe_parser(timeout=60)
+            # Create safe parser with 60-second timeout and complexity checks
+            geometry_parser = create_safe_parser(timeout=60, enable_complexity_checks=True)
             
-            logger.info("Calling geometry parser with timeout protection...")
-            raw_geometry = geometry_parser.parse(temp_file_path)
-            logger.info("Geometry parsing completed successfully")
+            logger.info(f"Calling geometry parser for page {selected_page_number} with timeout protection...")
+            raw_geometry = geometry_parser.parse(temp_file_path, page_number=selected_page_zero_based)
+            logger.info(f"Geometry parsing completed successfully for page {selected_page_number}")
             
             # Validate geometry extraction results
             if not raw_geometry or not hasattr(raw_geometry, 'lines'):
@@ -181,10 +220,16 @@ def calculate_hvac_loads(
             logger.info(f"Geometry extraction completed: {geometry_summary}")
             
         except GeometryParserTimeout as e:
-            error_msg = f"Geometry extraction timed out: {str(e)}"
+            error_msg = f"Geometry extraction timed out for page {selected_page_number}: {str(e)}"
             logger.error(f"Geometry extraction timeout for {project_id}: {error_msg}")
             audit_data['errors_encountered'].append({'stage': 'geometry', 'error': error_msg, 'error_type': 'timeout'})
-            update_progress_sync("failed", 0, "Geometry extraction timed out after 60 seconds")
+            update_progress_sync("failed", 0, f"Page {selected_page_number} geometry extraction timed out after 60 seconds")
+            raise ValueError(error_msg)
+        except GeometryParserComplexity as e:
+            error_msg = f"Page {selected_page_number} is too complex to process: {str(e)}"
+            logger.error(f"Geometry complexity error for {project_id}: {error_msg}")
+            audit_data['errors_encountered'].append({'stage': 'geometry', 'error': error_msg, 'error_type': 'complexity'})
+            update_progress_sync("failed", 0, f"Page {selected_page_number} is too complex - try a simpler blueprint or different page")
             raise ValueError(error_msg)
         except Exception as e:
             error_msg = f"Geometry extraction failed: {str(e)}"
@@ -193,12 +238,12 @@ def calculate_hvac_loads(
             update_progress_sync("failed", 0, f"Geometry extraction failed: {str(e)[:100]}")
             raise ValueError(error_msg)
         
-        # Stage 3: Text extraction
-        update_progress_sync("extracting_text", 35, "Extracting text and labels")
+        # Stage 3: Text extraction from selected page
+        update_progress_sync("extracting_text", 35, f"Extracting text and labels from page {selected_page_number}")
         
         try:
             text_parser = TextParser()
-            raw_text = text_parser.parse(temp_file_path)
+            raw_text = text_parser.parse(temp_file_path, page_number=selected_page_zero_based)
             
             # Validate text extraction results
             if not raw_text:
@@ -373,7 +418,10 @@ def calculate_hvac_loads(
                 'rooms_identified': len(blueprint_schema.rooms),
                 'total_area': blueprint_schema.sqft_total,
                 'stories': blueprint_schema.stories,
-                'geometry_confidence': 'high' if geometry_summary['lines_found'] > 50 else 'medium'
+                'geometry_confidence': 'high' if geometry_summary['lines_found'] > 50 else 'medium',
+                'selected_page': selected_page_number,
+                'page_selection_score': page_analysis_summary.get('best_score', 0.0) if page_analysis_summary else 0.0,
+                'total_pages_analyzed': page_analysis_summary.get('total_pages_analyzed', 1) if page_analysis_summary else 1
             },
             
             'processing_stages': audit_data['stages_completed'],
@@ -394,7 +442,8 @@ def calculate_hvac_loads(
                 user_id=email,
                 duct_config=duct_config,
                 heating_fuel=heating_fuel,
-                processing_metadata=audit_data
+                processing_metadata=audit_data,
+                page_selection_data=page_analysis_summary
             )
             final_results['comprehensive_audit_id'] = audit_id
         except Exception as e:
@@ -449,7 +498,8 @@ def calculate_hvac_loads(
                 duct_config=duct_config,
                 heating_fuel=heating_fuel,
                 processing_metadata=audit_data,
-                error_details={'type': error_type, 'message': error_message}
+                error_details={'type': error_type, 'message': error_message},
+                page_selection_data=page_analysis_summary if 'page_analysis_summary' in locals() else None
             )
         except Exception as audit_error:
             logger.warning(f"Failed to save error audit data: {audit_error}")
