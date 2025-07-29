@@ -146,21 +146,35 @@ class GeometryParser:
             drawings = page.get_drawings()
             
             for drawing in drawings:
-                if 'items' in drawing and len(drawing['items']) > 2:
+                if drawing and 'items' in drawing and len(drawing['items']) > 2:
                     # Extract path points
                     points = []
                     for item in drawing['items']:
-                        if len(item) >= 3:  # Has coordinates
-                            points.extend(item[1:3])  # x, y coordinates
+                        if item and len(item) >= 3:  # Has coordinates
+                            # Safely extract coordinates with null checks
+                            try:
+                                x, y = item[1], item[2]
+                                if x is not None and y is not None:
+                                    points.extend([float(x), float(y)])
+                            except (TypeError, ValueError, IndexError):
+                                continue  # Skip invalid coordinates
                     
                     if len(points) >= 6:  # At least 3 points
-                        polylines.append({
-                            'points': points,
-                            'stroke_width': drawing.get('width', 1.0),
-                            'color': drawing.get('stroke', {}).get('color', 0),
-                            'closed': drawing.get('closePath', False),
-                            'duct_probability': self._calculate_duct_probability(points, drawing)
-                        })
+                        try:
+                            stroke_width = float(drawing.get('width', 1.0)) if drawing.get('width') is not None else 1.0
+                            color = drawing.get('stroke', {}).get('color', 0) if drawing.get('stroke') else 0
+                            closed = bool(drawing.get('closePath', False))
+                            
+                            polylines.append({
+                                'points': points,
+                                'stroke_width': stroke_width,
+                                'color': color,
+                                'closed': closed,
+                                'duct_probability': self._calculate_duct_probability(points, drawing)
+                            })
+                        except (TypeError, ValueError) as e:
+                            print(f"Error processing drawing properties: {e}")
+                            continue
             
             doc.close()
             

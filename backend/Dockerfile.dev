@@ -2,10 +2,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies for Pillow source builds (libjpeg, zlib, freetype, build tools)
+# Install system dependencies for Pillow, tesseract, and PDF processing
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         libjpeg-dev zlib1g-dev libfreetype6-dev build-essential \
+        tesseract-ocr tesseract-ocr-eng \
+        libpoppler-utils poppler-utils \
+        libgl1-mesa-glx libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

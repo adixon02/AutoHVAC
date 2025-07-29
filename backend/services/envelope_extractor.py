@@ -187,8 +187,23 @@ async def extract_envelope_data(blueprint_text: str, notes_text: str = "",
         
     except json.JSONDecodeError as e:
         raise EnvelopeExtractorError(f"Failed to parse AI response as JSON: {e}")
+    except TypeError as e:
+        if "proxies" in str(e):
+            raise EnvelopeExtractorError(f"OpenAI client configuration error - please update dependencies: {e}")
+        raise EnvelopeExtractorError(f"OpenAI API call failed (type error): {e}")
     except Exception as e:
-        raise EnvelopeExtractorError(f"OpenAI API call failed: {e}")
+        # Handle common httpx/connection errors
+        error_msg = str(e).lower()
+        if "proxies" in error_msg:
+            raise EnvelopeExtractorError(f"HTTP client configuration error - please update OpenAI library: {e}")
+        elif "connection" in error_msg or "timeout" in error_msg:
+            raise EnvelopeExtractorError(f"Network connection error during envelope extraction: {e}")
+        elif "unauthorized" in error_msg or "401" in error_msg:
+            raise EnvelopeExtractorError(f"OpenAI API authentication failed - check API key: {e}")
+        elif "rate limit" in error_msg or "429" in error_msg:
+            raise EnvelopeExtractorError(f"OpenAI API rate limit exceeded: {e}")
+        else:
+            raise EnvelopeExtractorError(f"OpenAI API call failed: {e}")
 
 
 def _prepare_envelope_context(blueprint_text: str, notes_text: str, zip_code: str) -> str:

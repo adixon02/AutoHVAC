@@ -8,6 +8,7 @@ interface ProjectData {
   blueprintFile: File | null
   ductConfig: 'ducted_attic' | 'ducted_crawl' | 'ductless' | ''
   heatingFuel: 'gas' | 'heat_pump' | 'electric' | ''
+  zipCode: string
   email: string
 }
 
@@ -27,10 +28,11 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
     blueprintFile: null,
     ductConfig: 'ducted_attic', // Pre-selected default
     heatingFuel: 'gas', // Pre-selected default
+    zipCode: '',
     email: ''
   })
 
-  const totalSteps = 4
+  const totalSteps = 5
 
   const nextStep = () => {
     if (currentStep < totalSteps) {
@@ -53,6 +55,7 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
       blueprintFile: null,
       ductConfig: 'ducted_attic',
       heatingFuel: 'gas',
+      zipCode: '',
       email: ''
     })
     setError(null)
@@ -75,13 +78,15 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
               {currentStep === 1 && 'Start Your HVAC Analysis'}
               {currentStep === 2 && 'What type of ductwork?'}
               {currentStep === 3 && 'What heating system will you use?'}
-              {currentStep === 4 && 'Where should we send your analysis?'}
+              {currentStep === 4 && 'What\'s the project location?'}
+              {currentStep === 5 && 'Where should we send your analysis?'}
             </h2>
             <p className="text-gray-600 mt-1">
               {currentStep === 1 && 'Upload your blueprint and give your project a name'}
               {currentStep === 2 && 'This affects your system efficiency calculations'}
               {currentStep === 3 && 'This determines equipment recommendations'}
-              {currentStep === 4 && `Your detailed Manual J report for "${projectData.projectName}" will be ready in 30 seconds`}
+              {currentStep === 4 && 'We need the ZIP code for accurate climate data'}
+              {currentStep === 5 && `Your detailed Manual J report for "${projectData.projectName}" will be ready in 30 seconds`}
             </p>
           </div>
           <button
@@ -99,7 +104,7 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
         {currentStep > 1 && (
           <div className="px-6 py-4 border-b border-gray-100">
             <div className="flex items-center justify-center space-x-2">
-              {Array.from({ length: 3 }, (_, i) => (
+              {Array.from({ length: 4 }, (_, i) => (
                 <div
                   key={i}
                   className={`w-3 h-3 rounded-full ${
@@ -109,7 +114,7 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
               ))}
             </div>
             <div className="text-center mt-2 text-sm text-gray-600">
-              Step {currentStep - 1} of 3
+              Step {currentStep - 1} of 4
             </div>
           </div>
         )}
@@ -147,9 +152,21 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
             />
           )}
 
-          {/* Step 4: Email Collection */}
+          {/* Step 4: ZIP Code Collection */}
           {currentStep === 4 && (
-            <Step4EmailCollection
+            <Step4ZipCode
+              projectData={projectData}
+              updateProjectData={updateProjectData}
+              onNext={nextStep}
+              onPrev={prevStep}
+              error={error}
+              setError={setError}
+            />
+          )}
+
+          {/* Step 5: Email Collection */}
+          {currentStep === 5 && (
+            <Step5EmailCollection
               projectData={projectData}
               updateProjectData={updateProjectData}
               onPrev={prevStep}
@@ -174,6 +191,7 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
       formData.append('file', projectData.blueprintFile!)
       formData.append('project_label', projectData.projectName)
       formData.append('email', projectData.email)
+      formData.append('zip_code', projectData.zipCode)
       formData.append('duct_config', projectData.ductConfig)
       formData.append('heating_fuel', projectData.heatingFuel)
 
@@ -442,6 +460,74 @@ function Step3HeatingSystem({ projectData, updateProjectData, onNext, onPrev }: 
           onClick={onNext}
           className="flex-1 btn-primary text-lg py-4"
         >
+          Next: Project Location
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function Step4ZipCode({ projectData, updateProjectData, onNext, onPrev, error, setError }: any) {
+  const handleNext = () => {
+    if (!projectData.zipCode.trim()) {
+      setError('Please enter a ZIP code')
+      return
+    }
+    if (!/^\d{5}$/.test(projectData.zipCode.trim())) {
+      setError('ZIP code must be exactly 5 digits')
+      return
+    }
+    setError(null)
+    onNext()
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* ZIP Code Input */}
+      <div>
+        <label className="block text-sm font-medium text-brand-700 mb-2">
+          ZIP Code
+        </label>
+        <input
+          type="text"
+          value={projectData.zipCode}
+          onChange={(e) => updateProjectData({ zipCode: e.target.value.replace(/\D/g, '').slice(0, 5) })}
+          placeholder="12345"
+          maxLength={5}
+          className="w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors text-center text-xl font-mono"
+        />
+        <p className="mt-2 text-sm text-gray-500">
+          We use this for accurate climate data and HVAC sizing calculations
+        </p>
+      </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+          <div className="flex items-start">
+            <svg className="w-5 h-5 text-red-500 mt-0.5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div className="flex-1">
+              <h4 className="text-sm font-medium text-red-800 mb-1">Please Enter ZIP Code</h4>
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Navigation Buttons */}
+      <div className="flex space-x-4">
+        <button
+          onClick={onPrev}
+          className="flex-1 btn-secondary text-lg py-4"
+        >
+          Back
+        </button>
+        <button
+          onClick={handleNext}
+          className="flex-1 btn-primary text-lg py-4"
+        >
           Next: Get Results
         </button>
       </div>
@@ -449,7 +535,7 @@ function Step3HeatingSystem({ projectData, updateProjectData, onNext, onPrev }: 
   )
 }
 
-function Step4EmailCollection({ projectData, updateProjectData, onPrev, onSubmit, isLoading, error, setError }: any) {
+function Step5EmailCollection({ projectData, updateProjectData, onPrev, onSubmit, isLoading, error, setError }: any) {
   const handleSubmit = () => {
     if (!projectData.email.trim()) {
       setError('Please enter your email address')

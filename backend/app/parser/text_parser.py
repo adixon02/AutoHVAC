@@ -101,6 +101,13 @@ class TextParser:
             return words
         
         try:
+            # Check if tesseract is available
+            try:
+                pytesseract.get_tesseract_version()
+            except (pytesseract.TesseractNotFoundError, FileNotFoundError) as e:
+                print(f"Tesseract OCR not found in PATH: {e}")
+                return words
+            
             # Convert PDF page to image using PyMuPDF
             doc = fitz.open(pdf_path)
             page = doc[0]
@@ -144,8 +151,13 @@ class TextParser:
             
             doc.close()
             
+        except pytesseract.TesseractNotFoundError as e:
+            print(f"Tesseract OCR not installed or not in PATH: {e}")
+        except ImportError as e:
+            print(f"Required OCR dependencies not available: {e}")
         except Exception as e:
             print(f"OCR extraction failed: {e}")
+            # Don't fail completely, just log the error
         
         return words
     

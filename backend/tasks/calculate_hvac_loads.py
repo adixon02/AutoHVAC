@@ -174,7 +174,9 @@ def calculate_hvac_loads(
             
         except Exception as e:
             error_msg = f"Geometry extraction failed: {str(e)}"
+            logger.error(f"Geometry extraction error for {project_id}: {error_msg}", exc_info=True)
             audit_data['errors_encountered'].append({'stage': 'geometry', 'error': error_msg})
+            update_progress_sync("failed", 0, f"Geometry extraction failed: {str(e)[:100]}")
             raise ValueError(error_msg)
         
         # Stage 3: Text extraction
@@ -200,7 +202,9 @@ def calculate_hvac_loads(
             
         except Exception as e:
             error_msg = f"Text extraction failed: {str(e)}"
+            logger.error(f"Text extraction error for {project_id}: {error_msg}", exc_info=True)
             audit_data['errors_encountered'].append({'stage': 'text', 'error': error_msg})
+            update_progress_sync("failed", 0, f"Text extraction failed: {str(e)[:100]}")
             raise ValueError(error_msg)
         
         # Stage 4: AI cleanup and structuring
@@ -238,11 +242,15 @@ def calculate_hvac_loads(
             
         except asyncio.TimeoutError:
             error_msg = f"AI processing timed out after {AI_TIMEOUT_SECONDS} seconds"
+            logger.error(f"AI processing timeout for {project_id}: {error_msg}")
             audit_data['errors_encountered'].append({'stage': 'ai', 'error': error_msg})
+            update_progress_sync("failed", 0, f"AI processing timed out after {AI_TIMEOUT_SECONDS}s")
             raise AICleanupError(error_msg)
         except Exception as e:
             error_msg = f"AI processing failed: {str(e)}"
+            logger.error(f"AI processing error for {project_id}: {error_msg}", exc_info=True)
             audit_data['errors_encountered'].append({'stage': 'ai', 'error': error_msg})
+            update_progress_sync("failed", 0, f"AI processing failed: {str(e)[:100]}")
             raise AICleanupError(error_msg)
         
         # Stage 5: Envelope analysis (optional enhancement)
@@ -276,7 +284,7 @@ def calculate_hvac_loads(
                 
         except Exception as e:
             # Envelope analysis is optional - log but don't fail
-            logger.warning(f"Envelope analysis failed (non-critical): {e}")
+            logger.warning(f"Envelope analysis failed for {project_id} (non-critical): {e}")
             audit_data['errors_encountered'].append({
                 'stage': 'envelope', 
                 'error': f"Non-critical: {str(e)}"
@@ -319,7 +327,9 @@ def calculate_hvac_loads(
             
         except Exception as e:
             error_msg = f"Manual J calculations failed: {str(e)}"
+            logger.error(f"Manual J calculation error for {project_id}: {error_msg}", exc_info=True)
             audit_data['errors_encountered'].append({'stage': 'calculations', 'error': error_msg})
+            update_progress_sync("failed", 0, f"Load calculations failed: {str(e)[:100]}")
             raise ValueError(error_msg)
         
         # Stage 7: Result compilation and audit
