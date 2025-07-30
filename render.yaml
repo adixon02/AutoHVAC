@@ -19,10 +19,9 @@ services:
     healthCheckPath: /healthz
     # CRITICAL: Shared persistent disk for file storage
     # Both backend and worker MUST mount the same disk
-    disk:
-      name: shared-storage
-      mountPath: /var/data
-      sizeGB: 10
+    disks:
+      - name: shared-storage
+        mountPath: /var/data
     envVars:
       - key: REDIS_URL
         fromService:
@@ -47,9 +46,9 @@ services:
         value: "1"
       - key: WEB_CONCURRENCY
         value: "2"
-      # MUST match the subdirectory under mountPath where files are stored
+      # MUST match the mount path exactly - Render mounts at /var/data
       - key: RENDER_DISK_PATH
-        value: /var/data/uploads
+        value: /var/data
       # Optional: grace period for file cleanup (days)
       - key: FILE_CLEANUP_GRACE_DAYS
         value: "7"
@@ -63,10 +62,9 @@ services:
     # Import both task modules
     startCommand: cd backend && celery -A tasks worker --loglevel=info --concurrency=2 --max-tasks-per-child=50 --max-memory-per-child=512000 --time-limit=1800 --soft-time-limit=1740 --without-gossip --without-mingle --without-heartbeat
     # CRITICAL: Same shared disk as backend - files saved by backend must be readable by worker
-    disk:
-      name: shared-storage
-      mountPath: /var/data
-      sizeGB: 10
+    disks:
+      - name: shared-storage
+        mountPath: /var/data
     envVars:
       - key: REDIS_URL
         fromService:
@@ -85,7 +83,7 @@ services:
         value: "true"
       # MUST be the same as backend to access the same files
       - key: RENDER_DISK_PATH
-        value: /var/data/uploads
+        value: /var/data
       # Optional: grace period for file cleanup (days)
       - key: FILE_CLEANUP_GRACE_DAYS
         value: "7"
@@ -102,3 +100,8 @@ databases:
     databaseName: autohvac
     user: autohvac
     plan: starter
+
+# Shared disk definition - mounted by both backend and worker
+disks:
+  - name: shared-storage
+    sizeGB: 10

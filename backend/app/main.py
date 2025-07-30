@@ -82,27 +82,52 @@ async def startup_event():
     logger.info("Starting AutoHVAC API...")
     
     # Log disk mount configuration
-    disk_path = os.getenv("RENDER_DISK_PATH", "/var/data/uploads")
-    logger.info(f"[STARTUP] RENDER_DISK_PATH environment variable: {os.getenv('RENDER_DISK_PATH')}")
-    logger.info(f"[STARTUP] Using storage path: {disk_path}")
+    disk_path = os.getenv("RENDER_DISK_PATH")
+    logger.info(f"[STARTUP] RENDER_DISK_PATH environment variable: {disk_path}")
     
-    # Check if the disk is mounted and accessible
-    try:
+    if disk_path:
+        # Check if the mount point exists
         if os.path.exists(disk_path):
-            logger.info(f"[STARTUP] Storage path exists: {disk_path}")
-            # List contents to verify it's mounted
-            contents = os.listdir(disk_path)
-            logger.info(f"[STARTUP] Storage path contents ({len(contents)} files): {contents[:5]}...")
-            # Test write permissions
-            test_file = os.path.join(disk_path, ".startup_test")
-            with open(test_file, 'w') as f:
-                f.write("startup test")
-            os.unlink(test_file)
-            logger.info(f"[STARTUP] Storage path is writable: {disk_path}")
+            logger.info(f"[STARTUP] Mount point exists: {disk_path}")
+            
+            # Check if it's a directory
+            if os.path.isdir(disk_path):
+                logger.info(f"[STARTUP] Mount point is a directory")
+                
+                # List mount point contents
+                try:
+                    contents = os.listdir(disk_path)
+                    logger.info(f"[STARTUP] Mount point contents: {contents}")
+                except Exception as e:
+                    logger.error(f"[STARTUP] Cannot list mount point: {e}")
+                
+                # Check uploads subdirectory
+                upload_dir = os.path.join(disk_path, "uploads")
+                if os.path.exists(upload_dir):
+                    logger.info(f"[STARTUP] Uploads directory exists: {upload_dir}")
+                    try:
+                        upload_contents = os.listdir(upload_dir)
+                        logger.info(f"[STARTUP] Uploads directory has {len(upload_contents)} files")
+                    except Exception as e:
+                        logger.error(f"[STARTUP] Cannot list uploads directory: {e}")
+                else:
+                    logger.info(f"[STARTUP] Uploads directory will be created on first use")
+                
+                # Test write permissions in mount point
+                try:
+                    test_file = os.path.join(disk_path, ".startup_test")
+                    with open(test_file, 'w') as f:
+                        f.write("startup test")
+                    os.unlink(test_file)
+                    logger.info(f"[STARTUP] Mount point is writable")
+                except Exception as e:
+                    logger.error(f"[STARTUP] Mount point is NOT writable: {e}")
+            else:
+                logger.error(f"[STARTUP] Mount point exists but is not a directory")
         else:
-            logger.error(f"[STARTUP] Storage path does NOT exist: {disk_path}")
-    except Exception as e:
-        logger.error(f"[STARTUP] Error checking storage path {disk_path}: {e}")
+            logger.error(f"[STARTUP] Mount point does NOT exist: {disk_path}")
+    else:
+        logger.warning(f"[STARTUP] RENDER_DISK_PATH not set - storage will fail")
     
     # DON'T access database here - it blocks port binding
     

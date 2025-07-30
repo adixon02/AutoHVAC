@@ -51,7 +51,10 @@ def cleanup_old_files(grace_period_days: int = None) -> dict:
         logger.error("[CLEANUP] RENDER_DISK_PATH not set, skipping cleanup")
         return {"error": "RENDER_DISK_PATH not set"}
     
-    logger.info(f"[CLEANUP] Storage path: {storage_path}")
+    # Files are stored in the uploads subdirectory
+    upload_dir = os.path.join(storage_path, "uploads")
+    logger.info(f"[CLEANUP] Mount point: {storage_path}")
+    logger.info(f"[CLEANUP] Upload directory: {upload_dir}")
     
     # Track statistics
     stats = {
@@ -65,11 +68,11 @@ def cleanup_old_files(grace_period_days: int = None) -> dict:
     
     try:
         # List all PDF files in storage
-        if not os.path.exists(storage_path):
-            logger.error(f"[CLEANUP] Storage path does not exist: {storage_path}")
-            return {"error": f"Storage path does not exist: {storage_path}"}
+        if not os.path.exists(upload_dir):
+            logger.warning(f"[CLEANUP] Upload directory does not exist: {upload_dir}")
+            return {"error": f"Upload directory does not exist: {upload_dir}"}
         
-        all_files = os.listdir(storage_path)
+        all_files = os.listdir(upload_dir)
         pdf_files = [f for f in all_files if f.endswith('.pdf')]
         
         logger.info(f"[CLEANUP] Found {len(pdf_files)} PDF files to check")
@@ -85,7 +88,7 @@ def cleanup_old_files(grace_period_days: int = None) -> dict:
         
         for filename in pdf_files[:MAX_FILES_PER_RUN]:  # Limit files per run
             stats["files_checked"] += 1
-            file_path = os.path.join(storage_path, filename)
+            file_path = os.path.join(upload_dir, filename)
             
             try:
                 # Get file stats
@@ -109,7 +112,7 @@ def cleanup_old_files(grace_period_days: int = None) -> dict:
         
         # Delete old files
         for filename, mtime, size in files_to_delete:
-            file_path = os.path.join(storage_path, filename)
+            file_path = os.path.join(upload_dir, filename)
             file_age_days = (time.time() - mtime) / (24 * 60 * 60)
             
             try:

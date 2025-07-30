@@ -143,16 +143,22 @@ def calculate_hvac_loads(
         raise RuntimeError(error_msg)
     
     # Construct file path from environment variable and project ID
-    file_path = os.path.join(disk_path, f"{project_id}.pdf")
+    # Files are stored in the uploads subdirectory
+    upload_dir = os.path.join(disk_path, "uploads")
+    file_path = os.path.join(upload_dir, f"{project_id}.pdf")
     
     logger.info(f"[CELERY TASK] Starting task for project {project_id}")
     logger.info(f"[CELERY TASK] RENDER_DISK_PATH={disk_path}")
-    logger.info(f"[CELERY TASK] Reconstructed file path: {file_path}")
+    logger.info(f"[CELERY TASK] Upload directory: {upload_dir}")
+    logger.info(f"[CELERY TASK] File path: {file_path}")
     
     # List directory contents for debugging
     try:
-        contents = os.listdir(disk_path)
-        logger.info(f"[CELERY TASK] Directory contents ({len(contents)} files): {contents[:10]}...")
+        if os.path.exists(upload_dir):
+            contents = os.listdir(upload_dir)
+            logger.info(f"[CELERY TASK] Upload directory contents ({len(contents)} files): {contents[:10]}...")
+        else:
+            logger.warning(f"[CELERY TASK] Upload directory does not exist: {upload_dir}")
     except Exception as e:
         logger.warning(f"[CELERY TASK] Could not list directory: {e}")
     
@@ -203,13 +209,17 @@ def calculate_hvac_loads(
         
         # List all files in the storage directory
         try:
-            if os.path.exists(disk_path):
-                all_files = os.listdir(disk_path)
+            if os.path.exists(upload_dir):
+                all_files = os.listdir(upload_dir)
                 pdf_files = [f for f in all_files if f.endswith('.pdf')]
-                logger.error(f"[CELERY TASK] PDF files in {disk_path}: {pdf_files}")
+                logger.error(f"[CELERY TASK] PDF files in {upload_dir}: {pdf_files}")
                 logger.error(f"[CELERY TASK] All files ({len(all_files)}): {all_files[:20]}...")
             else:
-                logger.error(f"[CELERY TASK] Storage directory does not exist: {disk_path}")
+                logger.error(f"[CELERY TASK] Upload directory does not exist: {upload_dir}")
+                # Also check parent directory
+                if os.path.exists(disk_path):
+                    parent_contents = os.listdir(disk_path)
+                    logger.error(f"[CELERY TASK] Parent directory contents: {parent_contents}")
         except Exception as e:
             logger.error(f"[CELERY TASK] Failed to list directory: {e}")
         

@@ -19,36 +19,55 @@ class StorageService:
         if not self.storage_path:
             raise RuntimeError(
                 "RENDER_DISK_PATH environment variable is not set. "
-                "This must be set to the shared disk mount path (e.g., /var/data/uploads)"
+                "This must be set to the shared disk mount path (e.g., /var/data)"
             )
         
         logger.info(f"[STORAGE INIT] RENDER_DISK_PATH={self.storage_path}")
         
-        # Ensure the storage path exists and is writable
+        # Check if the storage path exists (mount point should already exist)
+        if not os.path.exists(self.storage_path):
+            raise RuntimeError(
+                f"Storage path does not exist: {self.storage_path}. "
+                "Ensure the persistent disk is properly mounted."
+            )
+        
+        # Check if it's a directory
+        if not os.path.isdir(self.storage_path):
+            raise RuntimeError(f"Storage path is not a directory: {self.storage_path}")
+        
+        # Create a subdirectory for uploads if we want organization
+        self.upload_dir = os.path.join(self.storage_path, "uploads")
+        
         try:
-            os.makedirs(self.storage_path, exist_ok=True)
+            # Create uploads subdirectory if it doesn't exist
+            if not os.path.exists(self.upload_dir):
+                logger.info(f"[STORAGE INIT] Creating uploads directory: {self.upload_dir}")
+                os.makedirs(self.upload_dir, exist_ok=True)
             
             # List current contents for debugging
             try:
-                contents = os.listdir(self.storage_path)
-                logger.info(f"[STORAGE INIT] Directory contents ({len(contents)} files): {contents[:10]}...")
+                contents = os.listdir(self.upload_dir)
+                logger.info(f"[STORAGE INIT] Upload directory contents ({len(contents)} files): {contents[:10]}...")
             except Exception as e:
-                logger.warning(f"[STORAGE INIT] Could not list directory contents: {e}")
+                logger.warning(f"[STORAGE INIT] Could not list upload directory contents: {e}")
             
-            # Test write permissions
-            test_file = os.path.join(self.storage_path, ".write_test")
+            # Test write permissions in the uploads directory
+            test_file = os.path.join(self.upload_dir, ".write_test")
             with open(test_file, 'w') as f:
                 f.write("test")
             os.unlink(test_file)
             
-            logger.info(f"[STORAGE INIT] Storage service initialized successfully at {self.storage_path}")
+            logger.info(f"[STORAGE INIT] Storage service initialized successfully")
+            logger.info(f"[STORAGE INIT] Mount point: {self.storage_path}")
+            logger.info(f"[STORAGE INIT] Upload directory: {self.upload_dir}")
+            
         except Exception as e:
-            logger.error(f"[STORAGE INIT] Storage path {self.storage_path} is not accessible: {e}")
-            raise RuntimeError(f"Cannot initialize storage at {self.storage_path}: {e}")
+            logger.error(f"[STORAGE INIT] Cannot write to storage path: {e}")
+            raise RuntimeError(f"Storage path is not writable: {e}")
     
     async def save_upload(self, project_id: str, content: bytes) -> str:
         """Save uploaded file to persistent storage"""
-        file_path = os.path.join(self.storage_path, f"{project_id}.pdf")
+        file_path = os.path.join(self.upload_dir, f"{project_id}.pdf")
         
         logger.info(f"[STORAGE SAVE] Starting save for project {project_id}")
         logger.info(f"[STORAGE SAVE] RENDER_DISK_PATH={self.storage_path}")
@@ -58,7 +77,7 @@ class StorageService:
         try:
             # List directory contents before save
             try:
-                contents = os.listdir(self.storage_path)
+                contents = os.listdir(self.upload_dir)
                 logger.info(f"[STORAGE SAVE] Pre-save directory contents ({len(contents)} files): {contents[:10]}...")
             except Exception as e:
                 logger.warning(f"[STORAGE SAVE] Could not list directory: {e}")
@@ -80,7 +99,7 @@ class StorageService:
             
             # List directory contents after save
             try:
-                contents = os.listdir(self.storage_path)
+                contents = os.listdir(self.upload_dir)
                 logger.info(f"[STORAGE SAVE] Post-save directory contents ({len(contents)} files): {contents[:10]}...")
             except Exception as e:
                 logger.warning(f"[STORAGE SAVE] Could not list directory: {e}")
@@ -103,7 +122,7 @@ class StorageService:
     
     def cleanup(self, project_id: str):
         """Remove processed file - ONLY call after all processing complete"""
-        file_path = os.path.join(self.storage_path, f"{project_id}.pdf")
+        file_path = os.path.join(self.upload_dir, f"{project_id}.pdf")
         try:
             if os.path.exists(file_path):
                 # Log detailed cleanup info
@@ -124,7 +143,7 @@ class StorageService:
     
     def get_file_path(self, project_id: str) -> str:
         """Get the file path for a project"""
-        return os.path.join(self.storage_path, f"{project_id}.pdf")
+        return os.path.join(self.upload_dir, f"{project_id}.pdf")
     
     def file_exists(self, project_id: str) -> bool:
         """Check if file exists for a project"""
