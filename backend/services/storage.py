@@ -6,6 +6,7 @@ import os
 import aiofiles
 from typing import Optional
 import logging
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -30,16 +31,24 @@ class StorageService:
             raise
     
     def cleanup(self, project_id: str):
-        """Remove processed file"""
+        """Remove processed file - ONLY call after all processing complete"""
         file_path = os.path.join(self.storage_path, f"{project_id}.pdf")
         try:
             if os.path.exists(file_path):
+                # Log detailed cleanup info
+                logger.info(f"[CLEANUP] Starting cleanup for project {project_id}")
+                logger.info(f"[CLEANUP] File path: {file_path}")
+                logger.info(f"[CLEANUP] File size: {os.path.getsize(file_path)} bytes")
+                logger.info(f"[CLEANUP] Caller stack trace:")
+                for line in traceback.format_stack()[:-1]:
+                    logger.debug(f"[CLEANUP]   {line.strip()}")
+                
                 os.unlink(file_path)
-                logger.info(f"Cleaned up file for project {project_id}")
+                logger.info(f"[CLEANUP] Successfully cleaned up file for project {project_id}")
             else:
-                logger.warning(f"File not found for cleanup: {file_path}")
+                logger.warning(f"[CLEANUP] File not found for cleanup: {file_path}")
         except Exception as e:
-            logger.error(f"Failed to cleanup file for project {project_id}: {e}")
+            logger.error(f"[CLEANUP] Failed to cleanup file for project {project_id}: {e}")
             # Don't raise - cleanup failures shouldn't break the flow
     
     def get_file_path(self, project_id: str) -> str:

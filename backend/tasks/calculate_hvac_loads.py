@@ -55,7 +55,7 @@ MAX_PROCESSING_TIME = 300   # 5 minutes max as requested
 )
 def calculate_hvac_loads(
     project_id: str,
-    file_content: bytes,
+    file_path: str,  # Changed from file_content to file_path
     filename: str, 
     email: str,
     zip_code: str,
@@ -67,7 +67,7 @@ def calculate_hvac_loads(
     
     Args:
         project_id: Unique project identifier
-        file_content: PDF file bytes
+        file_path: Path to PDF file on disk
         filename: Original filename for reference
         email: User email for notifications/logging
         zip_code: Project location for climate data
@@ -118,25 +118,31 @@ def calculate_hvac_loads(
         except Exception as e:
             logger.exception(f"Error updating progress for {project_id}: {e}")
     
-    temp_file_path = None
+    # CRITICAL: Use the file from disk, don't create temp files
+    logger.info(f"Using PDF file from disk: {file_path}")
     
     try:
         # Stage 1: File validation and setup
         update_progress_sync("initializing", 5, "Validating PDF file")
         
+        # Verify file exists and is accessible
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"PDF file not found at {file_path}")
+        
+        if not os.access(file_path, os.R_OK):
+            raise PermissionError(f"Cannot read PDF file at {file_path}")
+        
         # Validate file size
-        file_size_mb = len(file_content) / (1024 * 1024)
+        file_size = os.path.getsize(file_path)
+        file_size_mb = file_size / (1024 * 1024)
         if file_size_mb > MAX_PDF_SIZE_MB:
             raise ValueError(f"PDF file too large: {file_size_mb:.1f}MB (max: {MAX_PDF_SIZE_MB}MB)")
         
-        # Save to temporary file for processing
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
-            temp_file.write(file_content)
-            temp_file_path = temp_file.name
-        
-        # Quick PDF validation
-        if not file_content.startswith(b'%PDF'):
-            raise ValueError("Invalid PDF file format")
+        # Quick PDF validation by reading header
+        with open(file_path, 'rb') as f:
+            header = f.read(4)
+            if header != b'%PDF':
+                raise ValueError("Invalid PDF file format")
             
         # Validate climate data availability
         climate_data = get_climate_data(zip_code)
@@ -151,11 +157,12 @@ def calculate_hvac_loads(
         
         try:
             logger.info(f"Starting JSON-first blueprint parsing for {project_id}")
-            logger.info(f"PDF file: {temp_file_path}, size: {len(file_content)} bytes")
+            logger.info(f"PDF file: {file_path}, size: {file_size} bytes")
             
             # Use the new blueprint parser service for complete PDF to JSON conversion
+            # CRITICAL: Use the file path from disk, not temp file
             blueprint_schema = parse_blueprint_to_json(
-                pdf_path=temp_file_path,
+                pdf_path=file_path,
                 filename=filename,
                 zip_code=zip_code,
                 project_id=project_id
@@ -222,13 +229,20 @@ def calculate_hvac_loads(
         
         envelope_data = None
         try:
-            # Extract full text for envelope analysis
-            import fitz
-            pdf_doc = fitz.open(temp_file_path)
-            full_text = ""
-            for page in pdf_doc:
-                full_text += page.get_text()
-            pdf_doc.close()
+            # Extract full text for envelope analysis using thread-safe operation
+            from services.pdf_thread_manager import safe_pymupdf_operation
+            
+            def extract_text_for_envelope(doc):
+                full_text = ""
+                for page in doc:
+                    full_text += page.get_text()
+                return full_text
+            
+            full_text = safe_pymupdf_operation(
+                pdf_path=file_path,
+                operation_func=extract_text_for_envelope,
+                operation_name="envelope_text_extraction"
+            )
             
             # Run envelope extraction with timeout
             loop = asyncio.new_event_loop()
@@ -357,13 +371,8 @@ def calculate_hvac_loads(
         # Stage 8: Store results and complete
         update_progress_sync("completed", 100, "Calculation completed successfully")
         
-        # Update project with final results
-        job_service.sync_update_project(project_id, {
-            'status': 'completed',
-            'result': final_results,
-            'progress_percent': 100,
-            'current_stage': 'completed'
-        })
+        # Update project with final results and cleanup files
+        job_service.sync_set_project_completed(project_id, final_results)
         
         logger.info(f"HVAC calculation completed successfully for {project_id}")
         return final_results
@@ -384,13 +393,8 @@ def calculate_hvac_loads(
             'total_processing_time': time.time() - calculation_start_time
         }
         
-        # Update project with failure status
-        job_service.sync_update_project(project_id, {
-            'status': 'failed',
-            'error': f"{error_type}: {error_message[:500]}",  # Truncate long errors
-            'progress_percent': 0,
-            'current_stage': 'failed'
-        })
+        # Update project with failure status and cleanup files
+        job_service.sync_set_project_failed(project_id, f"{error_type}: {error_message[:500]}")
         
         # Try to save audit data even on failure
         try:
@@ -413,13 +417,10 @@ def calculate_hvac_loads(
         raise
         
     finally:
-        # Cleanup temporary files
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.unlink(temp_file_path)
-                logger.debug(f"Cleaned up temporary file: {temp_file_path}")
-            except Exception as cleanup_error:
-                logger.warning(f"Failed to cleanup temporary file {temp_file_path}: {cleanup_error}")
+        # CRITICAL: Do NOT delete the file here - it's managed by storage service
+        # The file should only be deleted after ALL processing is complete
+        # and results are stored in the database
+        logger.info(f"Completed processing for {project_id}, file preserved at {file_path}")
 
 
 @celery_app.task

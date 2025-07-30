@@ -267,7 +267,7 @@ class JobService:
         pdf_report_path: Optional[str] = None,
         session: Optional[AsyncSession] = None
     ) -> bool:
-        """Mark project as completed with results"""
+        """Mark project as completed with results and cleanup files"""
         updates = {
             "status": JobStatus.COMPLETED,
             "result": result
@@ -276,7 +276,18 @@ class JobService:
         if pdf_report_path:
             updates["pdf_report_path"] = pdf_report_path
         
-        return await JobService.update_project(project_id, updates, session)
+        success = await JobService.update_project(project_id, updates, session)
+        
+        # Cleanup uploaded file after successful completion
+        if success:
+            try:
+                from services.storage import storage_service
+                storage_service.cleanup(project_id)
+                logger.info(f"Cleaned up files for completed project {project_id}")
+            except Exception as e:
+                logger.error(f"Failed to cleanup files for project {project_id}: {e}")
+        
+        return success
     
     @staticmethod
     async def set_project_failed(
@@ -284,12 +295,73 @@ class JobService:
         error: str,
         session: Optional[AsyncSession] = None
     ) -> bool:
-        """Mark project as failed with error message"""
-        return await JobService.update_project(
+        """Mark project as failed with error message and cleanup files"""
+        success = await JobService.update_project(
             project_id,
             {"status": JobStatus.FAILED, "error": error},
             session
         )
+        
+        # Cleanup uploaded file after failure
+        if success:
+            try:
+                from services.storage import storage_service
+                storage_service.cleanup(project_id)
+                logger.info(f"Cleaned up files for failed project {project_id}")
+            except Exception as e:
+                logger.error(f"Failed to cleanup files for project {project_id}: {e}")
+        
+        return success
+    
+    @staticmethod  
+    def sync_set_project_completed(
+        project_id: str,
+        result: Dict[str, Any],
+        pdf_report_path: Optional[str] = None
+    ) -> bool:
+        """Sync version of set_project_completed for Celery workers"""
+        updates = {
+            "status": JobStatus.COMPLETED,
+            "result": result
+        }
+        
+        if pdf_report_path:
+            updates["pdf_report_path"] = pdf_report_path
+        
+        success = JobService.sync_update_project(project_id, updates)
+        
+        # Cleanup uploaded file after successful completion
+        if success:
+            try:
+                from services.storage import storage_service
+                storage_service.cleanup(project_id)
+                logger.info(f"Cleaned up files for completed project {project_id}")
+            except Exception as e:
+                logger.error(f"Failed to cleanup files for project {project_id}: {e}")
+        
+        return success
+    
+    @staticmethod
+    def sync_set_project_failed(
+        project_id: str,
+        error: str
+    ) -> bool:
+        """Sync version of set_project_failed for Celery workers"""
+        success = JobService.sync_update_project(
+            project_id,
+            {"status": JobStatus.FAILED, "error": error}
+        )
+        
+        # Cleanup uploaded file after failure
+        if success:
+            try:
+                from services.storage import storage_service
+                storage_service.cleanup(project_id)
+                logger.info(f"Cleaned up files for failed project {project_id}")
+            except Exception as e:
+                logger.error(f"Failed to cleanup files for project {project_id}: {e}")
+        
+        return success
     
     # Legacy assumption handling methods removed - all parameters now collected upfront
 

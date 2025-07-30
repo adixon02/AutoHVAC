@@ -75,8 +75,14 @@ class PDFThreadManager:
         
         for attempt in range(max_retries + 1):
             try:
-                logger.debug(f"[Thread {thread_name}:{thread_id}] Executing {operation_name} (attempt {attempt + 1}/{max_retries + 1})")
-                return operation_func()
+                logger.info(f"[Thread {thread_name}:{thread_id}] Executing {operation_name} (attempt {attempt + 1}/{max_retries + 1})")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Stack trace for {operation_name}:")
+                for line in traceback.format_stack()[:-1]:
+                    logger.debug(f"[Thread {thread_name}:{thread_id}]   {line.strip()}")
+                
+                result = operation_func()
+                logger.info(f"[Thread {thread_name}:{thread_id}] Successfully completed {operation_name}")
+                return result
                 
             except Exception as e:
                 error_str = str(e).lower()

@@ -258,74 +258,96 @@ async def upload_blueprint(
             # Read file content
             file_content = await file.read()
             
-            # Save using storage service
+            # CRITICAL: Save file to disk FIRST, before any validation
             temp_path = await storage_service.save_upload(project_id, file_content)
             logger.info(f"🔍 Saved PDF to {temp_path}, size={len(file_content)} bytes")
             
             # Validate file exists and has content
             if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
+                # Mark job as failed instead of cleaning up immediately
+                await job_service.set_project_failed(project_id, "File is empty", session)
                 raise HTTPException(status_code=400, detail="File is empty")
             
-            # Enhanced PDF validation for multi-page support
+            # Enhanced PDF validation using saved file (NOT memory bytes)
             if file_ext == '.pdf':
+                # Basic format check on bytes
                 if file_content[:4] != b'%PDF':
-                    storage_service.cleanup(project_id)
+                    await job_service.set_project_failed(project_id, "Invalid PDF file", session)
                     raise HTTPException(status_code=400, detail="Invalid PDF file")
                 
-                # Quick complexity check using PyMuPDF
-                try:
+                # Use PDF thread manager for safe validation from disk
+                from services.pdf_thread_manager import pdf_thread_manager
+                
+                def validate_pdf_from_disk(pdf_path: str):
+                    """Validate PDF within same thread context"""
                     import fitz
-                    doc = fitz.open(stream=file_content, filetype="pdf")
+                    error_msg = None
+                    page_count = 0
                     
-                    if doc.is_encrypted:
-                        doc.close()
-                        storage_service.cleanup(project_id)
-                        raise HTTPException(
-                            status_code=400, 
-                            detail="PDF is password protected. Please upload an unprotected version."
-                        )
-                    
-                    page_count = len(doc)
-                    if page_count == 0:
-                        doc.close()
-                        storage_service.cleanup(project_id)
-                        raise HTTPException(status_code=400, detail="PDF contains no pages")
-                    
-                    if page_count > 100:
-                        doc.close()
-                        storage_service.cleanup(project_id)
-                        raise HTTPException(
-                            status_code=400, 
-                            detail=f"PDF has {page_count} pages. Please limit to 100 pages or fewer for processing."
-                        )
-                    
-                    # Quick complexity check on first few pages
-                    total_elements = 0
-                    for page_num in range(min(3, page_count)):
+                    try:
+                        # Open from disk, not memory
+                        doc = fitz.open(pdf_path)
+                        
                         try:
-                            page = doc[page_num]
-                            drawings = page.get_drawings()
-                            total_elements += len(drawings)
+                            if doc.is_encrypted:
+                                error_msg = "PDF is password protected. Please upload an unprotected version."
+                                return False, error_msg, 0
                             
-                            if len(drawings) > 20000:
-                                doc.close()
-                                storage_service.cleanup(project_id)
-                                raise HTTPException(
-                                    status_code=400,
-                                    detail=f"Blueprint is too complex to process (page {page_num + 1} has {len(drawings)} elements). Please try a simplified version or contact support."
-                                )
-                        except Exception:
-                            # If we can't check complexity, continue
-                            break
+                            page_count = len(doc)
+                            if page_count == 0:
+                                error_msg = "PDF contains no pages"
+                                return False, error_msg, 0
+                            
+                            if page_count > 100:
+                                error_msg = f"PDF has {page_count} pages. Please limit to 100 pages or fewer for processing."
+                                return False, error_msg, page_count
+                            
+                            # Quick complexity check on first few pages
+                            total_elements = 0
+                            for page_num in range(min(3, page_count)):
+                                try:
+                                    page = doc[page_num]
+                                    drawings = page.get_drawings()
+                                    total_elements += len(drawings)
+                                    
+                                    if len(drawings) > 20000:
+                                        error_msg = f"Blueprint is too complex to process (page {page_num + 1} has {len(drawings)} elements). Please try a simplified version or contact support."
+                                        return False, error_msg, page_count
+                                except Exception:
+                                    # If we can't check complexity, continue
+                                    break
+                            
+                            logger.info(f"PDF validation passed: {page_count} pages, estimated {total_elements} elements in first 3 pages")
+                            return True, None, page_count
+                            
+                        finally:
+                            # ALWAYS close the document
+                            doc.close()
+                            
+                    except Exception as e:
+                        # Store error as string BEFORE any cleanup
+                        error_msg = f"Cannot process this PDF file. It may be corrupted or in an unsupported format: {str(e)[:100]}"
+                        return False, error_msg, 0
+                
+                try:
+                    # Validate using thread-safe operation
+                    is_valid, error_message, pages = pdf_thread_manager.process_pdf_with_retry(
+                        pdf_path=temp_path,
+                        processor_func=validate_pdf_from_disk,
+                        operation_name="pdf_validation",
+                        max_retries=2
+                    )
                     
-                    doc.close()
-                    logger.info(f"PDF validation passed: {page_count} pages, estimated {total_elements} elements in first 3 pages")
-                    
+                    if not is_valid:
+                        await job_service.set_project_failed(project_id, error_message, session)
+                        raise HTTPException(status_code=400, detail=error_message)
+                        
                 except Exception as e:
-                    storage_service.cleanup(project_id)
+                    await job_service.set_project_failed(project_id, "Failed to validate PDF file", session)
+                    # Don't reference the exception object in error message
                     raise HTTPException(
                         status_code=400, 
-                        detail=f"Cannot process this PDF file. It may be corrupted or in an unsupported format: {str(e)[:100]}"
+                        detail="Failed to validate PDF file. Please ensure it's a valid PDF document."
                     )
             
             logger.error("🔍 Step 8: Starting background job processor")
@@ -335,9 +357,10 @@ async def upload_blueprint(
             
             if USE_CELERY:
                 # Start comprehensive HVAC load calculation task
+                # CRITICAL: Pass file path, not content, to prevent threading issues
                 calculate_hvac_loads.delay(
                     project_id=project_id, 
-                    file_content=file_content, 
+                    file_path=temp_path,  # Pass path instead of content
                     filename=file.filename, 
                     email=email, 
                     zip_code=zip_code,
