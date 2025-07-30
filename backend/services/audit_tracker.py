@@ -309,7 +309,7 @@ class AuditTracker:
         # Check for unrealistic loads
         heating_total = calculation_result.get('heating_total', 0)
         cooling_total = calculation_result.get('cooling_total', 0)
-        total_sqft = blueprint_schema.sqft_total
+        total_sqft = blueprint_schema.sqft_total if blueprint_schema else 0
         
         if total_sqft > 0:
             heating_per_sqft = heating_total / total_sqft

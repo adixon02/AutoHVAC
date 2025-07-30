@@ -557,10 +557,12 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     # Get climate zone factors
     climate_factors = get_climate_zone_factors(climate_data['climate_zone'])
     
-    # Get construction values if vintage specified
-    construction_values = None
+    # Get construction values - use default if vintage not specified
     if construction_vintage:
         construction_values = get_construction_vintage_values(construction_vintage)
+    else:
+        # Default to 1980-2000 construction standards if no vintage specified
+        construction_values = get_construction_vintage_values('1980-2000')
     
     # For backward compatibility, create climate dict in old format
     climate = {

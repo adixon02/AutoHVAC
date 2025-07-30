@@ -354,6 +354,7 @@ def calculate_hvac_loads(
                 duct_config=duct_config,
                 heating_fuel=heating_fuel,
                 climate_data=climate_data,
+                construction_vintage='1980-2000',  # Default construction vintage
                 envelope_data=envelope_data,
                 create_audit=True,
                 user_id=email
