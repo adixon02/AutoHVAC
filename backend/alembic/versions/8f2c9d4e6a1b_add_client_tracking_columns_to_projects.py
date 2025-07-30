@@ -19,10 +19,25 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Add client tracking columns to projects table
-    op.add_column('projects', sa.Column('client_ip', sa.VARCHAR(), nullable=True))
-    op.add_column('projects', sa.Column('user_agent', sa.VARCHAR(), nullable=True))
-    op.add_column('projects', sa.Column('referrer', sa.VARCHAR(), nullable=True))
+    # Add client tracking columns to projects table (check if they exist first)
+    conn = op.get_bind()
+    
+    # Check if columns already exist
+    result = conn.execute(sa.text("""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'projects' 
+        AND column_name IN ('client_ip', 'user_agent', 'referrer')
+    """))
+    existing_columns = {row[0] for row in result}
+    
+    # Only add columns that don't exist
+    if 'client_ip' not in existing_columns:
+        op.add_column('projects', sa.Column('client_ip', sa.VARCHAR(), nullable=True))
+    if 'user_agent' not in existing_columns:
+        op.add_column('projects', sa.Column('user_agent', sa.VARCHAR(), nullable=True))
+    if 'referrer' not in existing_columns:
+        op.add_column('projects', sa.Column('referrer', sa.VARCHAR(), nullable=True))
 
 
 def downgrade() -> None:
