@@ -97,8 +97,17 @@ def calculate_hvac_loads(
         'heating_fuel': heating_fuel,
         'start_time': calculation_start_time,
         'stages_completed': [],
-        'errors_encountered': []
+        'errors_encountered': [],
+        'page_analysis': None  # Initialize to prevent KeyError in error paths
     }
+    
+    # Initialize variables that might be referenced in error paths
+    climate_data = None
+    blueprint_schema = None
+    parsing_metadata = None
+    selected_page_analysis = None
+    manualj_results = None
+    envelope_data = None
     
     def update_progress_sync(stage: str, percent: int, message: str = None):
         """Update job progress synchronously for Celery worker"""
@@ -182,9 +191,13 @@ def calculate_hvac_loads(
                 raise ValueError("Invalid PDF file format")
             
         # Validate climate data availability
-        climate_data = get_climate_data(zip_code)
-        if not climate_data.get('found', False):
-            logger.warning(f"Climate data not found for zip {zip_code}, using defaults")
+        try:
+            climate_data = get_climate_data(zip_code)
+            if not climate_data.get('found', False):
+                logger.warning(f"Climate data not found for zip {zip_code}, using defaults")
+        except Exception as e:
+            logger.warning(f"Error getting climate data for zip {zip_code}: {e}, using defaults")
+            climate_data = {'found': False, 'error': str(e)}
         
         audit_data['climate_data'] = climate_data
         logger.info(f"HVAC calculation started for {project_id} - {filename} - {zip_code}")
@@ -197,6 +210,10 @@ def calculate_hvac_loads(
         logger.info(f"[METRICS] Starting blueprint parsing for {project_id}")
         logger.info(f"[METRICS] PDF file: {file_path}, size: {file_size_mb:.1f}MB")
         logger.info(f"[METRICS] User: {email}, Zip: {zip_code}")
+        
+        # Initialize variables to prevent UnboundLocalError
+        parsing_metadata = None
+        parsing_duration = 0
         
         try:
             logger.info(f"Starting JSON-first blueprint parsing for {project_id}")
@@ -215,7 +232,6 @@ def calculate_hvac_loads(
             parsing_end_time = time.time()
             parsing_duration = parsing_end_time - parsing_start_time
             logger.info(f"[METRICS] Blueprint parsing completed in {parsing_duration:.2f}s")
-            logger.info(f"[METRICS] Parsing path used: {parsing_metadata.ai_status.value if hasattr(parsing_metadata, 'ai_status') else 'unknown'}")
             
             # Store the comprehensive JSON in the database as canonical representation
             job_service.sync_update_project(project_id, {
@@ -224,33 +240,38 @@ def calculate_hvac_loads(
             
             # Extract metadata for audit
             parsing_metadata = blueprint_schema.parsing_metadata
+            
+            # Now log the parsing path after parsing_metadata is assigned
+            logger.info(f"[METRICS] Parsing path used: {parsing_metadata.ai_status.value if hasattr(parsing_metadata, 'ai_status') else 'unknown'}")
             audit_data['blueprint_schema'] = blueprint_schema.dict()
             audit_data['rooms_identified'] = len(blueprint_schema.rooms)
             audit_data['total_area'] = blueprint_schema.sqft_total
             audit_data['parsing_metadata'] = parsing_metadata.dict()
             
             # Extract page analysis info
-            if parsing_metadata.page_analyses:
+            if parsing_metadata and hasattr(parsing_metadata, 'page_analyses') and parsing_metadata.page_analyses:
                 selected_page_analysis = next(
                     (p for p in parsing_metadata.page_analyses if p.selected), 
-                    parsing_metadata.page_analyses[0]
+                    parsing_metadata.page_analyses[0] if parsing_metadata.page_analyses else None
                 )
-                audit_data['page_analysis'] = {
-                    'selected_page': parsing_metadata.selected_page,
-                    'total_pages_analyzed': len(parsing_metadata.page_analyses),
-                    'best_score': selected_page_analysis.score,
-                    'page_details': [p.dict() for p in parsing_metadata.page_analyses]
-                }
+                if selected_page_analysis:
+                    audit_data['page_analysis'] = {
+                        'selected_page': parsing_metadata.selected_page,
+                        'total_pages_analyzed': len(parsing_metadata.page_analyses),
+                        'best_score': selected_page_analysis.score,
+                        'page_details': [p.dict() for p in parsing_metadata.page_analyses]
+                    }
             
             # Report parsing results
             logger.info(f"Blueprint parsing completed successfully:")
-            logger.info(f"  - Selected page: {parsing_metadata.selected_page}")
+            if parsing_metadata:
+                logger.info(f"  - Selected page: {getattr(parsing_metadata, 'selected_page', 'unknown')}")
+                logger.info(f"  - Overall confidence: {getattr(parsing_metadata, 'overall_confidence', 0.0):.2f}")
+                logger.info(f"  - Processing time: {getattr(parsing_metadata, 'processing_time_seconds', 0.0):.2f}s")
             logger.info(f"  - Rooms identified: {len(blueprint_schema.rooms)}")
             logger.info(f"  - Total area: {blueprint_schema.sqft_total} sqft")
-            logger.info(f"  - Overall confidence: {parsing_metadata.overall_confidence:.2f}")
-            logger.info(f"  - Processing time: {parsing_metadata.processing_time_seconds:.2f}s")
             
-            update_progress_sync("blueprint_parsed", 50, f"Successfully parsed {len(blueprint_schema.rooms)} rooms from page {parsing_metadata.selected_page}")
+            update_progress_sync("blueprint_parsed", 50, f"Successfully parsed {len(blueprint_schema.rooms)} rooms from page {getattr(parsing_metadata, 'selected_page', 1) if parsing_metadata else 1}")
             
         except BlueprintParsingError as e:
             error_msg = f"Blueprint parsing failed: {str(e)}"
@@ -258,7 +279,8 @@ def calculate_hvac_loads(
             audit_data['errors_encountered'].append({
                 'stage': 'blueprint_parsing', 
                 'error': error_msg, 
-                'error_type': 'BlueprintParsingError'
+                'error_type': 'BlueprintParsingError',
+                'parsing_metadata': parsing_metadata.dict() if parsing_metadata else None
             })
             update_progress_sync("failed", 0, f"Blueprint parsing failed: {str(e)[:100]}")
             raise ValueError(error_msg)
@@ -268,7 +290,8 @@ def calculate_hvac_loads(
             audit_data['errors_encountered'].append({
                 'stage': 'blueprint_parsing', 
                 'error': error_msg, 
-                'error_type': type(e).__name__
+                'error_type': type(e).__name__,
+                'parsing_metadata': parsing_metadata.dict() if parsing_metadata else None
             })
             update_progress_sync("failed", 0, f"Blueprint parsing failed: {str(e)[:100]}")
             raise ValueError(error_msg)
@@ -345,9 +368,9 @@ def calculate_hvac_loads(
             audit_data['calculation_results'] = {
                 'heating_total': manualj_results['heating_total'],
                 'cooling_total': manualj_results['cooling_total'],
-                'climate_zone': manualj_results['climate_zone'],
-                'calculation_method': manualj_results['design_parameters'].get('calculation_method', 'ACCA Manual J'),
-                'zones_calculated': len(manualj_results['zones'])
+                'climate_zone': manualj_results.get('climate_zone', 'unknown'),
+                'calculation_method': manualj_results.get('design_parameters', {}).get('calculation_method', 'ACCA Manual J'),
+                'zones_calculated': len(manualj_results.get('zones', []))
             }
             
             logger.info(f"Manual J calculations completed: {manualj_results['heating_total']} BTU/h heating, {manualj_results['cooling_total']} BTU/h cooling")
@@ -386,16 +409,16 @@ def calculate_hvac_loads(
                 'rooms_identified': len(blueprint_schema.rooms),
                 'total_area': blueprint_schema.sqft_total,
                 'stories': blueprint_schema.stories,
-                'geometry_confidence': 'high' if geometry_summary['lines_found'] > 50 else 'medium',
-                'selected_page': selected_page_number,
-                'page_selection_score': page_analysis_summary.get('best_score', 0.0) if page_analysis_summary else 0.0,
-                'total_pages_analyzed': page_analysis_summary.get('total_pages_analyzed', 1) if page_analysis_summary else 1
+                'geometry_confidence': 'high' if parsing_metadata and hasattr(parsing_metadata, 'overall_confidence') and parsing_metadata.overall_confidence > 0.8 else 'medium',
+                'selected_page': parsing_metadata.selected_page if parsing_metadata else 1,
+                'page_selection_score': selected_page_analysis.score if 'selected_page_analysis' in locals() else 0.0,
+                'total_pages_analyzed': len(parsing_metadata.page_analyses) if parsing_metadata and hasattr(parsing_metadata, 'page_analyses') else 1
             },
             
             'processing_stages': audit_data['stages_completed'],
             'data_sources': {
                 'climate_data_source': 'ASHRAE/IECC',
-                'construction_assumptions': manualj_results['design_parameters'].get('construction_vintage', 'estimated'),
+                'construction_assumptions': manualj_results.get('design_parameters', {}).get('construction_vintage', 'estimated') if manualj_results else 'estimated',
                 'envelope_data_extracted': envelope_data is not None
             }
         }
@@ -411,7 +434,7 @@ def calculate_hvac_loads(
                 duct_config=duct_config,
                 heating_fuel=heating_fuel,
                 processing_metadata=audit_data,
-                page_selection_data=page_analysis_summary
+                page_selection_data=audit_data.get('page_analysis')
             )
             final_results['comprehensive_audit_id'] = audit_id
         except Exception as e:
@@ -468,7 +491,7 @@ def calculate_hvac_loads(
                 heating_fuel=heating_fuel,
                 processing_metadata=audit_data,
                 error_details={'type': error_type, 'message': error_message},
-                page_selection_data=page_analysis_summary if 'page_analysis_summary' in locals() else None
+                page_selection_data=audit_data.get('page_analysis')
             )
         except Exception as audit_error:
             logger.warning(f"Failed to save error audit data: {audit_error}")
