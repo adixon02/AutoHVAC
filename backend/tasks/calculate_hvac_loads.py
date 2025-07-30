@@ -22,6 +22,8 @@ import os
 import tempfile
 import asyncio
 import logging
+import hashlib
+import traceback
 from typing import Dict, Any, Optional
 
 from services.job_service import job_service
@@ -120,6 +122,39 @@ def calculate_hvac_loads(
     
     # CRITICAL: Use the file from disk, don't create temp files
     logger.info(f"Using PDF file from disk: {file_path}")
+    
+    # Log file state at the start of Celery task
+    file_info = {
+        "path": file_path,
+        "exists": os.path.exists(file_path)
+    }
+    
+    if file_info["exists"]:
+        try:
+            file_info["size"] = os.path.getsize(file_path)
+            with open(file_path, 'rb') as f:
+                first_bytes = f.read(16)
+                file_info["first_16_bytes"] = first_bytes.hex()
+                f.seek(0)
+                chunk = f.read(65536)
+                file_info["sha1_first_64k"] = hashlib.sha1(chunk).hexdigest()
+        except Exception as e:
+            file_info["read_error"] = f"{type(e).__name__}: {str(e)}"
+            logger.error(f"Failed to read file info: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    logger.info(f"[CELERY START] File check for {project_id}: {file_info}")
+    
+    if not file_info["exists"]:
+        error_msg = f"PDF file not found at start of Celery task: {file_path}"
+        logger.error(error_msg)
+        audit_data['errors_encountered'].append({
+            'stage': 'file_check',
+            'error': error_msg,
+            'timestamp': time.time()
+        })
+        job_service.sync_set_project_failed(project_id, error_msg)
+        raise FileNotFoundError(error_msg)
     
     try:
         # Stage 1: File validation and setup

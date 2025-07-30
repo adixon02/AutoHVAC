@@ -10,6 +10,9 @@ from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
+# Debug flag to disable cleanup on failure
+CLEANUP_ON_FAILURE = False  # Set to True in production
+
 class JobService:
     """PostgreSQL-backed job service replacing InMemoryJobStore"""
     
@@ -302,14 +305,16 @@ class JobService:
             session
         )
         
-        # Cleanup uploaded file after failure
-        if success:
+        # Cleanup uploaded file after failure (disabled in debug mode)
+        if success and CLEANUP_ON_FAILURE:
             try:
                 from services.storage import storage_service
                 storage_service.cleanup(project_id)
                 logger.info(f"Cleaned up files for failed project {project_id}")
             except Exception as e:
                 logger.error(f"Failed to cleanup files for project {project_id}: {e}")
+        elif success and not CLEANUP_ON_FAILURE:
+            logger.warning(f"⚠️ CLEANUP DISABLED: Files preserved for failed project {project_id} for debugging")
         
         return success
     
@@ -352,14 +357,16 @@ class JobService:
             {"status": JobStatus.FAILED, "error": error}
         )
         
-        # Cleanup uploaded file after failure
-        if success:
+        # Cleanup uploaded file after failure (disabled in debug mode)
+        if success and CLEANUP_ON_FAILURE:
             try:
                 from services.storage import storage_service
                 storage_service.cleanup(project_id)
                 logger.info(f"Cleaned up files for failed project {project_id}")
             except Exception as e:
                 logger.error(f"Failed to cleanup files for project {project_id}: {e}")
+        elif success and not CLEANUP_ON_FAILURE:
+            logger.warning(f"⚠️ CLEANUP DISABLED: Files preserved for failed project {project_id} for debugging")
         
         return success
     

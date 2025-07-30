@@ -6,6 +6,9 @@ import stripe
 import logging
 import mimetypes
 import os
+import hashlib
+import traceback
+import sys
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_async_session
@@ -29,7 +32,70 @@ import os
 # Use Celery for production job processing
 USE_CELERY = True
 
+# Debug mode for detailed error responses
+DEBUG_EXCEPTIONS = True  # Set to False in production
+
 router = APIRouter()
+
+def get_file_info(file_path: str, project_id: str = None) -> dict:
+    """Get detailed file information for debugging"""
+    info = {
+        "path": file_path,
+        "exists": os.path.exists(file_path),
+        "project_id": project_id
+    }
+    
+    if info["exists"]:
+        try:
+            info["size"] = os.path.getsize(file_path)
+            with open(file_path, 'rb') as f:
+                first_bytes = f.read(16)
+                info["first_16_bytes"] = first_bytes.hex()
+                f.seek(0)
+                # Hash first 64KB
+                chunk = f.read(65536)
+                info["sha1_first_64k"] = hashlib.sha1(chunk).hexdigest()
+        except Exception as e:
+            info["read_error"] = f"{type(e).__name__}: {str(e)}"
+    
+    return info
+
+def log_file_state(project_id: str, step: str, file_path: str):
+    """Log detailed file state at each step"""
+    info = get_file_info(file_path, project_id)
+    if info["exists"]:
+        logger.info(f"[FILE CHECK - {step}] {project_id}: exists=True, size={info.get('size')}, path={file_path}, first_16_bytes={info.get('first_16_bytes')}, sha1_first_64k={info.get('sha1_first_64k')}")
+    else:
+        logger.error(f"[FILE CHECK - {step}] {project_id}: FILE NOT FOUND at {file_path}")
+    return info
+
+def create_debug_error_response(e: Exception, context: str, project_id: str = None, file_path: str = None) -> dict:
+    """Create detailed error response for debugging"""
+    error_info = {
+        "error": "Failed to validate PDF file. Please ensure it's a valid PDF document.",
+        "type": type(e).__name__,
+        "message": str(e),
+        "context": context
+    }
+    
+    if DEBUG_EXCEPTIONS:
+        # Get the line number where the exception occurred
+        tb = traceback.extract_tb(sys.exc_info()[2])
+        if tb:
+            last_frame = tb[-1]
+            error_info["line_number"] = last_frame.lineno
+            error_info["function"] = last_frame.name
+            error_info["filename"] = last_frame.filename
+        
+        error_info["traceback"] = traceback.format_exc()
+        
+        if project_id:
+            error_info["project_id"] = project_id
+        
+        if file_path:
+            error_info["file_info"] = get_file_info(file_path, project_id)
+    
+    return error_info
 
 # All parameters now collected upfront in upload endpoint
 
@@ -342,13 +408,32 @@ async def upload_blueprint(
                         await job_service.set_project_failed(project_id, error_message, session)
                         raise HTTPException(status_code=400, detail=error_message)
                         
+                except FileNotFoundError as e:
+                    error_msg = f"PDF file not found during validation: {str(e)}"
+                    logger.error(f"FileNotFoundError during PDF validation: {error_msg}")
+                    await job_service.set_project_failed(project_id, error_msg, session)
+                    error_response = create_debug_error_response(e, "PDF validation - file not found", project_id, temp_path)
+                    raise HTTPException(status_code=400, detail=error_response)
+                except PermissionError as e:
+                    error_msg = f"Permission denied accessing PDF: {str(e)}"
+                    logger.error(f"PermissionError during PDF validation: {error_msg}")
+                    await job_service.set_project_failed(project_id, error_msg, session)
+                    error_response = create_debug_error_response(e, "PDF validation - permission denied", project_id, temp_path)
+                    raise HTTPException(status_code=400, detail=error_response)
                 except Exception as e:
-                    await job_service.set_project_failed(project_id, "Failed to validate PDF file", session)
-                    # Don't reference the exception object in error message
-                    raise HTTPException(
-                        status_code=400, 
-                        detail="Failed to validate PDF file. Please ensure it's a valid PDF document."
-                    )
+                    # Log the actual exception before masking it
+                    logger.error(f"❌ PDF validation exception: {type(e).__name__}: {str(e)}")
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    logger.error(f"File path: {temp_path}")
+                    log_file_state(project_id, "VALIDATION_EXCEPTION", temp_path)
+                    
+                    await job_service.set_project_failed(project_id, f"PDF validation failed: {type(e).__name__}: {str(e)}", session)
+                    error_response = create_debug_error_response(e, "PDF validation", project_id, temp_path)
+                    raise HTTPException(status_code=400, detail=error_response)
+            
+            # Log file state after successful validation
+            post_validation_info = log_file_state(project_id, "POST_VALIDATION", temp_path)
+            logger.info(f"✅ PDF validation completed successfully. File info: {post_validation_info}")
             
             logger.error("🔍 Step 8: Starting background job processor")
             logger.error(f"Adding background task for job {project_id}")
@@ -356,20 +441,37 @@ async def upload_blueprint(
             print(f">>> USE_CELERY = {USE_CELERY}")
             
             if USE_CELERY:
-                # Start comprehensive HVAC load calculation task
-                # CRITICAL: Pass file path, not content, to prevent threading issues
-                calculate_hvac_loads.delay(
-                    project_id=project_id, 
-                    file_path=temp_path,  # Pass path instead of content
-                    filename=file.filename, 
-                    email=email, 
-                    zip_code=zip_code,
-                    duct_config=duct_config,
-                    heating_fuel=heating_fuel
-                )
+                try:
+                    # Log file state before Celery task
+                    pre_celery_info = log_file_state(project_id, "PRE_CELERY", temp_path)
+                    logger.info(f"About to start Celery task. File info: {pre_celery_info}")
+                    
+                    # Start comprehensive HVAC load calculation task
+                    # CRITICAL: Pass file path, not content, to prevent threading issues
+                    calculate_hvac_loads.delay(
+                        project_id=project_id, 
+                        file_path=temp_path,  # Pass path instead of content
+                        filename=file.filename, 
+                        email=email, 
+                        zip_code=zip_code,
+                        duct_config=duct_config,
+                        heating_fuel=heating_fuel
+                    )
+                    
+                    # Log file state after Celery task dispatch
+                    post_celery_info = log_file_state(project_id, "POST_CELERY", temp_path)
+                    logger.info(f"Celery task dispatched. File info: {post_celery_info}")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Failed to start Celery task: {type(e).__name__}: {str(e)}")
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    error_response = create_debug_error_response(e, "Celery task dispatch", project_id, temp_path)
+                    await job_service.set_project_failed(project_id, f"Failed to start background job: {str(e)}", session)
+                    raise HTTPException(status_code=500, detail=error_response)
             else:
                 print(f">>> ERROR: USE_CELERY is False but Celery is expected")
-                raise HTTPException(status_code=500, detail="Job processing not configured correctly")
+                error_response = {"error": "Job processing not configured correctly", "USE_CELERY": USE_CELERY}
+                raise HTTPException(status_code=500, detail=error_response)
                     
             logger.error(f"Celery task started for job {project_id}")
             logger.error("🔍 Step 8 PASSED: Background job processor started")
@@ -379,10 +481,16 @@ async def upload_blueprint(
             await rate_limiter.decrement_active_jobs(email, project_id)
             raise
         except Exception as e:
-            logger.error(f"❌ Step 7/8 FAILED: File processing error: {repr(e)}")
+            logger.error(f"❌ Step 7/8 FAILED: File processing error: {type(e).__name__}: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            if 'temp_path' in locals():
+                log_file_state(project_id, "UPLOAD_EXCEPTION", temp_path)
+            
             await job_service.set_project_failed(project_id, str(e), session)
             await rate_limiter.decrement_active_jobs(email, project_id)
-            raise HTTPException(status_code=500, detail="Failed to process upload")
+            
+            error_response = create_debug_error_response(e, "File processing", project_id, temp_path if 'temp_path' in locals() else None)
+            raise HTTPException(status_code=500, detail=error_response)
         
         logger.info(f"✅ UPLOAD SUCCESS: Returning jobId {project_id} for {email}")
         return UploadResponse(
@@ -396,7 +504,8 @@ async def upload_blueprint(
         raise
     except Exception as e:
         logger.exception(f"❌ UPLOAD FATAL ERROR: {type(e).__name__}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        error_response = create_debug_error_response(e, "Upload endpoint", project_id if 'project_id' in locals() else None)
+        raise HTTPException(status_code=500, detail=error_response)
 
 # JSON Download Endpoints
 
