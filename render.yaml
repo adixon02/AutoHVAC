@@ -17,11 +17,9 @@ services:
       cd backend && pip install --only-binary=:all: -r requirements.txt
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
-    # CRITICAL: Shared persistent disk for file storage
-    # Both backend and worker MUST mount the same disk
-    disks:
-      - name: shared-storage
-        mountPath: /var/data
+    # IMPORTANT: You must manually attach the shared-storage disk to this service
+    # in the Render dashboard with mount path: /var/data
+    # This is required because Render doesn't support the disks: field for web services
     envVars:
       - key: REDIS_URL
         fromService:
