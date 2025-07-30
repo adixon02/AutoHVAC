@@ -16,10 +16,12 @@ import re
 import logging
 import traceback
 import threading
+import time
 from typing import Dict, List, Any, Tuple, Optional
 import numpy as np
 from io import BytesIO
 from .schema import RawText
+from services.pdf_thread_manager import safe_pdfplumber_operation, safe_pymupdf_operation
 
 logger = logging.getLogger(__name__)
 
@@ -43,44 +45,11 @@ class TextParser:
             r"(\d+)\s*[xX]\s*(\d+)",            # 12 x 15
         ]
     
-    def _retry_on_document_closed(self, operation_func, operation_name: str, max_retries: int = 2):
-        """
-        Retry wrapper for operations that might fail due to document closed errors
-        
-        Args:
-            operation_func: Function to execute
-            operation_name: Name of operation for logging
-            max_retries: Maximum number of retry attempts
-            
-        Returns:
-            Result of operation_func
-        """
-        thread_id = threading.get_ident()
-        thread_name = threading.current_thread().name
-        
-        for attempt in range(max_retries + 1):
-            try:
-                return operation_func()
-            except Exception as e:
-                error_str = str(e).lower()
-                if "document closed" in error_str or "seek of closed file" in error_str:
-                    logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR on attempt {attempt + 1}/{max_retries + 1} in {operation_name}: {type(e).__name__}: {str(e)}")
-                    logger.error(f"[Thread {thread_name}:{thread_id}] Call stack:\n{traceback.format_exc()}")
-                    
-                    if attempt < max_retries:
-                        logger.info(f"[Thread {thread_name}:{thread_id}] Retrying {operation_name} (attempt {attempt + 2}/{max_retries + 1})")
-                        time.sleep(0.1)  # Brief pause before retry
-                        continue
-                    else:
-                        logger.error(f"[Thread {thread_name}:{thread_id}] Max retries ({max_retries}) exceeded for {operation_name}")
-                        raise
-                else:
-                    # Not a document closed error, re-raise immediately
-                    raise
+    # Removed _retry_on_document_closed - now using thread-safe PDF manager
     
     def parse(self, pdf_path: str, page_number: int = 0) -> RawText:
         """
-        Extract text elements from architectural PDF
+        Extract text elements from architectural PDF using thread-safe operations
         
         Args:
             pdf_path: Path to PDF file
@@ -89,36 +58,31 @@ class TextParser:
         Returns:
             RawText with all extracted text elements
         """
-        import threading
         thread_id = threading.get_ident()
         thread_name = threading.current_thread().name
-        logger.info(f"[Thread {thread_name}:{thread_id}] Starting text parsing for {pdf_path}, page {page_number + 1}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Starting thread-safe text parsing for {pdf_path}, page {page_number + 1}")
         
         try:
-            # CRITICAL: Open PDF file INSIDE this thread - never pass handles between threads
-            logger.info(f"[Thread {thread_name}:{thread_id}] Opening PDF with pdfplumber: {pdf_path}")
-            with pdfplumber.open(pdf_path) as pdf:
-                logger.info(f"[Thread {thread_name}:{thread_id}] PDF opened successfully")
-                
+            # Extract words using thread-safe pdfplumber operation
+            def pdfplumber_operation(pdf):
                 if page_number >= len(pdf.pages) or page_number < 0:
                     raise ValueError(f"Page {page_number + 1} does not exist (PDF has {len(pdf.pages)} pages)")
                 
-                page = pdf.pages[page_number]  # Process specified page
+                page = pdf.pages[page_number]
                 logger.info(f"[Thread {thread_name}:{thread_id}] Processing page {page_number + 1} of {len(pdf.pages)}")
                 
-                # Extract words using pdfplumber
-                words = self._extract_words_pdfplumber(page)
-                logger.info(f"[Thread {thread_name}:{thread_id}] Extracted {len(words)} words with pdfplumber")
-                
-                logger.info(f"[Thread {thread_name}:{thread_id}] Closing pdfplumber PDF handle")
-                # PDF will be closed automatically by context manager
+                return self._extract_words_pdfplumber(page)
             
-            # Try OCR for any missed text (opens its own PDF handle in worker thread)
-            logger.info(f"[Thread {thread_name}:{thread_id}] Starting OCR extraction")
-            ocr_words = self._retry_on_document_closed(
-                lambda: self._extract_words_ocr(pdf_path, page_number),
-                "OCR extraction"
+            words = safe_pdfplumber_operation(
+                pdf_path, 
+                pdfplumber_operation, 
+                f"pdfplumber_text_extraction_page_{page_number + 1}",
+                max_retries=2
             )
+            logger.info(f"[Thread {thread_name}:{thread_id}] Extracted {len(words)} words with pdfplumber")
+            
+            # Extract words using thread-safe OCR operation  
+            ocr_words = self._extract_words_ocr_safe(pdf_path, page_number)
             logger.info(f"[Thread {thread_name}:{thread_id}] Extracted {len(ocr_words)} words with OCR")
             
             # Combine and deduplicate
@@ -178,36 +142,27 @@ class TextParser:
         
         return words
     
-    def _extract_words_ocr(self, pdf_path: str, page_number: int = 0) -> List[Dict[str, Any]]:
-        """Extract words using OCR for handwritten/unclear text"""
-        import threading
+    def _extract_words_ocr_safe(self, pdf_path: str, page_number: int = 0) -> List[Dict[str, Any]]:
+        """Extract words using OCR with thread-safe operations"""
         thread_id = threading.get_ident()
         thread_name = threading.current_thread().name
         
-        words = []
-        
         if not PYTESSERACT_AVAILABLE:
             logger.info(f"[Thread {thread_name}:{thread_id}] OCR not available, skipping")
-            return words
+            return []
         
-        doc = None
         try:
             # Check if tesseract is available
-            try:
-                pytesseract.get_tesseract_version()
-            except (pytesseract.TesseractNotFoundError, FileNotFoundError) as e:
-                logger.warning(f"[Thread {thread_name}:{thread_id}] Tesseract OCR not found in PATH: {e}")
-                return words
-            
-            # CRITICAL: Open PyMuPDF document INSIDE this thread
-            logger.info(f"[Thread {thread_name}:{thread_id}] Opening PDF with PyMuPDF for OCR: {pdf_path}")
-            doc = fitz.open(pdf_path)
-            logger.info(f"[Thread {thread_name}:{thread_id}] PyMuPDF document opened for OCR")
-            
+            pytesseract.get_tesseract_version()
+        except (pytesseract.TesseractNotFoundError, FileNotFoundError) as e:
+            logger.warning(f"[Thread {thread_name}:{thread_id}] Tesseract OCR not found in PATH: {e}")
+            return []
+        
+        def ocr_operation(doc):
+            """OCR operation to be executed thread-safely"""
             if page_number >= len(doc) or page_number < 0:
                 logger.warning(f"[Thread {thread_name}:{thread_id}] Invalid page number {page_number + 1} for OCR")
-                doc.close()
-                return words
+                return []
                 
             page = doc[page_number]
             logger.info(f"[Thread {thread_name}:{thread_id}] Rendering page {page_number + 1} for OCR")
@@ -229,6 +184,7 @@ class TextParser:
             )
             
             # Process OCR results
+            words = []
             for i, text in enumerate(ocr_data['text']):
                 if text.strip() and int(ocr_data['conf'][i]) > 30:  # Confidence threshold
                     x = float(ocr_data['left'][i]) / 2  # Adjust for 2x zoom
@@ -251,33 +207,18 @@ class TextParser:
                     })
             
             logger.info(f"[Thread {thread_name}:{thread_id}] OCR completed, found {len(words)} words")
-            
-        except pytesseract.TesseractNotFoundError as e:
-            logger.error(f"[Thread {thread_name}:{thread_id}] Tesseract OCR not installed or not in PATH: {e}")
-        except ImportError as e:
-            logger.error(f"[Thread {thread_name}:{thread_id}] Required OCR dependencies not available: {e}")
+            return words
+        
+        try:
+            return safe_pymupdf_operation(
+                pdf_path,
+                ocr_operation,
+                f"ocr_extraction_page_{page_number + 1}",
+                max_retries=2
+            )
         except Exception as e:
-            if "document closed" in str(e).lower() or "seek of closed file" in str(e).lower():
-                logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR detected in OCR: {type(e).__name__}: {str(e)}")
-                logger.error(f"[Thread {thread_name}:{thread_id}] PDF path: {pdf_path}")
-                logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
-                logger.error(f"[Thread {thread_name}:{thread_id}] Call stack:\n{traceback.format_exc()}")
-            else:
-                logger.error(f"[Thread {thread_name}:{thread_id}] OCR extraction failed: {e}")
-                logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
-            # Don't fail completely, just log the error
-        
-        finally:
-            # Ensure document is always closed in the same thread that opened it
-            if doc is not None:
-                try:
-                    logger.info(f"[Thread {thread_name}:{thread_id}] Closing OCR PyMuPDF document")
-                    doc.close()
-                    logger.info(f"[Thread {thread_name}:{thread_id}] OCR PyMuPDF document closed successfully")
-                except Exception as close_error:
-                    logger.error(f"[Thread {thread_name}:{thread_id}] Error closing OCR PyMuPDF document: {close_error}")
-        
-        return words
+            logger.error(f"[Thread {thread_name}:{thread_id}] OCR extraction failed: {type(e).__name__}: {str(e)}")
+            return []  # Don't fail completely, just return empty results
     
     def _merge_word_lists(self, words1: List[Dict], words2: List[Dict]) -> List[Dict]:
         """Merge word lists and remove duplicates"""

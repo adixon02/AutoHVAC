@@ -375,4 +375,258 @@ async def upload_blueprint(
         logger.exception(f"❌ UPLOAD FATAL ERROR: {type(e).__name__}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
-# Assumptions endpoint removed - all parameters now collected upfront in /upload
+# JSON Download Endpoints
+
+@router.get("/{project_id}/json")
+async def download_blueprint_json(
+    project_id: str,
+    include_raw_data: bool = False,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Download the parsed blueprint JSON for a project
+    
+    Args:
+        project_id: The project ID
+        include_raw_data: Whether to include raw geometry/text data
+        session: Database session
+        
+    Returns:
+        JSON response with the parsed blueprint data
+    """
+    try:
+        # Get project from database
+        project = await job_service.get_project(project_id, session)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Check if JSON exists
+        if not project.parsed_schema_json:
+            raise HTTPException(
+                status_code=404, 
+                detail="Blueprint JSON not available - project may not be completed or parsing failed"
+            )
+        
+        blueprint_json = project.parsed_schema_json.copy()
+        
+        # Optionally remove raw data to reduce response size
+        if not include_raw_data:
+            blueprint_json.pop('raw_geometry', None)
+            blueprint_json.pop('raw_text', None)
+        
+        # Add download metadata
+        response_data = {
+            "project_id": project_id,
+            "project_label": project.project_label,
+            "filename": project.filename,
+            "status": project.status,
+            "download_timestamp": datetime.now().isoformat(),
+            "blueprint_data": blueprint_json
+        }
+        
+        logger.info(f"Blueprint JSON downloaded for project {project_id}")
+        
+        return JSONResponse(
+            content=response_data,
+            headers={
+                "Content-Disposition": f"attachment; filename={project.project_label}_blueprint.json",
+                "Content-Type": "application/json"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading blueprint JSON for {project_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to download blueprint JSON")
+
+
+@router.get("/{project_id}/json/raw")
+async def download_raw_blueprint_data(
+    project_id: str,
+    data_type: str = "all",  # "all", "geometry", "text", "metadata"
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Download raw blueprint parsing data for debugging/analysis
+    
+    Args:
+        project_id: The project ID  
+        data_type: Type of raw data to return
+        session: Database session
+        
+    Returns:
+        JSON response with raw parsing data
+    """
+    try:
+        # Get project from database
+        project = await job_service.get_project(project_id, session)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Check if JSON exists
+        if not project.parsed_schema_json:
+            raise HTTPException(
+                status_code=404, 
+                detail="Blueprint JSON not available"
+            )
+        
+        blueprint_json = project.parsed_schema_json
+        response_data = {
+            "project_id": project_id,
+            "project_label": project.project_label,
+            "filename": project.filename,
+            "download_timestamp": datetime.now().isoformat(),
+            "data_type": data_type
+        }
+        
+        # Extract requested data type
+        if data_type == "all":
+            response_data["raw_data"] = {
+                "raw_geometry": blueprint_json.get('raw_geometry', {}),
+                "raw_text": blueprint_json.get('raw_text', {}),
+                "parsing_metadata": blueprint_json.get('parsing_metadata', {}),
+                "geometric_elements": blueprint_json.get('geometric_elements', []),
+                "dimensions": blueprint_json.get('dimensions', []),
+                "labels": blueprint_json.get('labels', [])
+            }
+        elif data_type == "geometry":
+            response_data["raw_data"] = {
+                "raw_geometry": blueprint_json.get('raw_geometry', {}),
+                "geometric_elements": blueprint_json.get('geometric_elements', [])
+            }
+        elif data_type == "text":
+            response_data["raw_data"] = {
+                "raw_text": blueprint_json.get('raw_text', {}),
+                "dimensions": blueprint_json.get('dimensions', []),
+                "labels": blueprint_json.get('labels', [])
+            }
+        elif data_type == "metadata":
+            response_data["raw_data"] = {
+                "parsing_metadata": blueprint_json.get('parsing_metadata', {})
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Invalid data_type. Must be 'all', 'geometry', 'text', or 'metadata'")
+        
+        logger.info(f"Raw blueprint data ({data_type}) downloaded for project {project_id}")
+        
+        return JSONResponse(
+            content=response_data,
+            headers={
+                "Content-Disposition": f"attachment; filename={project.project_label}_raw_{data_type}.json",
+                "Content-Type": "application/json"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading raw blueprint data for {project_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to download raw blueprint data")
+
+
+@router.get("/{project_id}/json/summary")  
+async def get_blueprint_json_summary(
+    project_id: str,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Get a summary of the parsed blueprint JSON without downloading the full data
+    
+    Args:
+        project_id: The project ID
+        session: Database session
+        
+    Returns:
+        JSON summary of the blueprint parsing results
+    """
+    try:
+        # Get project from database
+        project = await job_service.get_project(project_id, session)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Check if JSON exists
+        if not project.parsed_schema_json:
+            raise HTTPException(
+                status_code=404, 
+                detail="Blueprint JSON not available"
+            )
+        
+        blueprint_json = project.parsed_schema_json
+        parsing_metadata = blueprint_json.get('parsing_metadata', {})
+        
+        # Create summary
+        summary = {
+            "project_id": project_id,
+            "project_label": project.project_label,
+            "filename": project.filename,
+            "status": project.status,
+            "summary_timestamp": datetime.now().isoformat(),
+            
+            # Basic parsing results
+            "total_rooms": len(blueprint_json.get('rooms', [])),
+            "total_area_sqft": blueprint_json.get('sqft_total', 0),
+            "stories": blueprint_json.get('stories', 1),
+            "zip_code": blueprint_json.get('zip_code', ''),
+            
+            # Parsing metadata summary
+            "parsing_results": {
+                "selected_page": parsing_metadata.get('selected_page', 1),
+                "total_pages_analyzed": parsing_metadata.get('pdf_page_count', 1),
+                "processing_time_seconds": parsing_metadata.get('processing_time_seconds', 0),
+                "overall_confidence": parsing_metadata.get('overall_confidence', 0),
+                "geometry_status": parsing_metadata.get('geometry_status', 'unknown'),
+                "text_status": parsing_metadata.get('text_status', 'unknown'),
+                "ai_status": parsing_metadata.get('ai_status', 'unknown')
+            },
+            
+            # Data availability
+            "data_available": {
+                "rooms": len(blueprint_json.get('rooms', [])) > 0,
+                "dimensions": len(blueprint_json.get('dimensions', [])) > 0,
+                "labels": len(blueprint_json.get('labels', [])) > 0,
+                "geometric_elements": len(blueprint_json.get('geometric_elements', [])) > 0,
+                "raw_geometry": bool(blueprint_json.get('raw_geometry')),
+                "raw_text": bool(blueprint_json.get('raw_text'))
+            },
+            
+            # Room summary
+            "room_summary": [
+                {
+                    "name": room.get('name', 'Unknown'),
+                    "area": room.get('area', 0),
+                    "room_type": room.get('room_type', 'unknown'),
+                    "confidence": room.get('confidence', 0),
+                    "floor": room.get('floor', 1)
+                }
+                for room in blueprint_json.get('rooms', [])
+            ]
+        }
+        
+        # Add error summary if any
+        errors = parsing_metadata.get('errors_encountered', [])
+        if errors:
+            summary["parsing_errors"] = {
+                "total_errors": len(errors),
+                "error_summary": [
+                    {
+                        "stage": error.get('stage', 'unknown'),
+                        "error_type": error.get('error_type', 'unknown'),
+                        "error": error.get('error', '')[:100]  # Truncate long errors
+                    }
+                    for error in errors
+                ]
+            }
+        
+        logger.info(f"Blueprint JSON summary generated for project {project_id}")
+        return summary
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating blueprint JSON summary for {project_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to generate blueprint summary")
+
+
+# Legacy endpoint preserved for backward compatibility

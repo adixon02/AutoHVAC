@@ -27,10 +27,7 @@ from typing import Dict, Any, Optional
 from services.job_service import job_service
 from services.manualj import calculate_manualj_with_audit
 from services.climate_data import get_climate_data
-from app.parser.geometry_parser_safe import create_safe_parser, GeometryParserTimeout, GeometryParserComplexity
-from app.parser.text_parser import TextParser
-from app.parser.ai_cleanup import cleanup, AICleanupError
-from services.pdf_page_analyzer import PDFPageAnalyzer
+from services.blueprint_parser import parse_blueprint_to_json, BlueprintParsingError
 from services.envelope_extractor import extract_envelope_data, EnvelopeExtractorError
 from services.audit_tracker import create_calculation_audit
 from database import AsyncSessionLocal
@@ -149,168 +146,76 @@ def calculate_hvac_loads(
         audit_data['climate_data'] = climate_data
         logger.info(f"HVAC calculation started for {project_id} - {filename} - {zip_code}")
         
-        # Stage 1.5: Multi-page analysis and best page selection
-        update_progress_sync("analyzing_pages", 10, "Analyzing PDF pages for floor plan")
-        
-        selected_page_number = None
-        page_analysis_summary = None
+        # NEW JSON-FIRST APPROACH: Single-stage PDF to JSON conversion
+        update_progress_sync("parsing_blueprint", 20, "Converting PDF to comprehensive JSON representation")
         
         try:
-            logger.info(f"Starting multi-page analysis for {project_id}")
-            
-            # Analyze all pages to find the best floor plan
-            page_analyzer = PDFPageAnalyzer(timeout_per_page=30, max_pages=20)
-            selected_page_number, page_analyses = page_analyzer.analyze_pdf_pages(temp_file_path)
-            
-            # Convert to 0-based for internal use
-            selected_page_zero_based = selected_page_number - 1
-            
-            # Generate analysis summary for audit
-            page_analysis_summary = page_analyzer.get_analysis_summary(page_analyses)
-            audit_data['page_analysis'] = page_analysis_summary
-            
-            logger.info(f"Multi-page analysis completed for {project_id}")
-            logger.info(f"Selected page {selected_page_number} out of {len(page_analyses)} pages")
-            logger.info(f"Best page score: {page_analysis_summary['best_score']}")
-            
-            # Update progress with page selection info
-            update_progress_sync("page_selected", 15, f"Selected page {selected_page_number} as best floor plan")
-            
-        except Exception as e:
-            error_msg = f"Multi-page analysis failed: {str(e)}"
-            logger.error(f"Multi-page analysis error for {project_id}: {error_msg}", exc_info=True)
-            audit_data['errors_encountered'].append({'stage': 'page_analysis', 'error': error_msg})
-            
-            # Fall back to first page
-            selected_page_zero_based = 0
-            selected_page_number = 1
-            logger.warning(f"Falling back to page 1 for {project_id}")
-            update_progress_sync("page_selected", 15, "Using first page (multi-page analysis failed)")
-
-        # Stage 2: Geometry extraction with timeout protection
-        update_progress_sync("extracting_geometry", 20, f"Analyzing geometry from page {selected_page_number}")
-        
-        try:
-            logger.info(f"Starting geometry extraction for {project_id}")
+            logger.info(f"Starting JSON-first blueprint parsing for {project_id}")
             logger.info(f"PDF file: {temp_file_path}, size: {len(file_content)} bytes")
             
-            # Create safe parser with 300-second timeout and complexity checks
-            geometry_parser = create_safe_parser(timeout=300, enable_complexity_checks=True)
+            # Use the new blueprint parser service for complete PDF to JSON conversion
+            blueprint_schema = parse_blueprint_to_json(
+                pdf_path=temp_file_path,
+                filename=filename,
+                zip_code=zip_code,
+                project_id=project_id
+            )
             
-            logger.info(f"Calling geometry parser for page {selected_page_number} with timeout protection...")
-            raw_geometry = geometry_parser.parse(temp_file_path, page_number=selected_page_zero_based)
-            logger.info(f"Geometry parsing completed successfully for page {selected_page_number}")
+            # Store the comprehensive JSON in the database as canonical representation
+            job_service.sync_update_project(project_id, {
+                'parsed_schema_json': blueprint_schema.dict()
+            })
             
-            # Validate geometry extraction results
-            if not raw_geometry or not hasattr(raw_geometry, 'lines'):
-                raise ValueError("No geometric data extracted from PDF")
-                
-            geometry_summary = {
-                'lines_found': len(getattr(raw_geometry, 'lines', [])),
-                'rectangles_found': len(getattr(raw_geometry, 'rectangles', [])),
-                'polylines_found': len(getattr(raw_geometry, 'polylines', [])),
-                'page_dimensions': [
-                    getattr(raw_geometry, 'page_width', 0),
-                    getattr(raw_geometry, 'page_height', 0)
-                ],
-                'scale_factor': getattr(raw_geometry, 'scale_factor', 1.0)
-            }
-            audit_data['geometry_summary'] = geometry_summary
-            
-            logger.info(f"Geometry extraction completed: {geometry_summary}")
-            
-        except GeometryParserTimeout as e:
-            error_msg = f"Geometry extraction timed out for page {selected_page_number}: {str(e)}"
-            logger.error(f"Geometry extraction timeout for {project_id}: {error_msg}")
-            audit_data['errors_encountered'].append({'stage': 'geometry', 'error': error_msg, 'error_type': 'timeout'})
-            update_progress_sync("failed", 0, f"Page {selected_page_number} geometry extraction timed out after 300 seconds (5 minutes)")
-            raise ValueError(error_msg)
-        except GeometryParserComplexity as e:
-            error_msg = f"Page {selected_page_number} is too complex to process: {str(e)}"
-            logger.error(f"Geometry complexity error for {project_id}: {error_msg}")
-            audit_data['errors_encountered'].append({'stage': 'geometry', 'error': error_msg, 'error_type': 'complexity'})
-            update_progress_sync("failed", 0, f"Page {selected_page_number} is too complex - try a simpler blueprint or different page")
-            raise ValueError(error_msg)
-        except Exception as e:
-            error_msg = f"Geometry extraction failed: {str(e)}"
-            logger.error(f"Geometry extraction error for {project_id}: {error_msg}", exc_info=True)
-            audit_data['errors_encountered'].append({'stage': 'geometry', 'error': error_msg, 'error_type': type(e).__name__})
-            update_progress_sync("failed", 0, f"Geometry extraction failed: {str(e)[:100]}")
-            raise ValueError(error_msg)
-        
-        # Stage 3: Text extraction from selected page
-        update_progress_sync("extracting_text", 35, f"Extracting text and labels from page {selected_page_number}")
-        
-        try:
-            text_parser = TextParser()
-            raw_text = text_parser.parse(temp_file_path, page_number=selected_page_zero_based)
-            
-            # Validate text extraction results
-            if not raw_text:
-                raise ValueError("No text data extracted from PDF")
-                
-            text_summary = {
-                'words_found': len(getattr(raw_text, 'words', [])),
-                'room_labels': len(getattr(raw_text, 'room_labels', [])),
-                'dimensions': len(getattr(raw_text, 'dimensions', [])),
-                'notes_found': len(getattr(raw_text, 'notes', []))
-            }
-            audit_data['text_summary'] = text_summary
-            
-            logger.info(f"Text extraction completed: {text_summary}")
-            
-        except Exception as e:
-            error_msg = f"Text extraction failed: {str(e)}"
-            logger.error(f"Text extraction error for {project_id}: {error_msg}", exc_info=True)
-            audit_data['errors_encountered'].append({'stage': 'text', 'error': error_msg})
-            update_progress_sync("failed", 0, f"Text extraction failed: {str(e)[:100]}")
-            raise ValueError(error_msg)
-        
-        # Stage 4: AI cleanup and structuring
-        update_progress_sync("ai_processing", 50, "AI analysis and data structuring")
-        
-        try:
-            # Check for OpenAI API key
-            if not os.getenv("OPENAI_API_KEY"):
-                raise AICleanupError("OPENAI_API_KEY not configured")
-            
-            # Run AI cleanup with timeout protection
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            try:
-                blueprint_schema = loop.run_until_complete(
-                    asyncio.wait_for(
-                        cleanup(raw_geometry, raw_text),
-                        timeout=AI_TIMEOUT_SECONDS
-                    )
-                )
-            finally:
-                loop.close()
-            
-            # Validate AI cleanup results
-            if not blueprint_schema or not blueprint_schema.rooms:
-                raise AICleanupError("No rooms identified in blueprint")
-            
-            # Store schema for audit
+            # Extract metadata for audit
+            parsing_metadata = blueprint_schema.parsing_metadata
             audit_data['blueprint_schema'] = blueprint_schema.dict()
             audit_data['rooms_identified'] = len(blueprint_schema.rooms)
             audit_data['total_area'] = blueprint_schema.sqft_total
+            audit_data['parsing_metadata'] = parsing_metadata.dict()
             
-            logger.info(f"AI processing completed: {len(blueprint_schema.rooms)} rooms, {blueprint_schema.sqft_total} sqft")
+            # Extract page analysis info
+            if parsing_metadata.page_analyses:
+                selected_page_analysis = next(
+                    (p for p in parsing_metadata.page_analyses if p.selected), 
+                    parsing_metadata.page_analyses[0]
+                )
+                audit_data['page_analysis'] = {
+                    'selected_page': parsing_metadata.selected_page,
+                    'total_pages_analyzed': len(parsing_metadata.page_analyses),
+                    'best_score': selected_page_analysis.score,
+                    'page_details': [p.dict() for p in parsing_metadata.page_analyses]
+                }
             
-        except asyncio.TimeoutError:
-            error_msg = f"AI processing timed out after {AI_TIMEOUT_SECONDS} seconds"
-            logger.error(f"AI processing timeout for {project_id}: {error_msg}")
-            audit_data['errors_encountered'].append({'stage': 'ai', 'error': error_msg})
-            update_progress_sync("failed", 0, f"AI processing timed out after {AI_TIMEOUT_SECONDS}s")
-            raise AICleanupError(error_msg)
+            # Report parsing results
+            logger.info(f"Blueprint parsing completed successfully:")
+            logger.info(f"  - Selected page: {parsing_metadata.selected_page}")
+            logger.info(f"  - Rooms identified: {len(blueprint_schema.rooms)}")
+            logger.info(f"  - Total area: {blueprint_schema.sqft_total} sqft")
+            logger.info(f"  - Overall confidence: {parsing_metadata.overall_confidence:.2f}")
+            logger.info(f"  - Processing time: {parsing_metadata.processing_time_seconds:.2f}s")
+            
+            update_progress_sync("blueprint_parsed", 50, f"Successfully parsed {len(blueprint_schema.rooms)} rooms from page {parsing_metadata.selected_page}")
+            
+        except BlueprintParsingError as e:
+            error_msg = f"Blueprint parsing failed: {str(e)}"
+            logger.error(f"Blueprint parsing error for {project_id}: {error_msg}")
+            audit_data['errors_encountered'].append({
+                'stage': 'blueprint_parsing', 
+                'error': error_msg, 
+                'error_type': 'BlueprintParsingError'
+            })
+            update_progress_sync("failed", 0, f"Blueprint parsing failed: {str(e)[:100]}")
+            raise ValueError(error_msg)
         except Exception as e:
-            error_msg = f"AI processing failed: {str(e)}"
-            logger.error(f"AI processing error for {project_id}: {error_msg}", exc_info=True)
-            audit_data['errors_encountered'].append({'stage': 'ai', 'error': error_msg})
-            update_progress_sync("failed", 0, f"AI processing failed: {str(e)[:100]}")
-            raise AICleanupError(error_msg)
+            error_msg = f"Unexpected blueprint parsing error: {str(e)}"
+            logger.error(f"Unexpected blueprint parsing error for {project_id}: {error_msg}", exc_info=True)
+            audit_data['errors_encountered'].append({
+                'stage': 'blueprint_parsing', 
+                'error': error_msg, 
+                'error_type': type(e).__name__
+            })
+            update_progress_sync("failed", 0, f"Blueprint parsing failed: {str(e)[:100]}")
+            raise ValueError(error_msg)
         
         # Stage 5: Envelope analysis (optional enhancement)
         update_progress_sync("envelope_analysis", 65, "Analyzing building envelope")
