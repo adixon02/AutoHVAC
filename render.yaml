@@ -59,10 +59,9 @@ services:
       cd backend && pip install --only-binary=:all: -r requirements.txt
     # Import both task modules
     startCommand: cd backend && celery -A tasks worker --loglevel=info --concurrency=2 --max-tasks-per-child=50 --max-memory-per-child=512000 --time-limit=1800 --soft-time-limit=1740 --without-gossip --without-mingle --without-heartbeat
-    # CRITICAL: Same shared disk as backend - files saved by backend must be readable by worker
-    disks:
-      - name: shared-storage
-        mountPath: /var/data
+    # IMPORTANT: You must manually attach the shared-storage disk to this worker
+    # in the Render dashboard with mount path: /var/data
+    # This is required because Render doesn't support the disks: field in YAML
     envVars:
       - key: REDIS_URL
         fromService:
