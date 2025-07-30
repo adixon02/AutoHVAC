@@ -80,6 +80,30 @@ cleanup_task = None
 async def startup_event():
     """Run on application startup"""
     logger.info("Starting AutoHVAC API...")
+    
+    # Log disk mount configuration
+    disk_path = os.getenv("RENDER_DISK_PATH", "/var/data/uploads")
+    logger.info(f"[STARTUP] RENDER_DISK_PATH environment variable: {os.getenv('RENDER_DISK_PATH')}")
+    logger.info(f"[STARTUP] Using storage path: {disk_path}")
+    
+    # Check if the disk is mounted and accessible
+    try:
+        if os.path.exists(disk_path):
+            logger.info(f"[STARTUP] Storage path exists: {disk_path}")
+            # List contents to verify it's mounted
+            contents = os.listdir(disk_path)
+            logger.info(f"[STARTUP] Storage path contents ({len(contents)} files): {contents[:5]}...")
+            # Test write permissions
+            test_file = os.path.join(disk_path, ".startup_test")
+            with open(test_file, 'w') as f:
+                f.write("startup test")
+            os.unlink(test_file)
+            logger.info(f"[STARTUP] Storage path is writable: {disk_path}")
+        else:
+            logger.error(f"[STARTUP] Storage path does NOT exist: {disk_path}")
+    except Exception as e:
+        logger.error(f"[STARTUP] Error checking storage path {disk_path}: {e}")
+    
     # DON'T access database here - it blocks port binding
     
     # Start periodic cleanup task WITHOUT immediate execution

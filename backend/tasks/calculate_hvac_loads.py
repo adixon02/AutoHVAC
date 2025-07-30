@@ -36,6 +36,22 @@ from database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
+# Log disk mount configuration at worker startup
+disk_path = os.getenv("RENDER_DISK_PATH", "/var/data/uploads")
+logger.info(f"[WORKER STARTUP] RENDER_DISK_PATH environment variable: {os.getenv('RENDER_DISK_PATH')}")
+logger.info(f"[WORKER STARTUP] Using storage path: {disk_path}")
+
+# Check if the disk is mounted and accessible
+try:
+    if os.path.exists(disk_path):
+        logger.info(f"[WORKER STARTUP] Storage path exists: {disk_path}")
+        contents = os.listdir(disk_path)
+        logger.info(f"[WORKER STARTUP] Storage path contents ({len(contents)} files): {contents[:5]}...")
+    else:
+        logger.error(f"[WORKER STARTUP] Storage path does NOT exist: {disk_path}")
+except Exception as e:
+    logger.error(f"[WORKER STARTUP] Error checking storage path {disk_path}: {e}")
+
 celery_app = Celery(
     'autohvac',
     broker=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
@@ -57,7 +73,6 @@ MAX_PROCESSING_TIME = 300   # 5 minutes max as requested
 )
 def calculate_hvac_loads(
     project_id: str,
-    file_path: str,  # Changed from file_content to file_path
     filename: str, 
     email: str,
     zip_code: str,
@@ -69,7 +84,6 @@ def calculate_hvac_loads(
     
     Args:
         project_id: Unique project identifier
-        file_path: Path to PDF file on disk
         filename: Original filename for reference
         email: User email for notifications/logging
         zip_code: Project location for climate data
@@ -120,8 +134,27 @@ def calculate_hvac_loads(
         except Exception as e:
             logger.exception(f"Error updating progress for {project_id}: {e}")
     
-    # CRITICAL: Use the file from disk, don't create temp files
-    logger.info(f"Using PDF file from disk: {file_path}")
+    # CRITICAL: Reconstruct file path from RENDER_DISK_PATH environment variable
+    disk_path = os.getenv("RENDER_DISK_PATH")
+    if not disk_path:
+        error_msg = "RENDER_DISK_PATH environment variable not set in worker"
+        logger.error(f"[CELERY TASK] {error_msg}")
+        job_service.sync_set_project_failed(project_id, error_msg)
+        raise RuntimeError(error_msg)
+    
+    # Construct file path from environment variable and project ID
+    file_path = os.path.join(disk_path, f"{project_id}.pdf")
+    
+    logger.info(f"[CELERY TASK] Starting task for project {project_id}")
+    logger.info(f"[CELERY TASK] RENDER_DISK_PATH={disk_path}")
+    logger.info(f"[CELERY TASK] Reconstructed file path: {file_path}")
+    
+    # List directory contents for debugging
+    try:
+        contents = os.listdir(disk_path)
+        logger.info(f"[CELERY TASK] Directory contents ({len(contents)} files): {contents[:10]}...")
+    except Exception as e:
+        logger.warning(f"[CELERY TASK] Could not list directory: {e}")
     
     # Retry logic for file existence check (containers might be slow to sync)
     max_retries = 5
@@ -162,20 +195,23 @@ def calculate_hvac_loads(
     
     if not file_found:
         error_msg = f"PDF file not found at start of Celery task after {max_retries} retries: {file_path}"
-        logger.error(error_msg)
+        logger.error(f"[CELERY TASK] {error_msg}")
         
         # Additional debugging info
-        logger.error(f"Storage path check: RENDER_DISK_PATH={os.getenv('RENDER_DISK_PATH')}")
-        logger.error(f"Directory listing of parent dir:")
+        logger.error(f"[CELERY TASK] RENDER_DISK_PATH={disk_path}")
+        logger.error(f"[CELERY TASK] Expected file: {file_path}")
+        
+        # List all files in the storage directory
         try:
-            parent_dir = os.path.dirname(file_path)
-            if os.path.exists(parent_dir):
-                files = os.listdir(parent_dir)
-                logger.error(f"Files in {parent_dir}: {files[:10]}...")  # List first 10 files
+            if os.path.exists(disk_path):
+                all_files = os.listdir(disk_path)
+                pdf_files = [f for f in all_files if f.endswith('.pdf')]
+                logger.error(f"[CELERY TASK] PDF files in {disk_path}: {pdf_files}")
+                logger.error(f"[CELERY TASK] All files ({len(all_files)}): {all_files[:20]}...")
             else:
-                logger.error(f"Parent directory does not exist: {parent_dir}")
+                logger.error(f"[CELERY TASK] Storage directory does not exist: {disk_path}")
         except Exception as e:
-            logger.error(f"Failed to list directory: {e}")
+            logger.error(f"[CELERY TASK] Failed to list directory: {e}")
         
         audit_data['errors_encountered'].append({
             'stage': 'file_check',

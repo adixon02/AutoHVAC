@@ -477,10 +477,9 @@ async def upload_blueprint(
                         raise HTTPException(status_code=500, detail=error_msg)
                     
                     # Start comprehensive HVAC load calculation task
-                    # CRITICAL: Pass file path, not content, to prevent threading issues
+                    # CRITICAL: Pass only project_id - worker will reconstruct path from RENDER_DISK_PATH
                     calculate_hvac_loads.delay(
                         project_id=project_id, 
-                        file_path=temp_path,  # Pass path instead of content
                         filename=file.filename, 
                         email=email, 
                         zip_code=zip_code,
