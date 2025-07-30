@@ -138,12 +138,12 @@ class PDFThreadManager:
         
         try:
             thread_id = threading.get_ident()
-        thread_name = threading.current_thread().name
-        
-        logger.info(f"[Thread {thread_name}:{thread_id}] Submitting {operation_name} to worker thread pool (timeout: {timeout}s)")
-        future = self._executor.submit(operation_func)
-        result = future.result(timeout=timeout)
-        logger.info(f"[Thread {thread_name}:{thread_id}] Successfully completed {operation_name} in worker thread")
+            thread_name = threading.current_thread().name
+            
+            logger.info(f"[Thread {thread_name}:{thread_id}] Submitting {operation_name} to worker thread pool (timeout: {timeout}s)")
+            future = self._executor.submit(operation_func)
+            result = future.result(timeout=timeout)
+            logger.info(f"[Thread {thread_name}:{thread_id}] Successfully completed {operation_name} in worker thread")
             return result
             
         except FutureTimeoutError:
