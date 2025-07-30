@@ -12,6 +12,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 from uuid import uuid4
 from io import BytesIO
+from PIL import Image
 
 try:
     from pdf2image import convert_from_path
