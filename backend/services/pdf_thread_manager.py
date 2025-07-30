@@ -321,9 +321,16 @@ def safe_pdfplumber_operation(pdf_path: str, operation_func: Callable, operation
         logger.info(f"[Thread {thread_name}:{thread_id}] Operation: {operation_name}")
         
         try:
+            print(f"[Thread {thread_name}:{thread_id}] OPENING pdfplumber PDF: {path}")
+            logger.info(f"[Thread {thread_name}:{thread_id}] OPENING pdfplumber PDF: {path}")
+            
             with pdfplumber.open(path) as pdf:
+                print(f"[Thread {thread_name}:{thread_id}] pdfplumber PDF OPENED successfully, pages: {len(pdf.pages)}")
                 logger.info(f"[Thread {thread_name}:{thread_id}] pdfplumber PDF opened successfully, pages: {len(pdf.pages)}")
+                
                 result = operation_func(pdf)
+                
+                print(f"[Thread {thread_name}:{thread_id}] pdfplumber operation completed successfully")
                 logger.info(f"[Thread {thread_name}:{thread_id}] pdfplumber operation completed successfully")
                 return result
         except Exception as e:
@@ -331,6 +338,7 @@ def safe_pdfplumber_operation(pdf_path: str, operation_func: Callable, operation
             logger.error(f"[Thread {thread_name}:{thread_id}] PDF path: {path}")
             raise
         finally:
+            print(f"[Thread {thread_name}:{thread_id}] pdfplumber PDF CLOSED automatically by context manager")
             logger.info(f"[Thread {thread_name}:{thread_id}] pdfplumber PDF closed automatically by context manager")
     
     return pdf_thread_manager.process_pdf_with_retry(
@@ -366,10 +374,17 @@ def safe_pymupdf_operation(pdf_path: str, operation_func: Callable, operation_na
         
         doc = None
         try:
+            print(f"[Thread {thread_name}:{thread_id}] OPENING PyMuPDF document: {path}")
+            logger.info(f"[Thread {thread_name}:{thread_id}] OPENING PyMuPDF document: {path}")
+            
             doc = fitz.open(path)
+            
+            print(f"[Thread {thread_name}:{thread_id}] PyMuPDF document OPENED successfully, pages: {len(doc)}")
             logger.info(f"[Thread {thread_name}:{thread_id}] PyMuPDF document opened successfully, pages: {len(doc)}")
             
             result = operation_func(doc)
+            
+            print(f"[Thread {thread_name}:{thread_id}] PyMuPDF operation completed successfully")
             logger.info(f"[Thread {thread_name}:{thread_id}] PyMuPDF operation completed successfully")
             return result
             
@@ -380,10 +395,13 @@ def safe_pymupdf_operation(pdf_path: str, operation_func: Callable, operation_na
         finally:
             if doc is not None:
                 try:
+                    print(f"[Thread {thread_name}:{thread_id}] CLOSING PyMuPDF document")
                     logger.info(f"[Thread {thread_name}:{thread_id}] Closing PyMuPDF document")
                     doc.close()
+                    print(f"[Thread {thread_name}:{thread_id}] PyMuPDF document CLOSED successfully")
                     logger.info(f"[Thread {thread_name}:{thread_id}] PyMuPDF document closed successfully")
                 except Exception as close_error:
+                    print(f"[Thread {thread_name}:{thread_id}] ERROR closing PyMuPDF document: {close_error}")
                     logger.error(f"[Thread {thread_name}:{thread_id}] Error closing PyMuPDF document: {close_error}")
     
     return pdf_thread_manager.process_pdf_with_retry(

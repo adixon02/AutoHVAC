@@ -77,21 +77,147 @@ class GeometryParser:
                 page_height = float(page.height)
                 logger.info(f"[Thread {thread_name}:{thread_id}] Page dimensions: {page_width} x {page_height}")
                 
-                # Detect scale
+                # CRITICAL: Detect scale directly - no method calls with page objects
                 logger.info(f"[Thread {thread_name}:{thread_id}] Detecting scale markers...")
                 scale_start = time.time()
-                scale_factor = self._detect_scale(page)
+                scale_factor = None
+                try:
+                    words = page.extract_words()
+                    text = ' '.join([w['text'] for w in words])
+                    
+                    for pattern in self.scale_patterns:
+                        match = re.search(pattern, text, re.IGNORECASE)
+                        if match:
+                            try:
+                                # Parse scale ratio (simplified)
+                                if ':' in match.group():
+                                    parts = match.group().split(':')
+                                    scale_factor = float(parts[1]) / float(parts[0])
+                                else:
+                                    # Parse architectural scale like 1/4" = 1'-0"
+                                    scale_factor = 48.0  # Default to 1/4" scale
+                                break
+                            except:
+                                continue
+                except Exception as e:
+                    logger.warning(f"[Thread {thread_name}:{thread_id}] Scale detection failed: {e}")
+                
                 logger.info(f"[Thread {thread_name}:{thread_id}] Scale detection took {time.time() - scale_start:.2f}s, result: {scale_factor}")
                 
-                # Extract geometry elements with timing
+                # CRITICAL: Extract lines directly - no method calls with page objects
                 logger.info(f"[Thread {thread_name}:{thread_id}] Extracting lines...")
                 lines_start = time.time()
-                lines = self._extract_lines(page)
+                lines = []
+                
+                try:
+                    raw_lines = page.lines
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Found {len(raw_lines)} raw lines to process")
+                    
+                    # Apply defensive limit
+                    if len(raw_lines) > self.MAX_LINES:
+                        logger.warning(f"[Thread {thread_name}:{thread_id}] Too many lines ({len(raw_lines)}), limiting to {self.MAX_LINES}")
+                        raw_lines = raw_lines[:self.MAX_LINES]
+                    
+                    for i, line in enumerate(raw_lines):
+                        try:
+                            x0, y0, x1, y1 = line['x0'], line['y0'], line['x1'], line['y1']
+                            
+                            # Validate coordinates
+                            if any(coord is None for coord in [x0, y0, x1, y1]):
+                                continue
+                            
+                            length = np.sqrt((x1 - x0)**2 + (y1 - y0)**2)
+                            
+                            # Skip degenerate lines
+                            if length < 0.1:
+                                continue
+                            
+                            width = float(line.get('width', 1.0))
+                            
+                            lines.append({
+                                'type': 'line',
+                                'coords': [float(x0), float(y0), float(x1), float(y1)],
+                                'x0': float(x0),
+                                'y0': float(y0),
+                                'x1': float(x1),
+                                'y1': float(y1),
+                                'width': width,
+                                'length': float(length),
+                                'line_type': 'wall' if width > 2.0 and length > 50 else 'dimension' if length > 100 and width < 1.5 else 'other',
+                                'orientation': 'vertical' if abs(x1 - x0) < 2 else 'horizontal' if abs(y1 - y0) < 2 else 'diagonal',
+                                'wall_probability': min((length/200 + width/3.0)/2, 1.0)
+                            })
+                            
+                        except Exception as e:
+                            logger.debug(f"[Thread {thread_name}:{thread_id}] Error processing line {i}: {e}")
+                            continue
+                    
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Successfully processed {len(lines)} valid lines")
+                    
+                except Exception as e:
+                    logger.error(f"[Thread {thread_name}:{thread_id}] Line extraction failed: {e}")
+                    lines = []
+                
                 logger.info(f"[Thread {thread_name}:{thread_id}] Line extraction took {time.time() - lines_start:.2f}s, found {len(lines)} lines")
                 
+                # CRITICAL: Extract rectangles directly - no method calls with page objects
                 logger.info(f"[Thread {thread_name}:{thread_id}] Extracting rectangles...")
                 rects_start = time.time()
-                rectangles = self._extract_rectangles(page)
+                rectangles = []
+                
+                try:
+                    raw_rects = page.rects
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Found {len(raw_rects)} raw rectangles to process")
+                    
+                    # Apply defensive limit
+                    if len(raw_rects) > self.MAX_RECTANGLES:
+                        logger.warning(f"[Thread {thread_name}:{thread_id}] Too many rectangles ({len(raw_rects)}), limiting to {self.MAX_RECTANGLES}")
+                        raw_rects = raw_rects[:self.MAX_RECTANGLES]
+                    
+                    for i, rect in enumerate(raw_rects):
+                        try:
+                            # Validate coordinates
+                            if any(coord is None for coord in [rect.get('x0'), rect.get('y0'), rect.get('x1'), rect.get('y1')]):
+                                continue
+                            
+                            width = float(rect['x1'] - rect['x0'])
+                            height = float(rect['y1'] - rect['y0'])
+                            
+                            # Skip degenerate rectangles
+                            if width <= 0 or height <= 0:
+                                continue
+                            
+                            area = width * height
+                            
+                            # Filter meaningful rectangles
+                            if area > 500:  # Minimum room size
+                                rectangles.append({
+                                    'type': 'rect',
+                                    'coords': [float(rect['x0']), float(rect['y0']), float(rect['x1']), float(rect['y1'])],
+                                    'x0': float(rect['x0']),
+                                    'y0': float(rect['y0']),
+                                    'x1': float(rect['x1']),
+                                    'y1': float(rect['y1']),
+                                    'width': width,
+                                    'height': height,
+                                    'area': area,
+                                    'center_x': float(rect['x0'] + width / 2),
+                                    'center_y': float(rect['y0'] + height / 2),
+                                    'aspect_ratio': width / height if height > 0 else 0,
+                                    'room_probability': 0.5  # Simplified
+                                })
+                            
+                        except Exception as e:
+                            logger.debug(f"[Thread {thread_name}:{thread_id}] Error processing rectangle {i}: {e}")
+                            continue
+                    
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Successfully processed {len(rectangles)} valid rectangles")
+                    rectangles = sorted(rectangles, key=lambda r: r['area'], reverse=True)
+                    
+                except Exception as e:
+                    logger.error(f"[Thread {thread_name}:{thread_id}] Rectangle extraction failed: {e}")
+                    rectangles = []
+                
                 logger.info(f"[Thread {thread_name}:{thread_id}] Rectangle extraction took {time.time() - rects_start:.2f}s, found {len(rectangles)} rectangles")
                 
                 return {

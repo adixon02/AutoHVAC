@@ -4,6 +4,7 @@ Main service that orchestrates PDF to JSON conversion with comprehensive error h
 Implements the JSON-first architecture where all processing uses canonical JSON representation
 """
 
+import os
 import time
 import logging
 import asyncio
@@ -20,6 +21,7 @@ from app.parser.geometry_parser import GeometryParser
 from app.parser.ai_cleanup import cleanup, AICleanupError
 from services.pdf_thread_manager import pdf_thread_manager, PDFDocumentClosedError, PDFProcessingTimeoutError
 from services.pdf_page_analyzer import PDFPageAnalyzer
+from services.blueprint_ai_parser import blueprint_ai_parser, BlueprintAIParsingError
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,32 @@ class BlueprintParser:
         Raises:
             BlueprintParsingError: If parsing fails critically
         """
+        # Check if GPT-4V parsing is enabled
+        use_gpt4v = os.getenv("USE_GPT4V_PARSING", "false").lower() == "true"
+        
+        if use_gpt4v:
+            logger.info(f"Using GPT-4V parsing for {filename}")
+            try:
+                # Use async context to run the AI parser
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(
+                        blueprint_ai_parser.parse_pdf_with_gpt4v(pdf_path, filename, zip_code, project_id)
+                    )
+                    logger.info(f"GPT-4V parsing completed successfully for {filename}")
+                    return result
+                finally:
+                    loop.close()
+            except BlueprintAIParsingError as e:
+                logger.error(f"GPT-4V parsing failed for {filename}, falling back to traditional parsing: {str(e)}")
+                # Fall through to traditional parsing
+            except Exception as e:
+                logger.error(f"Unexpected error in GPT-4V parsing for {filename}, falling back to traditional parsing: {str(e)}")
+                # Fall through to traditional parsing
+        
+        # Traditional parsing pipeline (existing code)
+        logger.info(f"Using traditional parsing for {filename}")
         start_time = time.time()
         parsing_metadata = ParsingMetadata(
             parsing_timestamp=datetime.utcnow(),
@@ -84,7 +112,7 @@ class BlueprintParser:
             text_confidence=0.0
         )
         
-        logger.info(f"Starting blueprint parsing for {filename}")
+        logger.info(f"Starting traditional blueprint parsing for {filename}")
         
         try:
             # Stage 1: Multi-page analysis and best page selection

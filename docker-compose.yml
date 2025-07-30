@@ -25,6 +25,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql://autohvac:autohvac@postgres:5432/autohvac
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - USE_GPT4V_PARSING=${USE_GPT4V_PARSING}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
@@ -48,6 +49,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql://autohvac:autohvac@postgres:5432/autohvac
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - USE_GPT4V_PARSING=${USE_GPT4V_PARSING}
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
       - MINIO_ENDPOINT=http://minio:9000

@@ -506,10 +506,13 @@ class GeometryParserSafe:
                 # CRITICAL: Clean up temporary file in the SAME THREAD that created it
                 if os.path.exists(temp_single_page_path):
                     try:
+                        print(f"[Thread {thread_name}:{thread_id}] DELETING temporary file: {temp_single_page_path}")
                         logger.info(f"[Thread {thread_name}:{thread_id}] Cleaning up temporary file in worker thread: {temp_single_page_path}")
                         os.unlink(temp_single_page_path)
+                        print(f"[Thread {thread_name}:{thread_id}] Successfully DELETED temporary file")
                         logger.info(f"[Thread {thread_name}:{thread_id}] Successfully cleaned up temporary file")
                     except Exception as cleanup_error:
+                        print(f"[Thread {thread_name}:{thread_id}] ERROR deleting temporary file: {cleanup_error}")
                         logger.error(f"[Thread {thread_name}:{thread_id}] Failed to clean up temporary file {temp_single_page_path}: {cleanup_error}")
             
         except Exception as e:
@@ -565,6 +568,7 @@ class GeometryParserSafe:
         # CRITICAL: Create temporary file in worker thread
         temp_fd, temp_path = tempfile.mkstemp(suffix='.pdf', prefix=f'page_{page_number + 1}_')
         os.close(temp_fd)
+        print(f"[Thread {thread_name}:{thread_id}] CREATED temporary file: {temp_path}")
         logger.info(f"[Thread {thread_name}:{thread_id}] Created temporary file: {temp_path}")
         
         source_doc = None
@@ -627,9 +631,12 @@ class GeometryParserSafe:
             # Clean up temp file on failure in the same thread
             if os.path.exists(temp_path):
                 try:
+                    print(f"[Thread {thread_name}:{thread_id}] CLEANING UP failed temp file: {temp_path}")
                     logger.info(f"[Thread {thread_name}:{thread_id}] Cleaning up failed temp file: {temp_path}")
                     os.unlink(temp_path)
+                    print(f"[Thread {thread_name}:{thread_id}] Failed temp file CLEANED UP successfully")
                 except Exception as cleanup_error:
+                    print(f"[Thread {thread_name}:{thread_id}] ERROR cleaning up failed temp file: {cleanup_error}")
                     logger.error(f"[Thread {thread_name}:{thread_id}] Failed to cleanup temp file: {cleanup_error}")
             
             raise Exception(f"Failed to extract page {page_number + 1}: {str(e)}")

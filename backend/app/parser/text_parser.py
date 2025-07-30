@@ -79,7 +79,51 @@ class TextParser:
                 logger.info(f"[Thread {thread_name}:{thread_id}] Processing page {page_number + 1} of {len(pdf.pages)} via pdfplumber")
                 logger.info(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
                 
-                return self._extract_words_pdfplumber(page)
+                # CRITICAL: Extract words directly here - do NOT pass page object to another function
+                words = []
+                logger.info(f"[Thread {thread_name}:{thread_id}] Extracting words from pdfplumber page object")
+                
+                try:
+                    raw_words = page.extract_words()
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Found {len(raw_words)} raw words from pdfplumber")
+                    
+                    for word in raw_words:
+                        words.append({
+                            'text': str(word['text']),
+                            'x0': float(word['x0']),
+                            'top': float(word['top']),
+                            'x1': float(word['x1']),
+                            'bottom': float(word['bottom']),
+                            'width': float(word['x1'] - word['x0']),
+                            'height': float(word['bottom'] - word['top']),
+                            'size': float(word.get('size', 12)),
+                            'font': word.get('fontname', ''),
+                            'source': 'pdfplumber'
+                        })
+                        
+                except Exception as e:
+                    error_str = str(e).lower()
+                    
+                    # CRITICAL: Check for document closed errors and log full context  
+                    if any(error_phrase in error_str for error_phrase in [
+                        "document closed", 
+                        "seek of closed file", 
+                        "closed file", 
+                        "bad file descriptor",
+                        "document has been closed"
+                    ]):
+                        logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR in pdfplumber word extraction")
+                        logger.error(f"[Thread {thread_name}:{thread_id}] Error type: {type(e).__name__}")
+                        logger.error(f"[Thread {thread_name}:{thread_id}] Error message: {str(e)}")
+                        logger.error(f"[Thread {thread_name}:{thread_id}] Thread ID: {thread_id}")
+                        logger.error(f"[Thread {thread_name}:{thread_id}] Thread name: {thread_name}")
+                        logger.error(f"[Thread {thread_name}:{thread_id}] FULL STACK TRACE:\n{traceback.format_exc()}")
+                    else:
+                        logger.error(f"[Thread {thread_name}:{thread_id}] Error extracting words from pdfplumber: {e}")
+                        logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
+                    raise
+                
+                return words
             
             words = safe_pdfplumber_operation(
                 pdf_path, 
@@ -138,57 +182,6 @@ class TextParser:
                 logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
             raise
     
-    def _extract_words_pdfplumber(self, page) -> List[Dict[str, Any]]:
-        """Extract words using pdfplumber"""
-        import threading
-        thread_id = threading.get_ident()
-        thread_name = threading.current_thread().name
-        
-        words = []
-        logger.info(f"[Thread {thread_name}:{thread_id}] Extracting words from pdfplumber page")
-        
-        try:
-            logger.info(f"[Thread {thread_name}:{thread_id}] Extracting words from pdfplumber page object")
-            raw_words = page.extract_words()
-            logger.info(f"[Thread {thread_name}:{thread_id}] Found {len(raw_words)} raw words from pdfplumber")
-            
-            for word in raw_words:
-                words.append({
-                    'text': str(word['text']),
-                    'x0': float(word['x0']),
-                    'top': float(word['top']),
-                    'x1': float(word['x1']),
-                    'bottom': float(word['bottom']),
-                    'width': float(word['x1'] - word['x0']),
-                    'height': float(word['bottom'] - word['top']),
-                    'size': float(word.get('size', 12)),
-                    'font': word.get('fontname', ''),
-                    'source': 'pdfplumber'
-                })
-                
-        except Exception as e:
-            error_str = str(e).lower()
-            
-            # CRITICAL: Check for document closed errors and log full context  
-            if any(error_phrase in error_str for error_phrase in [
-                "document closed", 
-                "seek of closed file", 
-                "closed file", 
-                "bad file descriptor",
-                "document has been closed"
-            ]):
-                logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR in pdfplumber word extraction")
-                logger.error(f"[Thread {thread_name}:{thread_id}] Error type: {type(e).__name__}")
-                logger.error(f"[Thread {thread_name}:{thread_id}] Error message: {str(e)}")
-                logger.error(f"[Thread {thread_name}:{thread_id}] Thread ID: {thread_id}")
-                logger.error(f"[Thread {thread_name}:{thread_id}] Thread name: {thread_name}")
-                logger.error(f"[Thread {thread_name}:{thread_id}] FULL STACK TRACE:\n{traceback.format_exc()}")
-            else:
-                logger.error(f"[Thread {thread_name}:{thread_id}] Error extracting words from pdfplumber: {e}")
-                logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
-            raise
-        
-        return words
     
     def _extract_words_ocr_safe(self, pdf_path: str, page_number: int = 0) -> List[Dict[str, Any]]:
         """Extract words using OCR with thread-safe operations"""

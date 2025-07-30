@@ -14,6 +14,10 @@ from .cltd_clf import (
 from .envelope_extractor import EnvelopeExtraction
 from .audit_tracker import get_audit_tracker, create_calculation_audit
 import math
+import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Legacy climate zone data - now replaced by climate_data service
@@ -52,6 +56,57 @@ ORIENTATION_FACTORS = {
 }
 
 
+def _calculate_confidence_metrics(zones: List[Dict], schema: BlueprintSchema) -> Dict[str, Any]:
+    """Calculate overall confidence metrics for the load calculation"""
+    
+    # Room-level confidence
+    room_confidences = []
+    orientation_known_count = 0
+    low_confidence_rooms = []
+    warnings = []
+    
+    for zone in zones:
+        if 'confidence' in zone:
+            room_confidences.append(zone['confidence'])
+            if zone['confidence'] < 0.5:
+                low_confidence_rooms.append(zone['name'])
+        
+        if 'data_quality' in zone and zone['data_quality'].get('orientation_known', False):
+            orientation_known_count += 1
+    
+    overall_confidence = sum(room_confidences) / len(room_confidences) if room_confidences else 0.5
+    
+    # Check for orientation issues
+    orientation_known = orientation_known_count == len(zones)
+    if not orientation_known:
+        warnings.append("Building orientation unknown - solar loads averaged for all rooms")
+    
+    # Check for low confidence rooms
+    if low_confidence_rooms:
+        warnings.append(f"Low confidence rooms: {', '.join(low_confidence_rooms)}")
+    
+    # Check for area validation
+    total_room_area = sum(zone['area'] for zone in zones)
+    if abs(total_room_area - schema.sqft_total) > schema.sqft_total * 0.1:
+        warnings.append(f"Room areas ({total_room_area} sqft) differ from total ({schema.sqft_total} sqft) by >10%")
+        overall_confidence *= 0.9
+    
+    return {
+        "overall_confidence": round(overall_confidence, 2),
+        "orientation_known": orientation_known,
+        "rooms_with_low_confidence": len(low_confidence_rooms),
+        "total_rooms": len(zones),
+        "values_estimated": [f"{zone['name']}_dimensions" for zone in zones 
+                           if zone.get('data_quality', {}).get('dimension_source') == 'estimated'],
+        "warnings": warnings,
+        "data_sources": {
+            "gpt4v_parsing": True,
+            "envelope_extraction": False,  # Will be updated if envelope data used
+            "climate_data": "ASHRAE/IECC Database"
+        }
+    }
+
+
 def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dict, construction_values: Dict,
                                   outdoor_cooling_temp: float, outdoor_heating_temp: float, indoor_temp: float, 
                                   include_ventilation: bool = True, envelope_data: Optional[EnvelopeExtraction] = None) -> Dict[str, float]:
@@ -67,21 +122,45 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     else:
         ceiling_height = 9.0  # Default assumption
     
-    # Estimate building envelope areas (simplified - would be better from actual blueprints)
-    # Assume room is rectangular with typical proportions
-    room_width = math.sqrt(room.area * 0.75)  # Assume 4:3 aspect ratio
-    room_length = room.area / room_width
+    # Enhanced wall area calculation using GPT-4V exterior wall data
+    exterior_walls_count = room.source_elements.get('exterior_walls', 1) if hasattr(room, 'source_elements') else 1
     
-    # Calculate envelope areas
-    wall_area = 2 * (room_width + room_length) * ceiling_height
-    
-    # Subtract door area (assume one door per room)
-    door_area = 7 * 3  # 7ft x 3ft door
-    wall_area -= door_area
-    
-    # Calculate window area
-    window_area = room.windows * 12.0  # Assume 3x4 ft windows
-    wall_area -= window_area
+    if exterior_walls_count == 0:
+        # Interior room - no exterior wall area
+        wall_area = 0
+        logger.info(f"Room {room.name} is interior - no exterior wall loads")
+    else:
+        # Calculate room perimeter based on area
+        # Assume roughly square rooms for perimeter estimation
+        room_perimeter = 4 * math.sqrt(room.area)
+        
+        # Calculate exterior wall length based on number of exterior walls
+        # Each wall is approximately 1/4 of perimeter
+        exterior_wall_length = room_perimeter * (exterior_walls_count / 4.0)
+        
+        # Calculate wall area
+        wall_area = exterior_wall_length * ceiling_height
+        
+        # Subtract door area only if room has exterior doors
+        exterior_doors = room.source_elements.get('exterior_doors', 0) if hasattr(room, 'source_elements') else 0
+        if exterior_doors > 0:
+            door_area = exterior_doors * 21  # 3ft x 7ft doors
+            wall_area -= door_area
+        
+        # Calculate window area with size variation based on count
+        if room.windows > 0:
+            # Vary window size based on total count
+            if room.windows == 1:
+                window_size = 15.0  # Single large window (3x5 ft)
+            elif room.windows <= 3:
+                window_size = 12.0  # Medium windows (3x4 ft)
+            else:
+                window_size = 9.0   # Multiple smaller windows (3x3 ft)
+            
+            window_area = room.windows * window_size
+            wall_area -= window_area
+        else:
+            window_area = 0
     
     # Roof area (only for top floor rooms)
     roof_area = room.area if room.floor == max([r.floor for r in [room]]) else 0
@@ -166,11 +245,25 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
         )
         cooling_load += window_conduction
     
-    # 4. Window solar load
+    # 4. Window solar load with orientation uncertainty handling
     if window_area > 0:
-        solar_load = calculate_window_solar_load(
-            window_area, window_shgc, room.orientation
-        )
+        # Check if orientation is known
+        orientation_confidence = room.source_elements.get('orientation_confidence', 0.0) if hasattr(room, 'source_elements') else 0.0
+        
+        if room.orientation == 'unknown' or orientation_confidence < 0.3:
+            # Unknown orientation - use average of all orientations
+            orientations = ['N', 'S', 'E', 'W']
+            total_solar = 0
+            for orient in orientations:
+                total_solar += calculate_window_solar_load(
+                    window_area, window_shgc, orient
+                )
+            solar_load = total_solar / len(orientations)
+            logger.info(f"Room {room.name}: Using averaged solar load due to unknown orientation")
+        else:
+            solar_load = calculate_window_solar_load(
+                window_area, window_shgc, room.orientation
+            )
         cooling_load += solar_load
     
     # 5. Internal loads with CLF
@@ -241,9 +334,73 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     # Add ventilation heating load
     heating_load += ventilation['heating']
     
+    # Apply corner room and thermal exposure multipliers
+    if hasattr(room, 'source_elements'):
+        # Corner room factor
+        if room.source_elements.get('corner_room', False):
+            heating_load *= 1.15  # 15% increase for corner rooms
+            cooling_load *= 1.20  # 20% increase for corner rooms
+            logger.info(f"Room {room.name}: Applied corner room factors (H:1.15x, C:1.20x)")
+        
+        # Thermal exposure factor
+        thermal_exposure = room.source_elements.get('thermal_exposure', 'medium')
+        exposure_factors = {
+            'high': {'heating': 1.2, 'cooling': 1.25},
+            'medium': {'heating': 1.1, 'cooling': 1.1},
+            'low': {'heating': 1.0, 'cooling': 1.0}
+        }
+        factors = exposure_factors.get(thermal_exposure, exposure_factors['medium'])
+        heating_load *= factors['heating']
+        cooling_load *= factors['cooling']
+        
+        # Apply confidence-based safety factors
+        room_confidence = room.confidence if hasattr(room, 'confidence') else 0.8
+        if room_confidence < 0.5:
+            # Low confidence - add safety margin
+            heating_load *= 1.1
+            cooling_load *= 1.1
+            logger.warning(f"Room {room.name}: Low confidence ({room_confidence}) - applied 10% safety factor")
+    
+    # Create detailed load breakdown
+    load_breakdown = {
+        'heating': {
+            'wall_conduction': wall_load if 'wall_load' in locals() and wall_area > 0 else 0,
+            'roof_conduction': roof_load if 'roof_load' in locals() and roof_area > 0 else 0,
+            'window_conduction': window_u_factor * window_area * (indoor_temp - outdoor_heating_temp) if window_area > 0 else 0,
+            'infiltration': infiltration_heating,
+            'ventilation': ventilation['heating'],
+            'subtotal': heating_load / (factors.get('heating', 1.0) if 'factors' in locals() else 1.0),
+            'multipliers_applied': []
+        },
+        'cooling': {
+            'wall_conduction': wall_load if 'wall_load' in locals() else 0,
+            'roof_conduction': roof_load if 'roof_load' in locals() else 0,
+            'window_conduction': window_conduction if 'window_conduction' in locals() else 0,
+            'window_solar': solar_load if 'solar_load' in locals() else 0,
+            'internal_people': people_load if 'people_load' in locals() else 0,
+            'internal_lighting': lighting_load if 'lighting_load' in locals() else 0,
+            'internal_equipment': equipment_load if 'equipment_load' in locals() else 0,
+            'ventilation': ventilation['cooling'],
+            'subtotal': cooling_load / (factors.get('cooling', 1.0) if 'factors' in locals() else 1.0),
+            'multipliers_applied': []
+        }
+    }
+    
+    # Add multipliers info
+    if hasattr(room, 'source_elements'):
+        if room.source_elements.get('corner_room', False):
+            load_breakdown['heating']['multipliers_applied'].append('corner_room: 1.15x')
+            load_breakdown['cooling']['multipliers_applied'].append('corner_room: 1.20x')
+        
+        thermal_exposure = room.source_elements.get('thermal_exposure', 'medium')
+        if thermal_exposure != 'low':
+            load_breakdown['heating']['multipliers_applied'].append(f'thermal_exposure_{thermal_exposure}: {factors.get("heating", 1.0)}x')
+            load_breakdown['cooling']['multipliers_applied'].append(f'thermal_exposure_{thermal_exposure}: {factors.get("cooling", 1.0)}x')
+    
     return {
         'heating': max(heating_load, 0),
-        'cooling': max(cooling_load, 0)
+        'cooling': max(cooling_load, 0),
+        'breakdown': load_breakdown
     }
 
 
@@ -445,7 +602,7 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
         room_heating = room_loads['heating']
         room_cooling = room_loads['cooling']
         
-        zones.append({
+        zone_data = {
             "name": room.name,
             "area": room.area,
             "room_type": room_type,
@@ -455,7 +612,26 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
             "cfm_required": _calculate_airflow(room_cooling),
             "duct_size": _calculate_duct_size(room_cooling),
             "calculation_method": calculation_method
-        })
+        }
+        
+        # Add detailed breakdown if available
+        if 'breakdown' in room_loads:
+            zone_data['load_breakdown'] = room_loads['breakdown']
+        
+        # Add confidence and data quality info if available
+        if hasattr(room, 'confidence'):
+            zone_data['confidence'] = room.confidence
+        
+        if hasattr(room, 'source_elements'):
+            zone_data['data_quality'] = {
+                'orientation_known': room.orientation != 'unknown',
+                'orientation_confidence': room.source_elements.get('orientation_confidence', 0.0),
+                'dimension_source': room.source_elements.get('dimension_source', 'unknown'),
+                'exterior_walls': room.source_elements.get('exterior_walls', 1),
+                'corner_room': room.source_elements.get('corner_room', False)
+            }
+        
+        zones.append(zone_data)
         
         total_heating += room_heating
         total_cooling += room_cooling
@@ -484,6 +660,9 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     # Equipment sizing recommendations
     equipment = _recommend_equipment(total_heating, total_cooling, schema.sqft_total, heating_fuel)
     
+    # Calculate overall confidence metrics
+    confidence_metrics = _calculate_confidence_metrics(zones, schema)
+    
     result = {
         "heating_total": round(total_heating),
         "cooling_total": round(total_cooling),
@@ -503,7 +682,8 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
             "calculation_method": calculation_method,
             "include_ventilation": include_ventilation,
             "construction_values": construction_values
-        }
+        },
+        "confidence_metrics": confidence_metrics
     }
     
     # Create audit snapshot if requested
