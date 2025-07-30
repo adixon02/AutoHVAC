@@ -35,7 +35,16 @@ USE_CELERY = True
 # Debug mode for detailed error responses
 DEBUG_EXCEPTIONS = True  # Set to False in production
 
+# AI-first configuration
+AI_PARSING_ENABLED = os.getenv("AI_PARSING_ENABLED", "true").lower() != "false"
+LEGACY_ELEMENT_LIMIT = int(os.getenv("LEGACY_ELEMENT_LIMIT", "20000"))
+FILE_SIZE_WARNING_MB = int(os.getenv("FILE_SIZE_WARNING_MB", "20"))
+
 router = APIRouter()
+
+def should_use_ai_parsing() -> bool:
+    """Check if AI parsing should be used (default: True)"""
+    return AI_PARSING_ENABLED
 
 def get_file_info(file_path: str, project_id: str = None) -> dict:
     """Get detailed file information for debugging"""
@@ -195,6 +204,14 @@ async def upload_blueprint(
                 status_code=400,
                 detail="File size must be less than 50MB"
             )
+        
+        # Warn for large files
+        if file.size > FILE_SIZE_WARNING_MB * 1024 * 1024:
+            logger.warning(f"Large file uploaded: {file.size / 1024 / 1024:.1f}MB. Processing may take longer.")
+            # Add to audit/response later
+            large_file_warning = f"Large blueprint detected ({file.size / 1024 / 1024:.1f}MB). AI processing may take 2-3 minutes. Please do not refresh or leave the page."
+        else:
+            large_file_warning = None
         
         # Validate project label
         if not project_label.strip():
@@ -368,22 +385,28 @@ async def upload_blueprint(
                                 error_msg = f"PDF has {page_count} pages. Please limit to 100 pages or fewer for processing."
                                 return False, error_msg, page_count
                             
-                            # Quick complexity check on first few pages
+                            # Quick complexity check on first few pages (only for legacy parser)
                             total_elements = 0
-                            for page_num in range(min(3, page_count)):
-                                try:
-                                    page = doc[page_num]
-                                    drawings = page.get_drawings()
-                                    total_elements += len(drawings)
-                                    
-                                    if len(drawings) > 20000:
-                                        error_msg = f"Blueprint is too complex to process (page {page_num + 1} has {len(drawings)} elements). Please try a simplified version or contact support."
-                                        return False, error_msg, page_count
-                                except Exception:
-                                    # If we can't check complexity, continue
-                                    break
                             
-                            logger.info(f"PDF validation passed: {page_count} pages, estimated {total_elements} elements in first 3 pages")
+                            if should_use_ai_parsing():
+                                logger.info(f"AI parsing enabled - skipping element count validation for {page_count} pages")
+                            else:
+                                for page_num in range(min(3, page_count)):
+                                    try:
+                                        page = doc[page_num]
+                                        drawings = page.get_drawings()
+                                        total_elements += len(drawings)
+                                        
+                                        if len(drawings) > LEGACY_ELEMENT_LIMIT:
+                                            error_msg = f"Blueprint is too complex for traditional parsing (page {page_num + 1} has {len(drawings)} elements). AI parsing is recommended for complex blueprints."
+                                            return False, error_msg, page_count
+                                    except Exception:
+                                        # If we can't check complexity, continue
+                                        break
+                                
+                                logger.info(f"Legacy parser validation: {page_count} pages, {total_elements} elements in first 3 pages")
+                            
+                            logger.info(f"PDF validation passed: {page_count} pages{f', {total_elements} elements' if not should_use_ai_parsing() else ''}")
                             return True, None, page_count
                             
                         finally:
@@ -493,11 +516,22 @@ async def upload_blueprint(
             raise HTTPException(status_code=500, detail=error_response)
         
         logger.info(f"✅ UPLOAD SUCCESS: Returning jobId {project_id} for {email}")
-        return UploadResponse(
+        
+        # Add parsing path info to response
+        response = UploadResponse(
             job_id=project_id,
             status="pending",
             project_label=project_label.strip()
         )
+        
+        # Add warnings if needed
+        if large_file_warning:
+            response.message = large_file_warning
+        
+        # Log parsing path for metrics
+        logger.info(f"[PARSING PATH] Project {project_id}: Will use {'AI (GPT-4V)' if should_use_ai_parsing() else 'Legacy (Python)'} parser")
+        
+        return response
         
     except HTTPException as e:
         logger.error(f"❌ UPLOAD HTTP ERROR: {e.status_code} - {e.detail}")

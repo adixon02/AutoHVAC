@@ -190,6 +190,12 @@ def calculate_hvac_loads(
         # NEW JSON-FIRST APPROACH: Single-stage PDF to JSON conversion
         update_progress_sync("parsing_blueprint", 20, "Converting PDF to comprehensive JSON representation")
         
+        # Log metrics before parsing
+        parsing_start_time = time.time()
+        logger.info(f"[METRICS] Starting blueprint parsing for {project_id}")
+        logger.info(f"[METRICS] PDF file: {file_path}, size: {file_size_mb:.1f}MB")
+        logger.info(f"[METRICS] User: {email}, Zip: {zip_code}")
+        
         try:
             logger.info(f"Starting JSON-first blueprint parsing for {project_id}")
             logger.info(f"PDF file: {file_path}, size: {file_size} bytes")
@@ -202,6 +208,12 @@ def calculate_hvac_loads(
                 zip_code=zip_code,
                 project_id=project_id
             )
+            
+            # Log parsing completion metrics
+            parsing_end_time = time.time()
+            parsing_duration = parsing_end_time - parsing_start_time
+            logger.info(f"[METRICS] Blueprint parsing completed in {parsing_duration:.2f}s")
+            logger.info(f"[METRICS] Parsing path used: {parsing_metadata.ai_status.value if hasattr(parsing_metadata, 'ai_status') else 'unknown'}")
             
             # Store the comprehensive JSON in the database as canonical representation
             job_service.sync_update_project(project_id, {
@@ -406,7 +418,18 @@ def calculate_hvac_loads(
         # Stage 8: Store results and complete
         update_progress_sync("completed", 100, "Calculation completed successfully")
         
-        # Update project with final results and cleanup files
+        # Log final metrics
+        total_duration = time.time() - calculation_start_time
+        logger.info(f"[METRICS] Total processing time: {total_duration:.2f}s")
+        logger.info(f"[METRICS] File size: {file_size_mb:.1f}MB")
+        logger.info(f"[METRICS] Parsing duration: {parsing_duration:.2f}s")
+        logger.info(f"[METRICS] Rooms found: {len(blueprint_schema.rooms)}")
+        logger.info(f"[METRICS] Total area: {blueprint_schema.sqft_total} sqft")
+        logger.info(f"[METRICS] Heating load: {manualj_results['heating_total']} BTU/h")
+        logger.info(f"[METRICS] Cooling load: {manualj_results['cooling_total']} BTU/h")
+        
+        # Update project with final results
+        # NOTE: File cleanup happens automatically via job_service.sync_set_project_completed
         job_service.sync_set_project_completed(project_id, final_results)
         
         logger.info(f"HVAC calculation completed successfully for {project_id}")

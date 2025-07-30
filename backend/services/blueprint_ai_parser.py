@@ -187,23 +187,23 @@ class BlueprintAIParser:
                     # Render page as pixmap
                     pix = page.get_pixmap(matrix=mat)
                     
-                    # Convert to JPEG (more compatible with GPT-4V)
-                    img_bytes = pix.tobytes("jpeg", jpg_quality=90)
+                    # Try PNG first for lossless compression (better for line drawings)
+                    png_bytes = pix.tobytes("png")
                     
-                    # Check size limit
-                    if len(img_bytes) > self.max_image_size:
-                        logger.warning(f"Page {page_num+1} image too large ({len(img_bytes)} bytes), reducing quality...")
-                        # Try with 1.0x zoom instead
-                        mat = fitz.Matrix(1.0, 1.0)
-                        pix = page.get_pixmap(matrix=mat)
+                    if len(png_bytes) <= self.max_image_size:
+                        logger.info(f"Page {page_num + 1}: Using PNG format ({len(png_bytes) / 1024 / 1024:.1f}MB)")
+                        img_bytes = png_bytes
+                    else:
+                        # Fall back to JPEG with progressive compression
                         img_bytes = pix.tobytes("jpeg", jpg_quality=90)
-                        
-                        # If still too large, reduce quality
-                        if len(img_bytes) > self.max_image_size:
-                            img_bytes = pix.tobytes("jpeg", jpg_quality=70)
+                        logger.info(f"Page {page_num + 1}: Using JPEG format ({len(img_bytes) / 1024 / 1024:.1f}MB)")
+                    
+                    # Compress if still too large
+                    if len(img_bytes) > self.max_image_size:
+                        img_bytes = self._compress_image_for_gpt4v(img_bytes, page_num + 1, pix.width, pix.height)
                     
                     images.append(img_bytes)
-                    logger.info(f"Converted page {page_num+1} to image ({len(img_bytes)} bytes)")
+                    logger.info(f"Page {page_num + 1} ready: {len(img_bytes) / 1024 / 1024:.1f}MB")
                     
                 except Exception as e:
                     logger.error(f"Failed to convert page {page_num+1}: {str(e)}")
@@ -214,11 +214,83 @@ class BlueprintAIParser:
             if not images:
                 raise BlueprintAIParsingError("Failed to convert any pages to images")
             
+            # Log total conversion metrics
+            total_size = sum(len(img) for img in images)
+            logger.info(f"[METRICS] Converted {len(images)} pages, total size: {total_size / 1024 / 1024:.1f}MB")
             logger.info(f"Successfully converted {len(images)} pages to images")
+            
             return images
             
         except Exception as e:
             raise BlueprintAIParsingError(f"Failed to convert PDF to images with PyMuPDF: {str(e)}")
+    
+    def _compress_image_for_gpt4v(self, img_bytes: bytes, page_num: int, orig_width: int, orig_height: int) -> bytes:
+        """Compress image to stay under GPT-4V limit while maintaining readability"""
+        logger.info(f"Compressing page {page_num} (original: {len(img_bytes) / 1024 / 1024:.1f}MB)")
+        
+        # First try JPEG quality reduction
+        img = Image.open(BytesIO(img_bytes))
+        
+        # Try different JPEG qualities
+        for quality in [85, 75, 65, 50]:
+            buffer = BytesIO()
+            img.save(buffer, format='JPEG', quality=quality, optimize=True)
+            compressed = buffer.getvalue()
+            
+            if len(compressed) <= self.max_image_size:
+                logger.info(f"Compressed page {page_num} to {len(compressed) / 1024 / 1024:.1f}MB with JPEG quality {quality}")
+                return compressed
+        
+        # If still too large, reduce resolution while maintaining aspect ratio
+        return self._reduce_resolution(img, page_num)
+    
+    def _reduce_resolution(self, img: Image.Image, page_num: int) -> bytes:
+        """Reduce image resolution while maintaining minimum readability"""
+        orig_width, orig_height = img.size
+        
+        # Calculate scaling factor to stay above minimum resolution
+        min_dimension = min(orig_width, orig_height)
+        
+        # Try different scale factors
+        for scale in [0.75, 0.5, 0.4]:
+            new_width = int(orig_width * scale)
+            new_height = int(orig_height * scale)
+            
+            # Ensure minimum resolution for readability
+            if min(new_width, new_height) < self.min_resolution:
+                new_width = max(new_width, self.min_resolution)
+                new_height = max(new_height, self.min_resolution)
+            
+            # Resize with high-quality resampling
+            resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Try PNG first for resized image
+            buffer = BytesIO()
+            resized.save(buffer, format='PNG', optimize=True)
+            png_bytes = buffer.getvalue()
+            
+            if len(png_bytes) <= self.max_image_size:
+                logger.info(f"Reduced page {page_num} to {new_width}x{new_height} PNG ({len(png_bytes) / 1024 / 1024:.1f}MB)")
+                return png_bytes
+            
+            # Try JPEG if PNG is too large
+            buffer = BytesIO()
+            resized.save(buffer, format='JPEG', quality=75, optimize=True)
+            jpeg_bytes = buffer.getvalue()
+            
+            if len(jpeg_bytes) <= self.max_image_size:
+                logger.info(f"Reduced page {page_num} to {new_width}x{new_height} JPEG ({len(jpeg_bytes) / 1024 / 1024:.1f}MB)")
+                return jpeg_bytes
+        
+        # Last resort: very low quality JPEG at minimum resolution
+        min_size = (self.min_resolution, self.min_resolution)
+        last_resort = img.resize(min_size, Image.Resampling.LANCZOS)
+        buffer = BytesIO()
+        last_resort.save(buffer, format='JPEG', quality=40, optimize=True)
+        result = buffer.getvalue()
+        
+        logger.warning(f"Page {page_num} compressed to minimum size: {len(result) / 1024 / 1024:.1f}MB")
+        return result
     
     
     async def _extract_blueprint_data(self, image_bytes: bytes) -> Dict[str, Any]:

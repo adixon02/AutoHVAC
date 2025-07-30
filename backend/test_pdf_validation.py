@@ -16,6 +16,10 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from services.pdf_thread_manager import pdf_thread_manager
 
+# Check AI-first configuration
+AI_PARSING_ENABLED = os.getenv("AI_PARSING_ENABLED", "true").lower() != "false"
+LEGACY_ELEMENT_LIMIT = int(os.getenv("LEGACY_ELEMENT_LIMIT", "20000"))
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -135,9 +139,12 @@ def validate_pdf_from_disk(pdf_path: str, verbose: bool = False):
                     
                     total_elements += len(drawings)
                     
-                    if len(drawings) > 20000:
-                        error_msg = f"Blueprint is too complex to process (page {page_num + 1} has {len(drawings)} elements). Please try a simplified version or contact support."
+                    if not AI_PARSING_ENABLED and len(drawings) > LEGACY_ELEMENT_LIMIT:
+                        error_msg = f"Blueprint is too complex for traditional parsing (page {page_num + 1} has {len(drawings)} elements). AI parsing is recommended for complex blueprints."
                         return False, error_msg, page_count
+                    elif AI_PARSING_ENABLED and len(drawings) > LEGACY_ELEMENT_LIMIT:
+                        print(f"    Note: Page has {len(drawings)} elements (exceeds legacy limit of {LEGACY_ELEMENT_LIMIT})")
+                        print(f"    AI parsing enabled - complexity check skipped")
                         
                 except Exception as page_error:
                     print(f"    ERROR processing page: {type(page_error).__name__}: {str(page_error)}")
@@ -146,7 +153,15 @@ def validate_pdf_from_disk(pdf_path: str, verbose: bool = False):
                     # Continue with other pages
             
             print(f"\nTotal elements in first {min(3, page_count)} pages: {total_elements}")
-            print("\nPDF validation PASSED ✅")
+            
+            if AI_PARSING_ENABLED:
+                print(f"\nAI-first mode: ENABLED")
+                print("PDF validation PASSED ✅ (no complexity limits for AI parsing)")
+            else:
+                print(f"\nAI-first mode: DISABLED")
+                print(f"Legacy parser limit: {LEGACY_ELEMENT_LIMIT} elements per page")
+                print("PDF validation PASSED ✅")
+            
             return True, None, page_count
             
         finally:

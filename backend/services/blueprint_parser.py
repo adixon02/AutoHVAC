@@ -71,11 +71,11 @@ class BlueprintParser:
         Raises:
             BlueprintParsingError: If parsing fails critically
         """
-        # Check if GPT-4V parsing is enabled
-        use_gpt4v = os.getenv("USE_GPT4V_PARSING", "false").lower() == "true"
+        # Check if GPT-4V parsing is enabled (default: true for AI-first)
+        use_gpt4v = os.getenv("AI_PARSING_ENABLED", "true").lower() != "false"
         
         if use_gpt4v:
-            logger.info(f"Using GPT-4V parsing for {filename}")
+            logger.info(f"[AI-FIRST] Using GPT-4V parsing for {filename}")
             try:
                 # Use async context to run the AI parser
                 loop = asyncio.new_event_loop()
@@ -84,19 +84,24 @@ class BlueprintParser:
                     result = loop.run_until_complete(
                         blueprint_ai_parser.parse_pdf_with_gpt4v(pdf_path, filename, zip_code, project_id)
                     )
-                    logger.info(f"GPT-4V parsing completed successfully for {filename}")
+                    logger.info(f"[AI-FIRST] GPT-4V parsing completed successfully for {filename}")
+                    # Log metrics
+                    if hasattr(result, 'parsing_metadata'):
+                        logger.info(f"[METRICS] AI parsing: {result.parsing_metadata.processing_time_seconds:.2f}s, {len(result.rooms)} rooms found")
                     return result
                 finally:
                     loop.close()
             except BlueprintAIParsingError as e:
-                logger.error(f"GPT-4V parsing failed for {filename}, falling back to traditional parsing: {str(e)}")
+                logger.error(f"AI parsing failed for {filename}: {str(e)}")
+                logger.warning(f"Falling back to traditional parsing. Results may be less accurate for complex blueprints.")
                 # Fall through to traditional parsing
             except Exception as e:
-                logger.error(f"Unexpected error in GPT-4V parsing for {filename}, falling back to traditional parsing: {str(e)}")
+                logger.error(f"Unexpected error in AI parsing for {filename}: {type(e).__name__}: {str(e)}")
+                logger.warning(f"AI parsing temporarily unavailable, using traditional parsing as backup.")
                 # Fall through to traditional parsing
         
-        # Traditional parsing pipeline (existing code)
-        logger.info(f"Using traditional parsing for {filename}")
+        # Traditional parsing pipeline (fallback when AI fails)
+        logger.info(f"Using traditional parsing for {filename} (AI {'disabled' if not use_gpt4v else 'failed'})")
         start_time = time.time()
         parsing_metadata = ParsingMetadata(
             parsing_timestamp=datetime.utcnow(),

@@ -9,6 +9,7 @@ class UploadResponse(BaseModel):
     job_id: str = Field(..., alias="jobId")
     status: str
     project_label: str = Field(..., alias="projectLabel")
+    message: Optional[str] = None  # For warnings like large file processing time
     
     class Config:
         populate_by_name = True
