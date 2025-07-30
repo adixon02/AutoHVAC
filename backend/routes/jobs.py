@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_async_session
 from services.job_service import job_service
 from services.user_service import user_service
+from services.storage import storage_service
 from models.db_models import Project, JobStatus
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
@@ -99,9 +100,18 @@ async def download_project_report(
                 detail="PDF report not available"
             )
         
+        # Construct full path from storage service
+        # pdf_report_path stores relative path like "reports/{project_id}_report.pdf"
+        if project.pdf_report_path.startswith('reports/'):
+            # New format with relative path
+            full_path = os.path.join(storage_service.storage_path, project.pdf_report_path)
+        else:
+            # Legacy format with full path
+            full_path = project.pdf_report_path
+        
         # Check if file exists
-        if not os.path.exists(project.pdf_report_path):
-            logger.error(f"PDF file not found at {project.pdf_report_path}")
+        if not os.path.exists(full_path):
+            logger.error(f"PDF file not found at {full_path}")
             raise HTTPException(
                 status_code=404,
                 detail="Report file not found"
@@ -110,7 +120,7 @@ async def download_project_report(
         # Return file
         filename = f"{project.project_label}_report.pdf"
         return FileResponse(
-            path=project.pdf_report_path,
+            path=full_path,
             filename=filename,
             media_type="application/pdf",
             headers={
@@ -184,11 +194,18 @@ async def delete_project(
             )
         
         # Delete PDF file if it exists
-        if project.pdf_report_path and os.path.exists(project.pdf_report_path):
-            try:
-                os.remove(project.pdf_report_path)
-            except Exception as e:
-                logger.warning(f"Could not delete PDF file {project.pdf_report_path}: {str(e)}")
+        if project.pdf_report_path:
+            # Construct full path
+            if project.pdf_report_path.startswith('reports/'):
+                full_path = os.path.join(storage_service.storage_path, project.pdf_report_path)
+            else:
+                full_path = project.pdf_report_path
+            
+            if os.path.exists(full_path):
+                try:
+                    os.remove(full_path)
+                except Exception as e:
+                    logger.warning(f"Could not delete PDF file {full_path}: {str(e)}")
         
         # Delete from database
         success = await job_service.delete_project(project_id, session)

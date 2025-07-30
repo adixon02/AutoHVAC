@@ -8,6 +8,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Organized Storage Directory Structure**
+  - New `/var/data` subdirectories: `uploads/`, `processed/`, `reports/`, `temp/`
+  - Automatic directory initialization with permission checks on startup
+  - Storage service handles all file operations with proper error handling
+  - Backward compatibility for existing files
+- **Automated File Cleanup System**
+  - Scheduled Celery tasks for automatic file cleanup
+  - Configurable retention periods via environment variables
+  - `cleanup_temp_files`: Runs every 6 hours (6-hour retention)
+  - `cleanup_old_uploads`: Runs daily at 2 AM (30-day retention)
+  - `cleanup_old_processed`: Runs weekly on Mondays (90-day retention)
+- **Storage Service Enhancements**
+  - New methods: `save_processed_data()`, `save_report()`, `get_temp_dir()`, `cleanup_temp()`
+  - Centralized file path management
+  - Thread-safe operations with proper locking
+- **Migration Support**
+  - One-time migration script for existing files (`scripts/migrate_storage.py`)
+  - Dry-run mode for safe testing
+  - Comprehensive logging of migration process
+- **Environment Variables for Cleanup**
+  - `STORAGE_CLEANUP_ENABLED`: Enable/disable automated cleanup
+  - `TEMP_RETENTION_HOURS`: Hours to keep temporary files (default: 6)
+  - `UPLOAD_RETENTION_DAYS`: Days to keep uploaded PDFs (default: 30)
+  - `PROCESSED_RETENTION_DAYS`: Days to keep processed data (default: 90)
+
+### Changed
+- **PDF Reports** now saved to dedicated `reports/` directory
+- **Download endpoints** handle both legacy (full path) and new (relative path) formats
+- **File operations** now use centralized storage service
+- **Cleanup tasks** run as scheduled jobs, not on-demand (prevents race conditions)
+
+### Fixed
+- **File organization** - Clear separation between uploads, processed data, and reports
+- **Cleanup race conditions** - Files no longer deleted during active processing
+- **Storage permissions** - All directories tested for write access on startup
+
+### Added (Previous)
 - **AI-First Blueprint Parsing System**
   - GPT-4V is now the default parsing method (AI_PARSING_ENABLED=true)
   - No element count restrictions for AI parsing (handles 40k+ elements)
@@ -27,13 +64,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Legacy parser errors suggest AI parsing for complex files
   - Debug mode returns full exception details in API responses
 
-### Changed
+### Changed (Previous)
 - **AI parsing is now default** - USE_GPT4V_PARSING deprecated in favor of AI_PARSING_ENABLED
 - **Element count validation removed for AI path** - Complex AutoCAD files now process without issues
 - **Better fallback behavior** - Legacy parser only used when AI fails, not by default
 - **Error messages improved** - Users understand why validation failed and what alternatives exist
 
-### Fixed
+### Fixed (Previous)
 - **Missing PIL Image import** in blueprint_ai_parser.py causing NameError
 - **Complex blueprints rejected** - 38k+ element drawings now process successfully
 - **Overly restrictive validation** - Element count checks only apply to legacy parser

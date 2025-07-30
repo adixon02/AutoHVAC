@@ -32,25 +32,29 @@ from services.climate_data import get_climate_data
 from services.blueprint_parser import parse_blueprint_to_json, BlueprintParsingError
 from services.envelope_extractor import extract_envelope_data, EnvelopeExtractorError
 from services.audit_tracker import create_calculation_audit
+from services.storage import storage_service
 from database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
 # Log disk mount configuration at worker startup
-disk_path = os.getenv("RENDER_DISK_PATH", "/var/data/uploads")
 logger.info(f"[WORKER STARTUP] RENDER_DISK_PATH environment variable: {os.getenv('RENDER_DISK_PATH')}")
-logger.info(f"[WORKER STARTUP] Using storage path: {disk_path}")
+logger.info(f"[WORKER STARTUP] Storage service initialized with following paths:")
+logger.info(f"[WORKER STARTUP]   - Uploads: {storage_service.upload_dir}")
+logger.info(f"[WORKER STARTUP]   - Processed: {storage_service.processed_dir}")
+logger.info(f"[WORKER STARTUP]   - Reports: {storage_service.reports_dir}")
+logger.info(f"[WORKER STARTUP]   - Temp: {storage_service.temp_dir}")
 
 # Check if the disk is mounted and accessible
 try:
-    if os.path.exists(disk_path):
-        logger.info(f"[WORKER STARTUP] Storage path exists: {disk_path}")
-        contents = os.listdir(disk_path)
-        logger.info(f"[WORKER STARTUP] Storage path contents ({len(contents)} files): {contents[:5]}...")
+    if os.path.exists(storage_service.upload_dir):
+        logger.info(f"[WORKER STARTUP] Upload directory exists: {storage_service.upload_dir}")
+        contents = os.listdir(storage_service.upload_dir)
+        logger.info(f"[WORKER STARTUP] Upload directory contents ({len(contents)} files): {contents[:5]}...")
     else:
-        logger.error(f"[WORKER STARTUP] Storage path does NOT exist: {disk_path}")
+        logger.error(f"[WORKER STARTUP] Upload directory does NOT exist: {storage_service.upload_dir}")
 except Exception as e:
-    logger.error(f"[WORKER STARTUP] Error checking storage path {disk_path}: {e}")
+    logger.error(f"[WORKER STARTUP] Error checking storage directories: {e}")
 
 celery_app = Celery(
     'autohvac',
@@ -134,31 +138,19 @@ def calculate_hvac_loads(
         except Exception as e:
             logger.exception(f"Error updating progress for {project_id}: {e}")
     
-    # CRITICAL: Reconstruct file path from RENDER_DISK_PATH environment variable
-    disk_path = os.getenv("RENDER_DISK_PATH")
-    if not disk_path:
-        error_msg = "RENDER_DISK_PATH environment variable not set in worker"
-        logger.error(f"[CELERY TASK] {error_msg}")
-        job_service.sync_set_project_failed(project_id, error_msg)
-        raise RuntimeError(error_msg)
-    
-    # Construct file path from environment variable and project ID
-    # Files are stored in the uploads subdirectory
-    upload_dir = os.path.join(disk_path, "uploads")
-    file_path = os.path.join(upload_dir, f"{project_id}.pdf")
+    # Get file path using storage service
+    file_path = storage_service.get_file_path(project_id)
     
     logger.info(f"[CELERY TASK] Starting task for project {project_id}")
-    logger.info(f"[CELERY TASK] RENDER_DISK_PATH={disk_path}")
-    logger.info(f"[CELERY TASK] Upload directory: {upload_dir}")
     logger.info(f"[CELERY TASK] File path: {file_path}")
     
     # List directory contents for debugging
     try:
-        if os.path.exists(upload_dir):
-            contents = os.listdir(upload_dir)
+        if os.path.exists(storage_service.upload_dir):
+            contents = os.listdir(storage_service.upload_dir)
             logger.info(f"[CELERY TASK] Upload directory contents ({len(contents)} files): {contents[:10]}...")
         else:
-            logger.warning(f"[CELERY TASK] Upload directory does not exist: {upload_dir}")
+            logger.warning(f"[CELERY TASK] Upload directory does not exist: {storage_service.upload_dir}")
     except Exception as e:
         logger.warning(f"[CELERY TASK] Could not list directory: {e}")
     
@@ -204,21 +196,21 @@ def calculate_hvac_loads(
         logger.error(f"[CELERY TASK] {error_msg}")
         
         # Additional debugging info
-        logger.error(f"[CELERY TASK] RENDER_DISK_PATH={disk_path}")
+        logger.error(f"[CELERY TASK] RENDER_DISK_PATH={storage_service.storage_path}")
         logger.error(f"[CELERY TASK] Expected file: {file_path}")
         
         # List all files in the storage directory
         try:
-            if os.path.exists(upload_dir):
-                all_files = os.listdir(upload_dir)
+            if os.path.exists(storage_service.upload_dir):
+                all_files = os.listdir(storage_service.upload_dir)
                 pdf_files = [f for f in all_files if f.endswith('.pdf')]
-                logger.error(f"[CELERY TASK] PDF files in {upload_dir}: {pdf_files}")
+                logger.error(f"[CELERY TASK] PDF files in {storage_service.upload_dir}: {pdf_files}")
                 logger.error(f"[CELERY TASK] All files ({len(all_files)}): {all_files[:20]}...")
             else:
-                logger.error(f"[CELERY TASK] Upload directory does not exist: {upload_dir}")
+                logger.error(f"[CELERY TASK] Upload directory does not exist: {storage_service.upload_dir}")
                 # Also check parent directory
-                if os.path.exists(disk_path):
-                    parent_contents = os.listdir(disk_path)
+                if os.path.exists(storage_service.storage_path):
+                    parent_contents = os.listdir(storage_service.storage_path)
                     logger.error(f"[CELERY TASK] Parent directory contents: {parent_contents}")
         except Exception as e:
             logger.error(f"[CELERY TASK] Failed to list directory: {e}")

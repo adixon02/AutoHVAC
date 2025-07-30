@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 import logging
 from fastapi import HTTPException
+from services.storage import storage_service
 
 try:
     import pdfkit
@@ -20,14 +21,7 @@ class PDFGenerationService:
     
     def __init__(self):
         self.template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'html_templates')
-        # Use local temp directory for dev, container path for production
-        default_path = '/tmp/autohvac_reports' if os.path.exists('/tmp') else '/app/reports'
-        self.pdf_storage_path = os.getenv('PDF_STORAGE_PATH', default_path)
         self.wkhtmltopdf_path = os.getenv('WKHTMLTOPDF_PATH', '/usr/local/bin/wkhtmltopdf')
-        
-        # Ensure PDF storage directory exists (only if not disabled)
-        if not PDF_DISABLED:
-            os.makedirs(self.pdf_storage_path, exist_ok=True)
         
         # Initialize Jinja2 environment
         self.jinja_env = Environment(
@@ -136,16 +130,32 @@ class PDFGenerationService:
             template = self.jinja_env.get_template('report.html')
             html_content = template.render(**context)
             
-            # Generate PDF filename
-            safe_project_name = self._sanitize_filename(project_label)
-            pdf_filename = f"{safe_project_name}_{project_id[:8]}_report.pdf"
-            pdf_path = os.path.join(self.pdf_storage_path, pdf_filename)
+            # Generate PDF to temp file first
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as temp_html:
+                temp_html.write(html_content)
+                temp_html_path = temp_html.name
             
-            # Generate PDF
-            self._generate_pdf(html_content, pdf_path)
-            
-            logger.info(f"Generated PDF report: {pdf_path}")
-            return pdf_path
+            try:
+                # Generate PDF to temp file
+                temp_pdf_path = temp_html_path.replace('.html', '.pdf')
+                self._generate_pdf(html_content, temp_pdf_path)
+                
+                # Read the PDF content
+                with open(temp_pdf_path, 'rb') as f:
+                    pdf_content = f.read()
+                
+                # Save using storage service
+                relative_path = storage_service.save_report(project_id, pdf_content)
+                
+                logger.info(f"Generated PDF report for project {project_id}")
+                return relative_path
+            finally:
+                # Clean up temp files
+                if os.path.exists(temp_html_path):
+                    os.unlink(temp_html_path)
+                if os.path.exists(temp_pdf_path):
+                    os.unlink(temp_pdf_path)
             
         except Exception as e:
             logger.error(f"Error generating PDF report for project {project_id}: {str(e)}")
@@ -197,16 +207,17 @@ class PDFGenerationService:
         
         return " ".join(notes) if notes else "Standard residential HVAC system recommended."
     
-    def delete_report(self, pdf_path: str) -> bool:
+    def delete_report(self, project_id: str) -> bool:
         """Delete a PDF report file"""
         try:
-            if os.path.exists(pdf_path):
-                os.remove(pdf_path)
-                logger.info(f"Deleted PDF report: {pdf_path}")
+            report_path = storage_service.get_report_path(project_id)
+            if os.path.exists(report_path):
+                os.remove(report_path)
+                logger.info(f"Deleted PDF report for project {project_id}")
                 return True
             return False
         except Exception as e:
-            logger.error(f"Error deleting PDF report {pdf_path}: {str(e)}")
+            logger.error(f"Error deleting PDF report for project {project_id}: {str(e)}")
             return False
 
 # Global instance

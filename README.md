@@ -89,7 +89,8 @@ AutoHVAC/
 │   │   └── local_server.py            # Standalone local development server
 │   ├── tasks/                         # Celery background tasks
 │   │   ├── __init__.py
-│   │   └── calculate_hvac_loads.py    # Complete HVAC pipeline processing
+│   │   ├── calculate_hvac_loads.py    # Complete HVAC pipeline processing
+│   │   └── cleanup_tasks.py           # Scheduled file cleanup tasks
 │   ├── models/                        # Data models
 │   │   ├── __init__.py
 │   │   ├── db_models.py               # SQLModel database models
@@ -208,8 +209,10 @@ AutoHVAC/
   - Page complexity filtering and optimal page selection
   - Room keyword detection and dimension pattern analysis
 - **`storage.py`**: File storage and management service
-  - Handles temporary file operations and cleanup
-  - Storage abstraction for different backends
+  - Organized directory structure: `/var/data/{uploads,processed,reports,temp}/`
+  - Automatic directory initialization with permission checks
+  - Methods for saving uploads, processed data, reports, and temp files
+  - Backward compatibility with existing file paths
 
 #### **Test Suite (`backend/tests/`)**
 - **`test_parser.py`**: Comprehensive parser component tests
@@ -286,7 +289,7 @@ pip install PyMuPDF
 
 ### Environment Variables
 
-Create `.env` file in project root:
+Create `.env` file in project root (see `.env.example` for full template):
 
 ```bash
 # OpenAI (Required)
@@ -297,6 +300,15 @@ STRIPE_SECRET_KEY=sk_test_...
 STRIPE_PUBLISHABLE_KEY=pk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 STRIPE_PRICE_ID=price_...
+
+# Storage Configuration (Production)
+RENDER_DISK_PATH=/var/data  # Set by Render automatically
+
+# Storage Cleanup Configuration
+STORAGE_CLEANUP_ENABLED=true
+TEMP_RETENTION_HOURS=6
+UPLOAD_RETENTION_DAYS=30
+PROCESSED_RETENTION_DAYS=90
 
 # Optional (for production)
 DATABASE_URL=postgresql://user:pass@host:5432/db

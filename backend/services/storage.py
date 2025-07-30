@@ -35,35 +35,52 @@ class StorageService:
         if not os.path.isdir(self.storage_path):
             raise RuntimeError(f"Storage path is not a directory: {self.storage_path}")
         
-        # Create a subdirectory for uploads if we want organization
+        # Define all directory paths
         self.upload_dir = os.path.join(self.storage_path, "uploads")
+        self.processed_dir = os.path.join(self.storage_path, "processed")
+        self.reports_dir = os.path.join(self.storage_path, "reports")
+        self.temp_dir = os.path.join(self.storage_path, "temp")
         
-        try:
-            # Create uploads subdirectory if it doesn't exist
-            if not os.path.exists(self.upload_dir):
-                logger.info(f"[STORAGE INIT] Creating uploads directory: {self.upload_dir}")
-                os.makedirs(self.upload_dir, exist_ok=True)
-            
-            # List current contents for debugging
+        # Initialize all directories
+        self._initialize_directories()
+        
+        logger.info(f"[STORAGE INIT] Storage service initialized successfully")
+        logger.info(f"[STORAGE INIT] Mount point: {self.storage_path}")
+        logger.info(f"[STORAGE INIT] Directories: uploads/, processed/, reports/, temp/")
+    
+    def _initialize_directories(self):
+        """Create all required directories with proper permissions"""
+        dirs = [
+            ("uploads", self.upload_dir),
+            ("processed", self.processed_dir),
+            ("reports", self.reports_dir),
+            ("temp", self.temp_dir)
+        ]
+        
+        for dir_name, dir_path in dirs:
             try:
-                contents = os.listdir(self.upload_dir)
-                logger.info(f"[STORAGE INIT] Upload directory contents ({len(contents)} files): {contents[:10]}...")
+                # Create directory if it doesn't exist
+                if not os.path.exists(dir_path):
+                    logger.info(f"[STORAGE INIT] Creating {dir_name} directory: {dir_path}")
+                    os.makedirs(dir_path, mode=0o755, exist_ok=True)
+                
+                # Test write permissions
+                test_file = os.path.join(dir_path, ".write_test")
+                with open(test_file, 'w') as f:
+                    f.write("test")
+                os.unlink(test_file)
+                
+                # List current contents for debugging (only for uploads)
+                if dir_name == "uploads":
+                    try:
+                        contents = os.listdir(dir_path)
+                        logger.info(f"[STORAGE INIT] {dir_name} directory contents ({len(contents)} files): {contents[:10]}...")
+                    except Exception as e:
+                        logger.warning(f"[STORAGE INIT] Could not list {dir_name} directory contents: {e}")
+                
             except Exception as e:
-                logger.warning(f"[STORAGE INIT] Could not list upload directory contents: {e}")
-            
-            # Test write permissions in the uploads directory
-            test_file = os.path.join(self.upload_dir, ".write_test")
-            with open(test_file, 'w') as f:
-                f.write("test")
-            os.unlink(test_file)
-            
-            logger.info(f"[STORAGE INIT] Storage service initialized successfully")
-            logger.info(f"[STORAGE INIT] Mount point: {self.storage_path}")
-            logger.info(f"[STORAGE INIT] Upload directory: {self.upload_dir}")
-            
-        except Exception as e:
-            logger.error(f"[STORAGE INIT] Cannot write to storage path: {e}")
-            raise RuntimeError(f"Storage path is not writable: {e}")
+                logger.error(f"[STORAGE INIT] Cannot initialize {dir_name} directory: {e}")
+                raise RuntimeError(f"{dir_name} directory is not writable: {e}")
     
     async def save_upload(self, project_id: str, content: bytes) -> str:
         """Save uploaded file to persistent storage"""
@@ -148,6 +165,63 @@ class StorageService:
     def file_exists(self, project_id: str) -> bool:
         """Check if file exists for a project"""
         return os.path.exists(self.get_file_path(project_id))
+    
+    def save_processed_data(self, project_id: str, filename: str, content: bytes) -> str:
+        """Save processed data files (images, JSON, etc)"""
+        # Create project subdirectory
+        project_dir = os.path.join(self.processed_dir, project_id)
+        os.makedirs(project_dir, exist_ok=True)
+        
+        file_path = os.path.join(project_dir, filename)
+        
+        try:
+            with open(file_path, 'wb') as f:
+                f.write(content)
+            logger.info(f"[STORAGE] Saved processed file: {file_path}")
+            return file_path
+        except Exception as e:
+            logger.error(f"Failed to save processed file for project {project_id}: {e}")
+            raise
+    
+    def save_report(self, project_id: str, content: bytes) -> str:
+        """Save generated PDF report"""
+        file_path = os.path.join(self.reports_dir, f"{project_id}_report.pdf")
+        
+        try:
+            with open(file_path, 'wb') as f:
+                f.write(content)
+            logger.info(f"[STORAGE] Saved report: {file_path}")
+            # Return relative path for database storage
+            return f"reports/{project_id}_report.pdf"
+        except Exception as e:
+            logger.error(f"Failed to save report for project {project_id}: {e}")
+            raise
+    
+    def get_temp_dir(self, project_id: str) -> str:
+        """Get temporary directory for a project, creating if needed"""
+        temp_project_dir = os.path.join(self.temp_dir, project_id)
+        os.makedirs(temp_project_dir, exist_ok=True)
+        return temp_project_dir
+    
+    def cleanup_temp(self, project_id: str):
+        """Clean up temporary files for a project"""
+        import shutil
+        temp_project_dir = os.path.join(self.temp_dir, project_id)
+        try:
+            if os.path.exists(temp_project_dir):
+                shutil.rmtree(temp_project_dir)
+                logger.info(f"[CLEANUP] Removed temp directory for project {project_id}")
+        except Exception as e:
+            logger.error(f"[CLEANUP] Failed to cleanup temp files for project {project_id}: {e}")
+            # Don't raise - cleanup failures shouldn't break the flow
+    
+    def get_processed_file_path(self, project_id: str, filename: str) -> str:
+        """Get path to a processed file"""
+        return os.path.join(self.processed_dir, project_id, filename)
+    
+    def get_report_path(self, project_id: str) -> str:
+        """Get path to report file"""
+        return os.path.join(self.reports_dir, f"{project_id}_report.pdf")
 
 # Singleton instance
 storage_service = StorageService()

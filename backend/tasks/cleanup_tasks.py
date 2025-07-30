@@ -1,179 +1,287 @@
 """
-Automated cleanup tasks for old files and database records
+Scheduled cleanup tasks for managing file storage
+Runs periodically to clean up old files and maintain disk space
 """
 import os
 import time
+import shutil
 from datetime import datetime, timedelta
 from celery import Celery
 from celery.schedules import crontab
 import logging
-from typing import List, Tuple
-
-from services.job_service import job_service
-from database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
-celery_app = Celery(
-    'autohvac',
-    broker=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
-    backend=os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+# Create Celery app with Redis as broker
+redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+celery_app = Celery('autohvac', broker=redis_url, backend=redis_url)
+
+# Configure Celery
+celery_app.conf.update(
+    task_serializer='json',
+    accept_content=['json'],
+    result_serializer='json',
+    timezone='UTC',
+    enable_utc=True,
 )
 
-# Configuration
-DEFAULT_GRACE_PERIOD_DAYS = 7
-MAX_FILES_PER_RUN = 100  # Limit to prevent overwhelming the system
+# Load cleanup configuration from environment
+STORAGE_CLEANUP_ENABLED = os.getenv("STORAGE_CLEANUP_ENABLED", "true").lower() == "true"
+TEMP_RETENTION_HOURS = int(os.getenv("TEMP_RETENTION_HOURS", "6"))
+UPLOAD_RETENTION_DAYS = int(os.getenv("UPLOAD_RETENTION_DAYS", "30"))
+PROCESSED_RETENTION_DAYS = int(os.getenv("PROCESSED_RETENTION_DAYS", "90"))
+RENDER_DISK_PATH = os.getenv("RENDER_DISK_PATH", "/var/data")
 
+# Configure periodic tasks
+celery_app.conf.beat_schedule = {
+    'cleanup-temp-files': {
+        'task': 'tasks.cleanup_tasks.cleanup_temp_files',
+        'schedule': crontab(minute='0', hour='*/6'),  # Every 6 hours
+    },
+    'cleanup-old-uploads': {
+        'task': 'tasks.cleanup_tasks.cleanup_old_uploads',
+        'schedule': crontab(minute='0', hour='2'),  # Daily at 2 AM
+    },
+    'cleanup-old-processed': {
+        'task': 'tasks.cleanup_tasks.cleanup_old_processed',
+        'schedule': crontab(minute='0', hour='3', day_of_week='1'),  # Weekly on Monday at 3 AM
+    },
+    'health-check': {
+        'task': 'tasks.cleanup_tasks.health_check',
+        'schedule': 300.0,  # Every 5 minutes
+    }
+}
+
+def get_file_age_hours(file_path: str) -> float:
+    """Get age of file in hours"""
+    try:
+        stat = os.stat(file_path)
+        age = time.time() - stat.st_mtime
+        return age / 3600  # Convert to hours
+    except Exception as e:
+        logger.error(f"Error getting file age for {file_path}: {e}")
+        return 0
+
+def get_file_age_days(file_path: str) -> float:
+    """Get age of file in days"""
+    return get_file_age_hours(file_path) / 24
 
 @celery_app.task(
     acks_late=True,
     time_limit=600,  # 10 minutes max
     soft_time_limit=540  # 9 minutes soft limit
 )
-def cleanup_old_files(grace_period_days: int = None) -> dict:
-    """
-    Clean up old PDF files from storage and their associated database records
+def cleanup_temp_files():
+    """Clean up temporary files older than TEMP_RETENTION_HOURS"""
+    if not STORAGE_CLEANUP_ENABLED:
+        logger.info("[CLEANUP] Storage cleanup is disabled")
+        return {"status": "skipped", "reason": "cleanup disabled"}
     
-    Args:
-        grace_period_days: Number of days to keep files (default: from env or 7)
-        
-    Returns:
-        Dict with cleanup statistics
-    """
-    if grace_period_days is None:
-        grace_period_days = int(os.getenv('FILE_CLEANUP_GRACE_DAYS', DEFAULT_GRACE_PERIOD_DAYS))
+    temp_dir = os.path.join(RENDER_DISK_PATH, "temp")
+    if not os.path.exists(temp_dir):
+        logger.warning(f"[CLEANUP] Temp directory does not exist: {temp_dir}")
+        return {"status": "error", "reason": "temp directory not found"}
     
-    logger.info(f"[CLEANUP] Starting cleanup task with {grace_period_days} day grace period")
+    cleaned_count = 0
+    error_count = 0
+    total_size_cleaned = 0
     
-    # Get storage path from environment
-    storage_path = os.getenv("RENDER_DISK_PATH")
-    if not storage_path:
-        logger.error("[CLEANUP] RENDER_DISK_PATH not set, skipping cleanup")
-        return {"error": "RENDER_DISK_PATH not set"}
-    
-    # Files are stored in the uploads subdirectory
-    upload_dir = os.path.join(storage_path, "uploads")
-    logger.info(f"[CLEANUP] Mount point: {storage_path}")
-    logger.info(f"[CLEANUP] Upload directory: {upload_dir}")
-    
-    # Track statistics
-    stats = {
-        "files_checked": 0,
-        "files_deleted": 0,
-        "files_failed": 0,
-        "bytes_freed": 0,
-        "db_records_cleaned": 0,
-        "errors": []
-    }
+    logger.info(f"[CLEANUP] Starting temp file cleanup (retention: {TEMP_RETENTION_HOURS} hours)")
     
     try:
-        # List all PDF files in storage
-        if not os.path.exists(upload_dir):
-            logger.warning(f"[CLEANUP] Upload directory does not exist: {upload_dir}")
-            return {"error": f"Upload directory does not exist: {upload_dir}"}
-        
-        all_files = os.listdir(upload_dir)
-        pdf_files = [f for f in all_files if f.endswith('.pdf')]
-        
-        logger.info(f"[CLEANUP] Found {len(pdf_files)} PDF files to check")
-        
-        # Calculate cutoff time
-        cutoff_time = time.time() - (grace_period_days * 24 * 60 * 60)
-        cutoff_datetime = datetime.fromtimestamp(cutoff_time)
-        
-        logger.info(f"[CLEANUP] Will delete files older than {cutoff_datetime}")
-        
-        # Process files
-        files_to_delete: List[Tuple[str, float, int]] = []
-        
-        for filename in pdf_files[:MAX_FILES_PER_RUN]:  # Limit files per run
-            stats["files_checked"] += 1
-            file_path = os.path.join(upload_dir, filename)
+        # Iterate through project directories in temp/
+        for project_id in os.listdir(temp_dir):
+            project_dir = os.path.join(temp_dir, project_id)
             
-            try:
-                # Get file stats
-                file_stat = os.stat(file_path)
-                file_mtime = file_stat.st_mtime
-                file_size = file_stat.st_size
-                
-                # Check if file is old enough to delete
-                if file_mtime < cutoff_time:
-                    files_to_delete.append((filename, file_mtime, file_size))
-                    
-            except Exception as e:
-                logger.warning(f"[CLEANUP] Error checking file {filename}: {e}")
-                stats["files_failed"] += 1
-                stats["errors"].append(f"Error checking {filename}: {str(e)}")
-        
-        # Sort by modification time (oldest first)
-        files_to_delete.sort(key=lambda x: x[1])
-        
-        logger.info(f"[CLEANUP] Found {len(files_to_delete)} files to delete")
-        
-        # Delete old files
-        for filename, mtime, size in files_to_delete:
-            file_path = os.path.join(upload_dir, filename)
-            file_age_days = (time.time() - mtime) / (24 * 60 * 60)
+            if not os.path.isdir(project_dir):
+                continue
             
-            try:
-                # Extract project_id from filename (format: project_id.pdf)
-                project_id = filename[:-4] if filename.endswith('.pdf') else filename
-                
-                logger.info(f"[CLEANUP] Deleting {filename} (age: {file_age_days:.1f} days, size: {size} bytes)")
-                
-                # Delete the file
-                os.unlink(file_path)
-                
-                stats["files_deleted"] += 1
-                stats["bytes_freed"] += size
-                
-                # Update database record if exists
+            # Check directory age
+            age_hours = get_file_age_hours(project_dir)
+            if age_hours > TEMP_RETENTION_HOURS:
                 try:
-                    # Mark project as cleaned up in database
-                    async def mark_cleaned():
-                        async with AsyncSessionLocal() as session:
-                            success = await job_service.update_project(
-                                project_id, 
-                                {"cleanup_timestamp": datetime.utcnow()},
-                                session
-                            )
-                            if success:
-                                stats["db_records_cleaned"] += 1
+                    # Calculate size before deletion
+                    dir_size = sum(
+                        os.path.getsize(os.path.join(dirpath, filename))
+                        for dirpath, dirnames, filenames in os.walk(project_dir)
+                        for filename in filenames
+                    )
                     
-                    # Run async operation
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(mark_cleaned())
-                    loop.close()
+                    # Remove the directory
+                    shutil.rmtree(project_dir)
+                    cleaned_count += 1
+                    total_size_cleaned += dir_size
                     
+                    logger.info(f"[CLEANUP] Removed temp directory: {project_id} "
+                              f"(age: {age_hours:.1f}h, size: {dir_size/1024/1024:.2f}MB)")
                 except Exception as e:
-                    logger.warning(f"[CLEANUP] Could not update database for {project_id}: {e}")
-                
-            except Exception as e:
-                logger.error(f"[CLEANUP] Error deleting file {filename}: {e}")
-                stats["files_failed"] += 1
-                stats["errors"].append(f"Error deleting {filename}: {str(e)}")
-        
-        # Log summary
-        logger.info(f"[CLEANUP] Cleanup complete:")
-        logger.info(f"[CLEANUP]   Files checked: {stats['files_checked']}")
-        logger.info(f"[CLEANUP]   Files deleted: {stats['files_deleted']}")
-        logger.info(f"[CLEANUP]   Files failed: {stats['files_failed']}")
-        logger.info(f"[CLEANUP]   Bytes freed: {stats['bytes_freed']:,} ({stats['bytes_freed'] / (1024*1024):.1f} MB)")
-        logger.info(f"[CLEANUP]   DB records updated: {stats['db_records_cleaned']}")
-        
-        if stats["errors"]:
-            logger.warning(f"[CLEANUP] Errors encountered: {len(stats['errors'])}")
-            for error in stats["errors"][:10]:  # Log first 10 errors
-                logger.warning(f"[CLEANUP]   - {error}")
-        
-        return stats
-        
+                    error_count += 1
+                    logger.error(f"[CLEANUP] Failed to remove temp directory {project_id}: {e}")
+    
     except Exception as e:
-        logger.error(f"[CLEANUP] Fatal error during cleanup: {e}", exc_info=True)
-        return {"error": f"Fatal error: {str(e)}"}
+        logger.error(f"[CLEANUP] Error during temp cleanup: {e}")
+        return {"status": "error", "reason": str(e)}
+    
+    logger.info(f"[CLEANUP] Temp cleanup completed: {cleaned_count} directories removed, "
+              f"{total_size_cleaned/1024/1024:.2f}MB freed, {error_count} errors")
+    
+    return {
+        "status": "success",
+        "cleaned_count": cleaned_count,
+        "error_count": error_count,
+        "total_size_mb": round(total_size_cleaned / 1024 / 1024, 2)
+    }
 
+@celery_app.task(
+    acks_late=True,
+    time_limit=600,
+    soft_time_limit=540
+)
+def cleanup_old_uploads():
+    """Clean up uploaded files older than UPLOAD_RETENTION_DAYS"""
+    if not STORAGE_CLEANUP_ENABLED:
+        logger.info("[CLEANUP] Storage cleanup is disabled")
+        return {"status": "skipped", "reason": "cleanup disabled"}
+    
+    upload_dir = os.path.join(RENDER_DISK_PATH, "uploads")
+    if not os.path.exists(upload_dir):
+        logger.warning(f"[CLEANUP] Upload directory does not exist: {upload_dir}")
+        return {"status": "error", "reason": "upload directory not found"}
+    
+    cleaned_count = 0
+    error_count = 0
+    total_size_cleaned = 0
+    
+    logger.info(f"[CLEANUP] Starting upload file cleanup (retention: {UPLOAD_RETENTION_DAYS} days)")
+    
+    try:
+        for filename in os.listdir(upload_dir):
+            file_path = os.path.join(upload_dir, filename)
+            
+            if not os.path.isfile(file_path):
+                continue
+            
+            # Skip hidden files like .write_test
+            if filename.startswith('.'):
+                continue
+            
+            # Check file age
+            age_days = get_file_age_days(file_path)
+            if age_days > UPLOAD_RETENTION_DAYS:
+                try:
+                    file_size = os.path.getsize(file_path)
+                    os.unlink(file_path)
+                    cleaned_count += 1
+                    total_size_cleaned += file_size
+                    
+                    logger.info(f"[CLEANUP] Removed old upload: {filename} "
+                              f"(age: {age_days:.1f}d, size: {file_size/1024/1024:.2f}MB)")
+                except Exception as e:
+                    error_count += 1
+                    logger.error(f"[CLEANUP] Failed to remove upload {filename}: {e}")
+    
+    except Exception as e:
+        logger.error(f"[CLEANUP] Error during upload cleanup: {e}")
+        return {"status": "error", "reason": str(e)}
+    
+    logger.info(f"[CLEANUP] Upload cleanup completed: {cleaned_count} files removed, "
+              f"{total_size_cleaned/1024/1024:.2f}MB freed, {error_count} errors")
+    
+    return {
+        "status": "success",
+        "cleaned_count": cleaned_count,
+        "error_count": error_count,
+        "total_size_mb": round(total_size_cleaned / 1024 / 1024, 2)
+    }
+
+@celery_app.task(
+    acks_late=True,
+    time_limit=600,
+    soft_time_limit=540
+)
+def cleanup_old_processed():
+    """Clean up processed files older than PROCESSED_RETENTION_DAYS"""
+    if not STORAGE_CLEANUP_ENABLED:
+        logger.info("[CLEANUP] Storage cleanup is disabled")
+        return {"status": "skipped", "reason": "cleanup disabled"}
+    
+    processed_dir = os.path.join(RENDER_DISK_PATH, "processed")
+    if not os.path.exists(processed_dir):
+        logger.warning(f"[CLEANUP] Processed directory does not exist: {processed_dir}")
+        return {"status": "error", "reason": "processed directory not found"}
+    
+    cleaned_count = 0
+    error_count = 0
+    total_size_cleaned = 0
+    
+    logger.info(f"[CLEANUP] Starting processed file cleanup (retention: {PROCESSED_RETENTION_DAYS} days)")
+    
+    try:
+        # Iterate through project directories in processed/
+        for project_id in os.listdir(processed_dir):
+            project_dir = os.path.join(processed_dir, project_id)
+            
+            if not os.path.isdir(project_dir):
+                continue
+            
+            # Check directory age (use oldest file in directory)
+            oldest_age_days = 0
+            for root, dirs, files in os.walk(project_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    age_days = get_file_age_days(file_path)
+                    oldest_age_days = max(oldest_age_days, age_days)
+            
+            if oldest_age_days > PROCESSED_RETENTION_DAYS:
+                try:
+                    # Calculate size before deletion
+                    dir_size = sum(
+                        os.path.getsize(os.path.join(dirpath, filename))
+                        for dirpath, dirnames, filenames in os.walk(project_dir)
+                        for filename in filenames
+                    )
+                    
+                    # Remove the directory
+                    shutil.rmtree(project_dir)
+                    cleaned_count += 1
+                    total_size_cleaned += dir_size
+                    
+                    logger.info(f"[CLEANUP] Removed processed directory: {project_id} "
+                              f"(age: {oldest_age_days:.1f}d, size: {dir_size/1024/1024:.2f}MB)")
+                except Exception as e:
+                    error_count += 1
+                    logger.error(f"[CLEANUP] Failed to remove processed directory {project_id}: {e}")
+    
+    except Exception as e:
+        logger.error(f"[CLEANUP] Error during processed cleanup: {e}")
+        return {"status": "error", "reason": str(e)}
+    
+    logger.info(f"[CLEANUP] Processed cleanup completed: {cleaned_count} directories removed, "
+              f"{total_size_cleaned/1024/1024:.2f}MB freed, {error_count} errors")
+    
+    return {
+        "status": "success",
+        "cleaned_count": cleaned_count,
+        "error_count": error_count,
+        "total_size_mb": round(total_size_cleaned / 1024 / 1024, 2)
+    }
+
+# Manual cleanup function for immediate cleanup (useful for testing)
+@celery_app.task
+def cleanup_project_temp(project_id: str):
+    """Immediately clean up temp files for a specific project"""
+    temp_project_dir = os.path.join(RENDER_DISK_PATH, "temp", project_id)
+    
+    try:
+        if os.path.exists(temp_project_dir):
+            shutil.rmtree(temp_project_dir)
+            logger.info(f"[CLEANUP] Manually removed temp directory for project {project_id}")
+            return {"status": "success", "project_id": project_id}
+        else:
+            return {"status": "not_found", "project_id": project_id}
+    except Exception as e:
+        logger.error(f"[CLEANUP] Failed to manually cleanup project {project_id}: {e}")
+        return {"status": "error", "project_id": project_id, "error": str(e)}
 
 @celery_app.task
 def health_check():
@@ -181,29 +289,11 @@ def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
-        "storage_path": os.getenv("RENDER_DISK_PATH")
-    }
-
-
-# Celery beat schedule configuration
-celery_app.conf.beat_schedule = {
-    'cleanup-old-files': {
-        'task': 'tasks.cleanup_tasks.cleanup_old_files',
-        'schedule': crontab(hour=2, minute=0),  # Run daily at 2 AM
-        'options': {
-            'queue': 'celery',
-            'routing_key': 'celery'
-        }
-    },
-    'health-check': {
-        'task': 'tasks.cleanup_tasks.health_check',
-        'schedule': 300.0,  # Every 5 minutes
-        'options': {
-            'queue': 'celery',
-            'routing_key': 'celery'
+        "storage_path": os.getenv("RENDER_DISK_PATH"),
+        "cleanup_enabled": STORAGE_CLEANUP_ENABLED,
+        "retention_config": {
+            "temp_hours": TEMP_RETENTION_HOURS,
+            "upload_days": UPLOAD_RETENTION_DAYS,
+            "processed_days": PROCESSED_RETENTION_DAYS
         }
     }
-}
-
-# Configure timezone
-celery_app.conf.timezone = 'UTC'
