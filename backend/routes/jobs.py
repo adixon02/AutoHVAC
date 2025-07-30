@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_async_session
 from services.job_service import job_service
 from services.user_service import user_service
-from services.storage import storage_service
+from services.s3_storage import storage_service
 from models.db_models import Project, JobStatus
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
@@ -100,33 +100,33 @@ async def download_project_report(
                 detail="PDF report not available"
             )
         
-        # Construct full path from storage service
-        # pdf_report_path stores relative path like "reports/{project_id}_report.pdf"
-        if project.pdf_report_path.startswith('reports/'):
-            # New format with relative path
-            full_path = os.path.join(storage_service.storage_path, project.pdf_report_path)
-        else:
-            # Legacy format with full path
-            full_path = project.pdf_report_path
-        
-        # Check if file exists
-        if not os.path.exists(full_path):
-            logger.error(f"PDF file not found at {full_path}")
+        # Generate pre-signed URL for S3 download
+        try:
+            download_url = storage_service.get_download_url(
+                project_id=project_id,
+                file_type="report",
+                expiry_seconds=3600  # 1 hour expiry
+            )
+            
+            # Return redirect to pre-signed URL
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(
+                url=download_url,
+                status_code=303  # See Other - appropriate for GET after POST
+            )
+            
+        except FileNotFoundError:
+            logger.error(f"PDF report not found in S3 for project {project_id}")
             raise HTTPException(
                 status_code=404,
                 detail="Report file not found"
             )
-        
-        # Return file
-        filename = f"{project.project_label}_report.pdf"
-        return FileResponse(
-            path=full_path,
-            filename=filename,
-            media_type="application/pdf",
-            headers={
-                "Content-Disposition": f"attachment; filename=\"{filename}\""
-            }
-        )
+        except Exception as e:
+            logger.error(f"Error generating download URL for project {project_id}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate download URL"
+            )
     
     except HTTPException:
         raise
@@ -193,19 +193,18 @@ async def delete_project(
                 detail="Project not found or access denied"
             )
         
-        # Delete PDF file if it exists
+        # Delete PDF report from S3 if it exists
         if project.pdf_report_path:
-            # Construct full path
-            if project.pdf_report_path.startswith('reports/'):
-                full_path = os.path.join(storage_service.storage_path, project.pdf_report_path)
-            else:
-                full_path = project.pdf_report_path
-            
-            if os.path.exists(full_path):
-                try:
-                    os.remove(full_path)
-                except Exception as e:
-                    logger.warning(f"Could not delete PDF file {full_path}: {str(e)}")
+            try:
+                # Delete report from S3 using the S3 key directly
+                s3_key = f"reports/{project_id}_report.pdf"
+                storage_service.s3_client.delete_object(
+                    Bucket=storage_service.bucket_name,
+                    Key=s3_key
+                )
+                logger.info(f"Deleted report from S3: {s3_key}")
+            except Exception as e:
+                logger.warning(f"Could not delete PDF report from S3: {str(e)}")
         
         # Delete from database
         success = await job_service.delete_project(project_id, session)

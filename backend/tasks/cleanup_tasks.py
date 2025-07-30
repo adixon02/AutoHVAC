@@ -1,14 +1,15 @@
 """
-Scheduled cleanup tasks for managing file storage
-Runs periodically to clean up old files and maintain disk space
+Scheduled cleanup tasks for managing S3 storage
+Runs periodically to clean up old files in S3
 """
 import os
 import time
-import shutil
 from datetime import datetime, timedelta
 from celery import Celery
 from celery.schedules import crontab
 import logging
+import boto3
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,12 @@ STORAGE_CLEANUP_ENABLED = os.getenv("STORAGE_CLEANUP_ENABLED", "true").lower() =
 TEMP_RETENTION_HOURS = int(os.getenv("TEMP_RETENTION_HOURS", "6"))
 UPLOAD_RETENTION_DAYS = int(os.getenv("UPLOAD_RETENTION_DAYS", "30"))
 PROCESSED_RETENTION_DAYS = int(os.getenv("PROCESSED_RETENTION_DAYS", "90"))
-RENDER_DISK_PATH = os.getenv("RENDER_DISK_PATH", "/var/data")
+
+# S3 configuration
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.getenv("AWS_REGION", "us-west-2")
+S3_BUCKET = os.getenv("S3_BUCKET", "autohvac-uploads")
 
 # Configure periodic tasks
 celery_app.conf.beat_schedule = {
@@ -52,19 +58,23 @@ celery_app.conf.beat_schedule = {
     }
 }
 
-def get_file_age_hours(file_path: str) -> float:
-    """Get age of file in hours"""
-    try:
-        stat = os.stat(file_path)
-        age = time.time() - stat.st_mtime
-        return age / 3600  # Convert to hours
-    except Exception as e:
-        logger.error(f"Error getting file age for {file_path}: {e}")
-        return 0
+def get_s3_client():
+    """Create S3 client with credentials"""
+    return boto3.client(
+        's3',
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+        region_name=AWS_REGION
+    )
 
-def get_file_age_days(file_path: str) -> float:
-    """Get age of file in days"""
-    return get_file_age_hours(file_path) / 24
+def get_object_age_hours(last_modified: datetime) -> float:
+    """Get age of S3 object in hours"""
+    age = datetime.now(last_modified.tzinfo) - last_modified
+    return age.total_seconds() / 3600
+
+def get_object_age_days(last_modified: datetime) -> float:
+    """Get age of S3 object in days"""
+    return get_object_age_hours(last_modified) / 24
 
 @celery_app.task(
     acks_late=True,
@@ -72,57 +82,78 @@ def get_file_age_days(file_path: str) -> float:
     soft_time_limit=540  # 9 minutes soft limit
 )
 def cleanup_temp_files():
-    """Clean up temporary files older than TEMP_RETENTION_HOURS"""
+    """Clean up temporary files older than TEMP_RETENTION_HOURS from S3"""
     if not STORAGE_CLEANUP_ENABLED:
         logger.info("[CLEANUP] Storage cleanup is disabled")
         return {"status": "skipped", "reason": "cleanup disabled"}
     
-    temp_dir = os.path.join(RENDER_DISK_PATH, "temp")
-    if not os.path.exists(temp_dir):
-        logger.warning(f"[CLEANUP] Temp directory does not exist: {temp_dir}")
-        return {"status": "error", "reason": "temp directory not found"}
-    
+    s3_client = get_s3_client()
     cleaned_count = 0
     error_count = 0
     total_size_cleaned = 0
     
-    logger.info(f"[CLEANUP] Starting temp file cleanup (retention: {TEMP_RETENTION_HOURS} hours)")
+    logger.info(f"[CLEANUP] Starting temp file cleanup in S3 (retention: {TEMP_RETENTION_HOURS} hours)")
     
     try:
-        # Iterate through project directories in temp/
-        for project_id in os.listdir(temp_dir):
-            project_dir = os.path.join(temp_dir, project_id)
-            
-            if not os.path.isdir(project_dir):
+        # List all objects in temp/ prefix
+        paginator = s3_client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(
+            Bucket=S3_BUCKET,
+            Prefix='temp/'
+        )
+        
+        objects_to_delete = []
+        
+        for page in pages:
+            if 'Contents' not in page:
                 continue
+                
+            for obj in page['Contents']:
+                # Check object age
+                age_hours = get_object_age_hours(obj['LastModified'])
+                
+                if age_hours > TEMP_RETENTION_HOURS:
+                    objects_to_delete.append({
+                        'Key': obj['Key'],
+                        'Size': obj['Size'],
+                        'Age': age_hours
+                    })
+        
+        # Delete objects in batches of 1000 (S3 limit)
+        for i in range(0, len(objects_to_delete), 1000):
+            batch = objects_to_delete[i:i+1000]
+            delete_keys = [{'Key': obj['Key']} for obj in batch]
             
-            # Check directory age
-            age_hours = get_file_age_hours(project_dir)
-            if age_hours > TEMP_RETENTION_HOURS:
-                try:
-                    # Calculate size before deletion
-                    dir_size = sum(
-                        os.path.getsize(os.path.join(dirpath, filename))
-                        for dirpath, dirnames, filenames in os.walk(project_dir)
-                        for filename in filenames
-                    )
+            try:
+                response = s3_client.delete_objects(
+                    Bucket=S3_BUCKET,
+                    Delete={'Objects': delete_keys}
+                )
+                
+                # Count successful deletions
+                if 'Deleted' in response:
+                    cleaned_count += len(response['Deleted'])
+                    total_size_cleaned += sum(obj['Size'] for obj in batch)
                     
-                    # Remove the directory
-                    shutil.rmtree(project_dir)
-                    cleaned_count += 1
-                    total_size_cleaned += dir_size
-                    
-                    logger.info(f"[CLEANUP] Removed temp directory: {project_id} "
-                              f"(age: {age_hours:.1f}h, size: {dir_size/1024/1024:.2f}MB)")
-                except Exception as e:
-                    error_count += 1
-                    logger.error(f"[CLEANUP] Failed to remove temp directory {project_id}: {e}")
+                    for obj in batch[:5]:  # Log first 5 for brevity
+                        logger.info(f"[CLEANUP] Deleted temp file: {obj['Key']} "
+                                  f"(age: {obj['Age']:.1f}h, size: {obj['Size']/1024/1024:.2f}MB)")
+                
+                # Count errors
+                if 'Errors' in response:
+                    error_count += len(response['Errors'])
+                    for error in response['Errors']:
+                        logger.error(f"[CLEANUP] Failed to delete {error['Key']}: {error['Message']}")
+                        
+            except Exception as e:
+                error_count += len(batch)
+                logger.error(f"[CLEANUP] Batch deletion failed: {e}")
     
     except Exception as e:
         logger.error(f"[CLEANUP] Error during temp cleanup: {e}")
         return {"status": "error", "reason": str(e)}
     
-    logger.info(f"[CLEANUP] Temp cleanup completed: {cleaned_count} directories removed, "
+    logger.info(f"[CLEANUP] Temp cleanup completed: {cleaned_count} files removed, "
               f"{total_size_cleaned/1024/1024:.2f}MB freed, {error_count} errors")
     
     return {
@@ -138,47 +169,63 @@ def cleanup_temp_files():
     soft_time_limit=540
 )
 def cleanup_old_uploads():
-    """Clean up uploaded files older than UPLOAD_RETENTION_DAYS"""
+    """Clean up uploaded files older than UPLOAD_RETENTION_DAYS from S3"""
     if not STORAGE_CLEANUP_ENABLED:
         logger.info("[CLEANUP] Storage cleanup is disabled")
         return {"status": "skipped", "reason": "cleanup disabled"}
     
-    upload_dir = os.path.join(RENDER_DISK_PATH, "uploads")
-    if not os.path.exists(upload_dir):
-        logger.warning(f"[CLEANUP] Upload directory does not exist: {upload_dir}")
-        return {"status": "error", "reason": "upload directory not found"}
-    
+    s3_client = get_s3_client()
     cleaned_count = 0
     error_count = 0
     total_size_cleaned = 0
     
-    logger.info(f"[CLEANUP] Starting upload file cleanup (retention: {UPLOAD_RETENTION_DAYS} days)")
+    logger.info(f"[CLEANUP] Starting upload file cleanup in S3 (retention: {UPLOAD_RETENTION_DAYS} days)")
     
     try:
-        for filename in os.listdir(upload_dir):
-            file_path = os.path.join(upload_dir, filename)
-            
-            if not os.path.isfile(file_path):
+        # List all objects in uploads/ prefix
+        paginator = s3_client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(
+            Bucket=S3_BUCKET,
+            Prefix='uploads/'
+        )
+        
+        objects_to_delete = []
+        
+        for page in pages:
+            if 'Contents' not in page:
                 continue
-            
-            # Skip hidden files like .write_test
-            if filename.startswith('.'):
-                continue
-            
-            # Check file age
-            age_days = get_file_age_days(file_path)
-            if age_days > UPLOAD_RETENTION_DAYS:
-                try:
-                    file_size = os.path.getsize(file_path)
-                    os.unlink(file_path)
-                    cleaned_count += 1
-                    total_size_cleaned += file_size
-                    
-                    logger.info(f"[CLEANUP] Removed old upload: {filename} "
-                              f"(age: {age_days:.1f}d, size: {file_size/1024/1024:.2f}MB)")
-                except Exception as e:
-                    error_count += 1
-                    logger.error(f"[CLEANUP] Failed to remove upload {filename}: {e}")
+                
+            for obj in page['Contents']:
+                # Skip directory markers
+                if obj['Key'].endswith('/'):
+                    continue
+                
+                # Check object age
+                age_days = get_object_age_days(obj['LastModified'])
+                
+                if age_days > UPLOAD_RETENTION_DAYS:
+                    objects_to_delete.append({
+                        'Key': obj['Key'],
+                        'Size': obj['Size'],
+                        'Age': age_days
+                    })
+        
+        # Delete objects
+        for obj in objects_to_delete:
+            try:
+                s3_client.delete_object(
+                    Bucket=S3_BUCKET,
+                    Key=obj['Key']
+                )
+                cleaned_count += 1
+                total_size_cleaned += obj['Size']
+                
+                logger.info(f"[CLEANUP] Removed old upload: {obj['Key']} "
+                          f"(age: {obj['Age']:.1f}d, size: {obj['Size']/1024/1024:.2f}MB)")
+                          
+            except Exception as e:
+                error_count += 1
+                logger.error(f"[CLEANUP] Failed to remove upload {obj['Key']}: {e}")
     
     except Exception as e:
         logger.error(f"[CLEANUP] Error during upload cleanup: {e}")
@@ -200,63 +247,84 @@ def cleanup_old_uploads():
     soft_time_limit=540
 )
 def cleanup_old_processed():
-    """Clean up processed files older than PROCESSED_RETENTION_DAYS"""
+    """Clean up processed files older than PROCESSED_RETENTION_DAYS from S3"""
     if not STORAGE_CLEANUP_ENABLED:
         logger.info("[CLEANUP] Storage cleanup is disabled")
         return {"status": "skipped", "reason": "cleanup disabled"}
     
-    processed_dir = os.path.join(RENDER_DISK_PATH, "processed")
-    if not os.path.exists(processed_dir):
-        logger.warning(f"[CLEANUP] Processed directory does not exist: {processed_dir}")
-        return {"status": "error", "reason": "processed directory not found"}
-    
+    s3_client = get_s3_client()
     cleaned_count = 0
     error_count = 0
     total_size_cleaned = 0
     
-    logger.info(f"[CLEANUP] Starting processed file cleanup (retention: {PROCESSED_RETENTION_DAYS} days)")
+    logger.info(f"[CLEANUP] Starting processed file cleanup in S3 (retention: {PROCESSED_RETENTION_DAYS} days)")
     
     try:
-        # Iterate through project directories in processed/
-        for project_id in os.listdir(processed_dir):
-            project_dir = os.path.join(processed_dir, project_id)
-            
-            if not os.path.isdir(project_dir):
+        # List all objects in processed/ prefix
+        paginator = s3_client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(
+            Bucket=S3_BUCKET,
+            Prefix='processed/'
+        )
+        
+        # Group objects by project (subdirectory)
+        projects_to_check = {}
+        
+        for page in pages:
+            if 'Contents' not in page:
                 continue
-            
-            # Check directory age (use oldest file in directory)
-            oldest_age_days = 0
-            for root, dirs, files in os.walk(project_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    age_days = get_file_age_days(file_path)
-                    oldest_age_days = max(oldest_age_days, age_days)
-            
-            if oldest_age_days > PROCESSED_RETENTION_DAYS:
-                try:
-                    # Calculate size before deletion
-                    dir_size = sum(
-                        os.path.getsize(os.path.join(dirpath, filename))
-                        for dirpath, dirnames, filenames in os.walk(project_dir)
-                        for filename in filenames
-                    )
+                
+            for obj in page['Contents']:
+                # Skip directory markers
+                if obj['Key'].endswith('/'):
+                    continue
+                
+                # Extract project ID from key (processed/{project_id}/...)
+                parts = obj['Key'].split('/')
+                if len(parts) >= 2:
+                    project_id = parts[1]
                     
-                    # Remove the directory
-                    shutil.rmtree(project_dir)
-                    cleaned_count += 1
-                    total_size_cleaned += dir_size
+                    if project_id not in projects_to_check:
+                        projects_to_check[project_id] = []
                     
-                    logger.info(f"[CLEANUP] Removed processed directory: {project_id} "
-                              f"(age: {oldest_age_days:.1f}d, size: {dir_size/1024/1024:.2f}MB)")
-                except Exception as e:
-                    error_count += 1
-                    logger.error(f"[CLEANUP] Failed to remove processed directory {project_id}: {e}")
+                    projects_to_check[project_id].append({
+                        'Key': obj['Key'],
+                        'Size': obj['Size'],
+                        'LastModified': obj['LastModified']
+                    })
+        
+        # Check each project's oldest file
+        for project_id, objects in projects_to_check.items():
+            # Find oldest file in project
+            oldest_date = min(obj['LastModified'] for obj in objects)
+            age_days = get_object_age_days(oldest_date)
+            
+            if age_days > PROCESSED_RETENTION_DAYS:
+                # Delete all files for this project
+                project_size = sum(obj['Size'] for obj in objects)
+                
+                for obj in objects:
+                    try:
+                        s3_client.delete_object(
+                            Bucket=S3_BUCKET,
+                            Key=obj['Key']
+                        )
+                        cleaned_count += 1
+                        
+                    except Exception as e:
+                        error_count += 1
+                        logger.error(f"[CLEANUP] Failed to delete {obj['Key']}: {e}")
+                
+                total_size_cleaned += project_size
+                logger.info(f"[CLEANUP] Removed processed project: {project_id} "
+                          f"(age: {age_days:.1f}d, size: {project_size/1024/1024:.2f}MB, "
+                          f"files: {len(objects)})")
     
     except Exception as e:
         logger.error(f"[CLEANUP] Error during processed cleanup: {e}")
         return {"status": "error", "reason": str(e)}
     
-    logger.info(f"[CLEANUP] Processed cleanup completed: {cleaned_count} directories removed, "
+    logger.info(f"[CLEANUP] Processed cleanup completed: {cleaned_count} files removed, "
               f"{total_size_cleaned/1024/1024:.2f}MB freed, {error_count} errors")
     
     return {
@@ -269,16 +337,37 @@ def cleanup_old_processed():
 # Manual cleanup function for immediate cleanup (useful for testing)
 @celery_app.task
 def cleanup_project_temp(project_id: str):
-    """Immediately clean up temp files for a specific project"""
-    temp_project_dir = os.path.join(RENDER_DISK_PATH, "temp", project_id)
+    """Immediately clean up temp files for a specific project from S3"""
+    s3_client = get_s3_client()
     
     try:
-        if os.path.exists(temp_project_dir):
-            shutil.rmtree(temp_project_dir)
-            logger.info(f"[CLEANUP] Manually removed temp directory for project {project_id}")
-            return {"status": "success", "project_id": project_id}
+        # List all objects with the project prefix
+        prefix = f"temp/{project_id}/"
+        paginator = s3_client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(
+            Bucket=S3_BUCKET,
+            Prefix=prefix
+        )
+        
+        objects_to_delete = []
+        for page in pages:
+            if 'Contents' in page:
+                for obj in page['Contents']:
+                    objects_to_delete.append({'Key': obj['Key']})
+        
+        if objects_to_delete:
+            # Delete all objects
+            response = s3_client.delete_objects(
+                Bucket=S3_BUCKET,
+                Delete={'Objects': objects_to_delete}
+            )
+            
+            deleted_count = len(response.get('Deleted', []))
+            logger.info(f"[CLEANUP] Manually removed {deleted_count} temp files for project {project_id}")
+            return {"status": "success", "project_id": project_id, "deleted_count": deleted_count}
         else:
             return {"status": "not_found", "project_id": project_id}
+            
     except Exception as e:
         logger.error(f"[CLEANUP] Failed to manually cleanup project {project_id}: {e}")
         return {"status": "error", "project_id": project_id, "error": str(e)}
@@ -289,7 +378,8 @@ def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
-        "storage_path": os.getenv("RENDER_DISK_PATH"),
+        "storage_type": "S3",
+        "s3_bucket": S3_BUCKET,
         "cleanup_enabled": STORAGE_CLEANUP_ENABLED,
         "retention_config": {
             "temp_hours": TEMP_RETENTION_HOURS,

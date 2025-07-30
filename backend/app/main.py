@@ -81,53 +81,25 @@ async def startup_event():
     """Run on application startup"""
     logger.info("Starting AutoHVAC API...")
     
-    # Log disk mount configuration
-    disk_path = os.getenv("RENDER_DISK_PATH")
-    logger.info(f"[STARTUP] RENDER_DISK_PATH environment variable: {disk_path}")
+    # Log S3 configuration
+    s3_bucket = os.getenv("S3_BUCKET")
+    aws_region = os.getenv("AWS_REGION")
+    logger.info(f"[STARTUP] S3_BUCKET: {s3_bucket}")
+    logger.info(f"[STARTUP] AWS_REGION: {aws_region}")
     
-    if disk_path:
-        # Check if the mount point exists
-        if os.path.exists(disk_path):
-            logger.info(f"[STARTUP] Mount point exists: {disk_path}")
-            
-            # Check if it's a directory
-            if os.path.isdir(disk_path):
-                logger.info(f"[STARTUP] Mount point is a directory")
-                
-                # List mount point contents
-                try:
-                    contents = os.listdir(disk_path)
-                    logger.info(f"[STARTUP] Mount point contents: {contents}")
-                except Exception as e:
-                    logger.error(f"[STARTUP] Cannot list mount point: {e}")
-                
-                # Check uploads subdirectory
-                upload_dir = os.path.join(disk_path, "uploads")
-                if os.path.exists(upload_dir):
-                    logger.info(f"[STARTUP] Uploads directory exists: {upload_dir}")
-                    try:
-                        upload_contents = os.listdir(upload_dir)
-                        logger.info(f"[STARTUP] Uploads directory has {len(upload_contents)} files")
-                    except Exception as e:
-                        logger.error(f"[STARTUP] Cannot list uploads directory: {e}")
-                else:
-                    logger.info(f"[STARTUP] Uploads directory will be created on first use")
-                
-                # Test write permissions in mount point
-                try:
-                    test_file = os.path.join(disk_path, ".startup_test")
-                    with open(test_file, 'w') as f:
-                        f.write("startup test")
-                    os.unlink(test_file)
-                    logger.info(f"[STARTUP] Mount point is writable")
-                except Exception as e:
-                    logger.error(f"[STARTUP] Mount point is NOT writable: {e}")
-            else:
-                logger.error(f"[STARTUP] Mount point exists but is not a directory")
-        else:
-            logger.error(f"[STARTUP] Mount point does NOT exist: {disk_path}")
+    # Check AWS credentials are configured
+    if os.getenv("AWS_ACCESS_KEY_ID") and os.getenv("AWS_SECRET_ACCESS_KEY"):
+        logger.info("[STARTUP] AWS credentials are configured")
+        
+        # Initialize S3 storage service to verify connection
+        try:
+            from services.s3_storage import storage_service
+            logger.info(f"[STARTUP] S3 storage service initialized successfully")
+            logger.info(f"[STARTUP] Using S3 bucket: {storage_service.bucket_name}")
+        except Exception as e:
+            logger.error(f"[STARTUP] Failed to initialize S3 storage: {e}")
     else:
-        logger.warning(f"[STARTUP] RENDER_DISK_PATH not set - storage will fail")
+        logger.warning("[STARTUP] AWS credentials not configured - S3 storage will fail")
     
     # DON'T access database here - it blocks port binding
     

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # New comprehensive Celery task for HVAC load calculations
 from tasks.calculate_hvac_loads import calculate_hvac_loads
-from services.storage import storage_service
+from services.s3_storage import storage_service
 import aiofiles
 import os
 
@@ -46,36 +46,25 @@ def should_use_ai_parsing() -> bool:
     """Check if AI parsing should be used (default: True)"""
     return AI_PARSING_ENABLED
 
-def get_file_info(file_path: str, project_id: str = None) -> dict:
-    """Get detailed file information for debugging"""
+def get_s3_file_info(project_id: str) -> dict:
+    """Get file information from S3 for debugging"""
     info = {
-        "path": file_path,
-        "exists": os.path.exists(file_path),
-        "project_id": project_id
+        "project_id": project_id,
+        "exists": storage_service.file_exists(project_id)
     }
     
     if info["exists"]:
         try:
-            info["size"] = os.path.getsize(file_path)
-            with open(file_path, 'rb') as f:
-                first_bytes = f.read(16)
-                info["first_16_bytes"] = first_bytes.hex()
-                f.seek(0)
-                # Hash first 64KB
-                chunk = f.read(65536)
-                info["sha1_first_64k"] = hashlib.sha1(chunk).hexdigest()
+            # Get file metadata from S3
+            content = storage_service.get_file_content(project_id)
+            info["size"] = len(content)
+            info["first_16_bytes"] = content[:16].hex() if len(content) >= 16 else content.hex()
+            # Hash first 64KB
+            chunk = content[:65536]
+            info["sha1_first_64k"] = hashlib.sha1(chunk).hexdigest()
         except Exception as e:
             info["read_error"] = f"{type(e).__name__}: {str(e)}"
     
-    return info
-
-def log_file_state(project_id: str, step: str, file_path: str):
-    """Log detailed file state at each step"""
-    info = get_file_info(file_path, project_id)
-    if info["exists"]:
-        logger.info(f"[FILE CHECK - {step}] {project_id}: exists=True, size={info.get('size')}, path={file_path}, first_16_bytes={info.get('first_16_bytes')}, sha1_first_64k={info.get('sha1_first_64k')}")
-    else:
-        logger.error(f"[FILE CHECK - {step}] {project_id}: FILE NOT FOUND at {file_path}")
     return info
 
 def create_debug_error_response(e: Exception, context: str, project_id: str = None, file_path: str = None) -> dict:
@@ -101,8 +90,8 @@ def create_debug_error_response(e: Exception, context: str, project_id: str = No
         if project_id:
             error_info["project_id"] = project_id
         
-        if file_path:
-            error_info["file_info"] = get_file_info(file_path, project_id)
+        if project_id:
+            error_info["s3_file_info"] = get_s3_file_info(project_id)
     
     return error_info
 
@@ -341,15 +330,15 @@ async def upload_blueprint(
             # Read file content
             file_content = await file.read()
             
-            # CRITICAL: Save file to disk FIRST, before any validation
-            temp_path = await storage_service.save_upload(project_id, file_content)
-            logger.info(f"🔍 Saved PDF to {temp_path}, size={len(file_content)} bytes")
+            # CRITICAL: Save file to S3 FIRST, before any validation
+            s3_key = await storage_service.save_upload(project_id, file_content)
+            logger.info(f"🔍 Saved PDF to S3: {s3_key}, size={len(file_content)} bytes")
             
-            # Validate file exists and has content
-            if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
+            # Validate file exists in S3
+            if not storage_service.file_exists(project_id):
                 # Mark job as failed instead of cleaning up immediately
-                await job_service.set_project_failed(project_id, "File is empty", session)
-                raise HTTPException(status_code=400, detail="File is empty")
+                await job_service.set_project_failed(project_id, "File upload failed", session)
+                raise HTTPException(status_code=400, detail="File upload failed")
             
             # Enhanced PDF validation using saved file (NOT memory bytes)
             if file_ext == '.pdf':
@@ -358,7 +347,10 @@ async def upload_blueprint(
                     await job_service.set_project_failed(project_id, "Invalid PDF file", session)
                     raise HTTPException(status_code=400, detail="Invalid PDF file")
                 
-                # Use PDF thread manager for safe validation from disk
+                # Download PDF from S3 to temp file for validation
+                temp_pdf_path = storage_service.download_to_temp_file(project_id)
+                
+                # Use PDF thread manager for safe validation
                 from services.pdf_thread_manager import pdf_thread_manager
                 
                 def validate_pdf_from_disk(pdf_path: str):
@@ -368,7 +360,7 @@ async def upload_blueprint(
                     page_count = 0
                     
                     try:
-                        # Open from disk, not memory
+                        # Open from disk
                         doc = fitz.open(pdf_path)
                         
                         try:
@@ -421,7 +413,7 @@ async def upload_blueprint(
                 try:
                     # Validate using thread-safe operation
                     is_valid, error_message, pages = pdf_thread_manager.process_pdf_with_retry(
-                        pdf_path=temp_path,
+                        pdf_path=temp_pdf_path,
                         processor_func=validate_pdf_from_disk,
                         operation_name="pdf_validation",
                         max_retries=2
@@ -435,28 +427,31 @@ async def upload_blueprint(
                     error_msg = f"PDF file not found during validation: {str(e)}"
                     logger.error(f"FileNotFoundError during PDF validation: {error_msg}")
                     await job_service.set_project_failed(project_id, error_msg, session)
-                    error_response = create_debug_error_response(e, "PDF validation - file not found", project_id, temp_path)
+                    error_response = create_debug_error_response(e, "PDF validation - file not found", project_id, temp_pdf_path)
                     raise HTTPException(status_code=400, detail=error_response)
                 except PermissionError as e:
                     error_msg = f"Permission denied accessing PDF: {str(e)}"
                     logger.error(f"PermissionError during PDF validation: {error_msg}")
                     await job_service.set_project_failed(project_id, error_msg, session)
-                    error_response = create_debug_error_response(e, "PDF validation - permission denied", project_id, temp_path)
+                    error_response = create_debug_error_response(e, "PDF validation - permission denied", project_id, temp_pdf_path)
                     raise HTTPException(status_code=400, detail=error_response)
                 except Exception as e:
                     # Log the actual exception before masking it
                     logger.error(f"❌ PDF validation exception: {type(e).__name__}: {str(e)}")
                     logger.error(f"Traceback: {traceback.format_exc()}")
-                    logger.error(f"File path: {temp_path}")
-                    log_file_state(project_id, "VALIDATION_EXCEPTION", temp_path)
+                    logger.error(f"Temp file path: {temp_pdf_path}")
                     
                     await job_service.set_project_failed(project_id, f"PDF validation failed: {type(e).__name__}: {str(e)}", session)
-                    error_response = create_debug_error_response(e, "PDF validation", project_id, temp_path)
+                    error_response = create_debug_error_response(e, "PDF validation", project_id, temp_pdf_path)
                     raise HTTPException(status_code=400, detail=error_response)
             
-            # Log file state after successful validation
-            post_validation_info = log_file_state(project_id, "POST_VALIDATION", temp_path)
-            logger.info(f"✅ PDF validation completed successfully. File info: {post_validation_info}")
+            # Clean up temp file after validation
+            try:
+                os.unlink(temp_pdf_path)
+            except Exception as e:
+                logger.warning(f"Failed to clean up temp file {temp_pdf_path}: {e}")
+            
+            logger.info(f"✅ PDF validation completed successfully for project {project_id}")
             
             logger.error("🔍 Step 8: Starting background job processor")
             logger.error(f"Adding background task for job {project_id}")
@@ -466,12 +461,14 @@ async def upload_blueprint(
             if USE_CELERY:
                 try:
                     # Log file state before Celery task
-                    pre_celery_info = log_file_state(project_id, "PRE_CELERY", temp_path)
+                    # Log S3 file info before Celery task
+                    pre_celery_info = get_s3_file_info(project_id)
+                    logger.info(f"[PRE_CELERY] S3 file info for {project_id}: {pre_celery_info}")
                     logger.info(f"About to start Celery task. File info: {pre_celery_info}")
                     
-                    # Double-check file exists before dispatching Celery task
-                    if not os.path.exists(temp_path):
-                        error_msg = f"File disappeared before Celery dispatch: {temp_path}"
+                    # Double-check file exists in S3 before dispatching Celery task
+                    if not storage_service.file_exists(project_id):
+                        error_msg = f"File not found in S3 before Celery dispatch: {project_id}"
                         logger.error(error_msg)
                         await job_service.set_project_failed(project_id, error_msg, session)
                         raise HTTPException(status_code=500, detail=error_msg)
@@ -488,17 +485,19 @@ async def upload_blueprint(
                     )
                     
                     # Log file state after Celery task dispatch
-                    post_celery_info = log_file_state(project_id, "POST_CELERY", temp_path)
+                    # Log S3 file info after Celery task
+                    post_celery_info = get_s3_file_info(project_id)
+                    logger.info(f"[POST_CELERY] S3 file info for {project_id}: {post_celery_info}")
                     logger.info(f"Celery task dispatched. File info: {post_celery_info}")
                     
-                    # One final check to ensure file still exists
-                    if not os.path.exists(temp_path):
-                        logger.warning(f"File disappeared after Celery dispatch (non-critical): {temp_path}")
+                    # One final check to ensure file still exists in S3
+                    if not storage_service.file_exists(project_id):
+                        logger.warning(f"File not found in S3 after Celery dispatch (non-critical): {project_id}")
                     
                 except Exception as e:
                     logger.error(f"❌ Failed to start Celery task: {type(e).__name__}: {str(e)}")
                     logger.error(f"Traceback: {traceback.format_exc()}")
-                    error_response = create_debug_error_response(e, "Celery task dispatch", project_id, temp_path)
+                    error_response = create_debug_error_response(e, "Celery task dispatch", project_id)
                     await job_service.set_project_failed(project_id, f"Failed to start background job: {str(e)}", session)
                     raise HTTPException(status_code=500, detail=error_response)
             else:
@@ -516,13 +515,13 @@ async def upload_blueprint(
         except Exception as e:
             logger.error(f"❌ Step 7/8 FAILED: File processing error: {type(e).__name__}: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
-            if 'temp_path' in locals():
-                log_file_state(project_id, "UPLOAD_EXCEPTION", temp_path)
+            if project_id:
+                logger.error(f"[UPLOAD_EXCEPTION] Error for project {project_id}")
             
             await job_service.set_project_failed(project_id, str(e), session)
             await rate_limiter.decrement_active_jobs(email, project_id)
             
-            error_response = create_debug_error_response(e, "File processing", project_id, temp_path if 'temp_path' in locals() else None)
+            error_response = create_debug_error_response(e, "File processing", project_id)
             raise HTTPException(status_code=500, detail=error_response)
         
         logger.info(f"✅ UPLOAD SUCCESS: Returning jobId {project_id} for {email}")

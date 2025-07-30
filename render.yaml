@@ -17,8 +17,7 @@ services:
       cd backend && pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
-    # IMPORTANT: You must manually attach the shared-storage disk to this service
-    # in the Render dashboard with mount path: /var/data
+    # S3 storage configuration required
     envVars:
       - key: REDIS_URL
         fromService:
@@ -43,8 +42,14 @@ services:
         value: "1"
       - key: WEB_CONCURRENCY
         value: "2"
-      - key: RENDER_DISK_PATH
-        value: /var/data
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: us-west-2
+      - key: S3_BUCKET
+        value: autohvac-uploads
       - key: FILE_CLEANUP_GRACE_DAYS
         value: "7"
 
@@ -73,8 +78,14 @@ services:
         value: "1"
       - key: C_FORCE_ROOT
         value: "true"
-      - key: RENDER_DISK_PATH
-        value: /var/data
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: us-west-2
+      - key: S3_BUCKET
+        value: autohvac-uploads
       - key: FILE_CLEANUP_GRACE_DAYS
         value: "7"
     autoDeploy: false

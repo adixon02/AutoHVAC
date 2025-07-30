@@ -35,18 +35,23 @@ AutoHVAC/
 │   │   └── fetcher.ts                 # API client with error handling
 │   ├── types/                         # TypeScript type definitions
 │   │   └── api.ts                     # Shared API type definitions
+│   ├── public/                        # Public assets
+│   │   └── favicon.ico                # Site favicon
 │   ├── styles/
 │   │   └── globals.css                # Tailwind + custom styles
 │   ├── package.json                   # Dependencies + scripts
+│   ├── package-lock.json              # Locked dependency versions
 │   ├── tailwind.config.js             # Tailwind configuration
 │   ├── tsconfig.json                  # TypeScript configuration
 │   ├── next.config.js                 # Next.js configuration
 │   ├── postcss.config.js              # PostCSS configuration
+│   ├── next-env.d.ts                  # Next.js TypeScript declarations
 │   ├── .env.local                     # Frontend environment variables
 │   └── Dockerfile.dev                 # Development Docker image
 │
 ├── backend/                           # FastAPI Backend
 │   ├── app/                           # Main application
+│   │   ├── __init__.py
 │   │   ├── main.py                    # FastAPI app with CORS + routes
 │   │   ├── config.py                  # Application configuration
 │   │   ├── middleware/                # Custom middleware
@@ -65,7 +70,8 @@ AutoHVAC/
 │   │   ├── job.py                     # Job status polling
 │   │   ├── jobs.py                    # Job listing and management
 │   │   ├── auth.py                    # Authentication endpoints
-│   │   └── billing.py                 # Stripe subscription + webhooks
+│   │   ├── billing.py                 # Stripe subscription + webhooks
+│   │   └── admin.py                   # Administrative endpoints
 │   ├── services/                      # Business logic services
 │   │   ├── __init__.py
 │   │   ├── manualj.py                 # ACCA Manual J load calculations
@@ -73,6 +79,9 @@ AutoHVAC/
 │   │   ├── user_service.py            # User management with email verification
 │   │   ├── database_rate_limiter.py   # Database-backed rate limiting service
 │   │   ├── pdf_service.py             # PDF generation service
+│   │   ├── pdf_thread_manager.py      # PDF processing thread management
+│   │   ├── blueprint_parser.py        # Blueprint parsing orchestration
+│   │   ├── blueprint_ai_parser.py     # GPT-4V AI-powered blueprint parsing
 │   │   ├── page_scoring.py            # Advanced floor plan detection algorithms
 │   │   ├── pdf_page_analyzer.py       # Multi-page PDF analysis and page selection
 │   │   ├── audit_tracker.py           # Comprehensive audit logging system
@@ -86,16 +95,22 @@ AutoHVAC/
 │   │   └── zip_county_mapping.csv     # ZIP code to county relationships
 │   ├── scripts/                       # Development and utility scripts
 │   │   ├── test_pipeline.py           # Complete pipeline testing script
-│   │   └── local_server.py            # Standalone local development server
+│   │   ├── local_server.py            # Standalone local development server
+│   │   ├── migrate_storage.py         # Storage migration utility
+│   │   ├── smoke_test.py              # API smoke testing script
+│   │   └── test_pdf_validation.py     # PDF validation testing
 │   ├── tasks/                         # Celery background tasks
 │   │   ├── __init__.py
 │   │   ├── calculate_hvac_loads.py    # Complete HVAC pipeline processing
 │   │   └── cleanup_tasks.py           # Scheduled file cleanup tasks
+│   ├── celery/                        # Celery configuration
+│   │   └── beat.py                    # Celery beat scheduler configuration
 │   ├── models/                        # Data models
 │   │   ├── __init__.py
 │   │   ├── db_models.py               # SQLModel database models
 │   │   ├── schemas.py                 # API request/response schemas
-│   │   └── enums.py                   # System enumerations and constants
+│   │   ├── enums.py                   # System enumerations and constants
+│   │   └── audit.py                   # Audit trail models
 │   ├── core/                          # Core configuration
 │   │   ├── __init__.py
 │   │   ├── email.py                   # Email service integration
@@ -109,9 +124,15 @@ AutoHVAC/
 │   │   ├── test_integration.py        # Full pipeline integration tests
 │   │   ├── test_pdf_integration.py    # PDF service tests
 │   │   ├── test_acca_examples.py      # ACCA Manual J validation tests
+│   │   ├── test_acca_manual_j_compliance.py # ACCA compliance validation
+│   │   ├── test_ai_analysis_error.py  # AI analysis error handling tests
+│   │   ├── test_concurrent_progress.py # Concurrent progress update tests
 │   │   ├── test_cors.py               # CORS configuration tests
 │   │   ├── test_job_status.py         # Job status polling tests
 │   │   ├── test_manualj_duct_config.py # Duct sizing configuration tests
+│   │   ├── test_migrations.py         # Database migration tests
+│   │   ├── test_upload_contract.py    # Upload contract validation tests
+│   │   ├── test_upload_flow.py        # Upload flow integration tests
 │   │   └── legacy/                    # Legacy test files
 │   │       └── test_manualj_legacy.py # Previous Manual J implementation tests
 │   ├── html_templates/                # HTML templates for PDF generation
@@ -119,14 +140,32 @@ AutoHVAC/
 │   ├── alembic/                       # Database migrations
 │   │   ├── versions/                  # Migration files
 │   │   ├── env.py                     # Alembic environment
-│   │   └── script.py.mako             # Migration template
+│   │   ├── script.py.mako             # Migration template
+│   │   └── README                     # Migration instructions
+│   ├── reports/                       # Generated report storage
 │   ├── database.py                    # Database connection and session management
+│   ├── init_db.py                     # Database initialization script
 │   ├── requirements.txt               # Python dependencies (optimized)
+│   ├── runtime.txt                    # Python runtime version specification
+│   ├── pip.conf                       # Pip configuration
 │   ├── alembic.ini                    # Alembic configuration
+│   ├── Dockerfile                     # Production Docker image
 │   ├── Dockerfile.dev                 # Development Docker image
+│   ├── README.md                      # Backend-specific documentation
+│   ├── __main__.py                    # Backend entry point
+│   ├── app_minimal.py                 # Minimal app configuration
 │   ├── run_dev.sh                     # Development server startup script
 │   ├── run_server.py                  # Production server entry point
-│   └── start_backend.sh               # Backend startup script
+│   ├── start_backend.sh               # Backend startup script
+│   ├── start_with_env.sh              # Backend startup with environment
+│   ├── start_with_migrations.sh       # Backend startup with migrations
+│   ├── start_worker.sh                # Worker startup script
+│   ├── test_ai_first_config.py        # AI-first configuration testing
+│   ├── test_pdf_validation.py         # PDF validation testing
+│   └── test_upload_simulation.py      # Upload simulation testing
+│
+├── scripts/                           # Root-level utility scripts
+│   └── health_check.sh                # Health check script for monitoring
 │
 ├── .github/workflows/                 # CI/CD Pipeline
 │   ├── ci.yaml                        # Comprehensive GitHub Actions workflow
@@ -151,6 +190,9 @@ AutoHVAC/
 │   └── autohvac-postgres              # PostgreSQL database
 │
 ├── README.md                          # This file
+├── CHANGELOG.md                       # Project changelog
+├── DEPLOYMENT_FILE_STORAGE.md         # File storage deployment documentation
+├── DEPLOYMENT_VALIDATION.md           # Deployment validation procedures
 ├── .env                              # Environment variables (not committed)
 ├── .gitignore                        # Enhanced Git ignore rules (prevents logs, builds, dev files)
 ├── design-brief.md                   # Project design brief
@@ -191,6 +233,11 @@ AutoHVAC/
 - Advanced safeguards: geometry parser timeouts, complexity limits, AI token limits
 - Full auditability with detailed logging and progress tracking
 
+#### **Celery Configuration (`backend/celery/`)**
+- **`beat.py`**: Celery beat scheduler configuration
+  - Scheduled periodic tasks for file cleanup and maintenance
+  - Configurable task schedules for production environments
+
 #### **Business Logic Services (`backend/services/`)**
 - **`job_service.py`**: Core job management and orchestration service
   - Job lifecycle management with progress tracking
@@ -200,6 +247,19 @@ AutoHVAC/
   - User-based rate limiting with configurable limits
   - Job tracking and billing integration
   - Async database operations with proper session management
+- **`blueprint_parser.py`**: Blueprint parsing orchestration service
+  - Coordinates parsing pipeline from PDF to structured data
+  - Manages parser selection (AI-first vs traditional)
+  - Handles parsing failures and retries
+- **`blueprint_ai_parser.py`**: GPT-4V AI-powered blueprint parsing
+  - Direct PDF-to-structured-data parsing using OpenAI's GPT-4 Vision
+  - PyMuPDF-based image conversion without external dependencies
+  - Enhanced data extraction with confidence scores
+  - Graceful fallback to traditional parsing on failure
+- **`pdf_thread_manager.py`**: PDF processing thread management
+  - Thread-safe PDF processing operations
+  - Resource management for concurrent PDF operations
+  - Memory-efficient processing with proper cleanup
 - **`page_scoring.py`**: Advanced page scoring algorithms for floor plan detection
   - Geometric feature extraction and scoring for identifying architectural plans
   - Line density analysis, room keyword detection, and dimension pattern matching
@@ -213,6 +273,20 @@ AutoHVAC/
   - Automatic directory initialization with permission checks
   - Methods for saving uploads, processed data, reports, and temp files
   - Backward compatibility with existing file paths
+
+#### **Data Models (`backend/models/`)**
+- **`db_models.py`**: SQLModel database models
+  - User, Project, EmailVerificationToken models
+  - Database schema definitions with relationships
+- **`schemas.py`**: API request/response schemas
+  - Pydantic models for API validation
+  - Request and response data structures
+- **`enums.py`**: System enumerations and constants
+  - Job status, building types, room types
+  - Duct configurations and other system enums
+- **`audit.py`**: Audit trail models
+  - Comprehensive audit logging for ACCA compliance
+  - Tracks all processing steps and calculations
 
 #### **Test Suite (`backend/tests/`)**
 - **`test_parser.py`**: Comprehensive parser component tests
@@ -229,6 +303,13 @@ AutoHVAC/
   - Job lifecycle and progress tracking
   - Error handling scenarios
   - Performance and data integrity checks
+- **Additional test files**:
+  - `test_acca_manual_j_compliance.py`: ACCA compliance validation
+  - `test_ai_analysis_error.py`: AI error handling tests
+  - `test_concurrent_progress.py`: Concurrent update tests
+  - `test_migrations.py`: Database migration tests
+  - `test_upload_contract.py`: Upload API contract tests
+  - `test_upload_flow.py`: Complete upload flow tests
 - **`sample_blueprints/`**: Test PDF files for development and testing
   - Sample blueprint PDFs for pipeline validation
 
@@ -258,6 +339,31 @@ AutoHVAC/
   - Comprehensive output with parsing metadata and data gap analysis
   - Fallback parsing when OpenAI API is unavailable
   - Enhanced room data with building envelope assumptions
+- **`migrate_storage.py`**: Storage migration utility
+  - Migrates files between different storage backends
+  - Handles directory structure changes
+- **`smoke_test.py`**: API smoke testing script
+  - Quick validation of API endpoints
+  - Used in CI/CD pipelines
+- **`test_pdf_validation.py`**: PDF validation testing
+  - Tests PDF parsing and validation logic
+  - Ensures proper handling of various PDF formats
+
+#### **Additional Backend Files**
+- **`app_minimal.py`**: Minimal FastAPI application configuration
+- **`init_db.py`**: Database initialization script
+- **`test_ai_first_config.py`**: AI-first configuration testing
+- **`test_pdf_validation.py`**: PDF validation testing
+- **`test_upload_simulation.py`**: Upload simulation for load testing
+- **Various startup scripts**:
+  - `start_with_env.sh`: Start with environment variables
+  - `start_with_migrations.sh`: Start with database migrations
+  - `start_worker.sh`: Start Celery worker
+
+#### **Root-level Scripts (`scripts/`)**
+- **`health_check.sh`**: Health check script for monitoring
+  - Used by deployment platforms to verify service health
+  - Checks API availability and responsiveness
 
 #### **Infrastructure**
 - **`docker-compose.yml`**: Complete local development stack with all services
@@ -519,6 +625,9 @@ When GPT-4V is disabled or fails, the system falls back to the original pipeline
 ### Billing (Stripe Integration)
 - `POST /api/v1/subscribe` - Create subscription checkout
 - `POST /api/v1/webhook` - Stripe webhook handler
+
+### Admin
+- Admin endpoints for system management (authentication required)
 
 ### System
 - `GET /health` - Health check

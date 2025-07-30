@@ -32,29 +32,15 @@ from services.climate_data import get_climate_data
 from services.blueprint_parser import parse_blueprint_to_json, BlueprintParsingError
 from services.envelope_extractor import extract_envelope_data, EnvelopeExtractorError
 from services.audit_tracker import create_calculation_audit
-from services.storage import storage_service
+from services.s3_storage import storage_service
 from database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
-# Log disk mount configuration at worker startup
-logger.info(f"[WORKER STARTUP] RENDER_DISK_PATH environment variable: {os.getenv('RENDER_DISK_PATH')}")
-logger.info(f"[WORKER STARTUP] Storage service initialized with following paths:")
-logger.info(f"[WORKER STARTUP]   - Uploads: {storage_service.upload_dir}")
-logger.info(f"[WORKER STARTUP]   - Processed: {storage_service.processed_dir}")
-logger.info(f"[WORKER STARTUP]   - Reports: {storage_service.reports_dir}")
-logger.info(f"[WORKER STARTUP]   - Temp: {storage_service.temp_dir}")
-
-# Check if the disk is mounted and accessible
-try:
-    if os.path.exists(storage_service.upload_dir):
-        logger.info(f"[WORKER STARTUP] Upload directory exists: {storage_service.upload_dir}")
-        contents = os.listdir(storage_service.upload_dir)
-        logger.info(f"[WORKER STARTUP] Upload directory contents ({len(contents)} files): {contents[:5]}...")
-    else:
-        logger.error(f"[WORKER STARTUP] Upload directory does NOT exist: {storage_service.upload_dir}")
-except Exception as e:
-    logger.error(f"[WORKER STARTUP] Error checking storage directories: {e}")
+# Log S3 configuration at worker startup
+logger.info(f"[WORKER STARTUP] S3 storage service initialized")
+logger.info(f"[WORKER STARTUP] S3 bucket: {storage_service.bucket_name}")
+logger.info(f"[WORKER STARTUP] AWS region: {storage_service.aws_region}")
 
 celery_app = Celery(
     'autohvac',
@@ -138,82 +124,16 @@ def calculate_hvac_loads(
         except Exception as e:
             logger.exception(f"Error updating progress for {project_id}: {e}")
     
-    # Get file path using storage service
-    file_path = storage_service.get_file_path(project_id)
-    
     logger.info(f"[CELERY TASK] Starting task for project {project_id}")
-    logger.info(f"[CELERY TASK] File path: {file_path}")
     
-    # List directory contents for debugging
-    try:
-        if os.path.exists(storage_service.upload_dir):
-            contents = os.listdir(storage_service.upload_dir)
-            logger.info(f"[CELERY TASK] Upload directory contents ({len(contents)} files): {contents[:10]}...")
-        else:
-            logger.warning(f"[CELERY TASK] Upload directory does not exist: {storage_service.upload_dir}")
-    except Exception as e:
-        logger.warning(f"[CELERY TASK] Could not list directory: {e}")
+    # Check if file exists in S3
+    file_exists = storage_service.file_exists(project_id)
     
-    # Retry logic for file existence check (containers might be slow to sync)
-    max_retries = 5
-    retry_delay = 2  # seconds
-    file_found = False
+    logger.info(f"[CELERY START] S3 file check for {project_id}: exists={file_exists}")
     
-    for retry in range(max_retries):
-        if os.path.exists(file_path):
-            file_found = True
-            break
-        
-        if retry < max_retries - 1:
-            logger.warning(f"File not found on attempt {retry + 1}/{max_retries}, retrying in {retry_delay}s: {file_path}")
-            time.sleep(retry_delay)
-    
-    # Log file state at the start of Celery task
-    file_info = {
-        "path": file_path,
-        "exists": file_found,
-        "retries_needed": retry if file_found else max_retries
-    }
-    
-    if file_found:
-        try:
-            file_info["size"] = os.path.getsize(file_path)
-            with open(file_path, 'rb') as f:
-                first_bytes = f.read(16)
-                file_info["first_16_bytes"] = first_bytes.hex()
-                f.seek(0)
-                chunk = f.read(65536)
-                file_info["sha1_first_64k"] = hashlib.sha1(chunk).hexdigest()
-        except Exception as e:
-            file_info["read_error"] = f"{type(e).__name__}: {str(e)}"
-            logger.error(f"Failed to read file info: {e}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-    
-    logger.info(f"[CELERY START] File check for {project_id}: {file_info}")
-    
-    if not file_found:
-        error_msg = f"PDF file not found at start of Celery task after {max_retries} retries: {file_path}"
+    if not file_exists:
+        error_msg = f"PDF file not found in S3 at start of Celery task: {project_id}"
         logger.error(f"[CELERY TASK] {error_msg}")
-        
-        # Additional debugging info
-        logger.error(f"[CELERY TASK] RENDER_DISK_PATH={storage_service.storage_path}")
-        logger.error(f"[CELERY TASK] Expected file: {file_path}")
-        
-        # List all files in the storage directory
-        try:
-            if os.path.exists(storage_service.upload_dir):
-                all_files = os.listdir(storage_service.upload_dir)
-                pdf_files = [f for f in all_files if f.endswith('.pdf')]
-                logger.error(f"[CELERY TASK] PDF files in {storage_service.upload_dir}: {pdf_files}")
-                logger.error(f"[CELERY TASK] All files ({len(all_files)}): {all_files[:20]}...")
-            else:
-                logger.error(f"[CELERY TASK] Upload directory does not exist: {storage_service.upload_dir}")
-                # Also check parent directory
-                if os.path.exists(storage_service.storage_path):
-                    parent_contents = os.listdir(storage_service.storage_path)
-                    logger.error(f"[CELERY TASK] Parent directory contents: {parent_contents}")
-        except Exception as e:
-            logger.error(f"[CELERY TASK] Failed to list directory: {e}")
         
         audit_data['errors_encountered'].append({
             'stage': 'file_check',
@@ -222,6 +142,21 @@ def calculate_hvac_loads(
         })
         job_service.sync_set_project_failed(project_id, error_msg)
         raise FileNotFoundError(error_msg)
+    
+    # Download file from S3 to temporary location for processing
+    try:
+        file_path = storage_service.download_to_temp_file(project_id)
+        logger.info(f"[CELERY TASK] Downloaded file from S3 to temp location: {file_path}")
+    except Exception as e:
+        error_msg = f"Failed to download file from S3: {str(e)}"
+        logger.error(f"[CELERY TASK] {error_msg}")
+        audit_data['errors_encountered'].append({
+            'stage': 'file_download',
+            'error': error_msg,
+            'timestamp': time.time()
+        })
+        job_service.sync_set_project_failed(project_id, error_msg)
+        raise
     
     try:
         # Stage 1: File validation and setup
@@ -542,10 +477,15 @@ def calculate_hvac_loads(
         raise
         
     finally:
-        # CRITICAL: Do NOT delete the file here - it's managed by storage service
-        # The file should only be deleted after ALL processing is complete
-        # and results are stored in the database
-        logger.info(f"Completed processing for {project_id}, file preserved at {file_path}")
+        # Clean up the temporary file downloaded from S3
+        if 'file_path' in locals() and os.path.exists(file_path):
+            try:
+                os.unlink(file_path)
+                logger.info(f"Cleaned up temporary file: {file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up temporary file {file_path}: {e}")
+        
+        logger.info(f"Completed processing for {project_id}")
 
 
 @celery_app.task

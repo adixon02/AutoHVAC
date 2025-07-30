@@ -284,7 +284,7 @@ class JobService:
         # Cleanup uploaded file after successful completion
         if success:
             try:
-                from services.storage import storage_service
+                from services.s3_storage import storage_service
                 storage_service.cleanup(project_id)
                 logger.info(f"Cleaned up files for completed project {project_id}")
             except Exception as e:
@@ -308,7 +308,7 @@ class JobService:
         # Cleanup uploaded file after failure (disabled in debug mode)
         if success and CLEANUP_ON_FAILURE:
             try:
-                from services.storage import storage_service
+                from services.s3_storage import storage_service
                 storage_service.cleanup(project_id)
                 logger.info(f"Cleaned up files for failed project {project_id}")
             except Exception as e:
@@ -381,7 +381,7 @@ class JobService:
                 return False
             
             # Perform cleanup
-            from services.storage import storage_service
+            from services.s3_storage import storage_service
             storage_service.cleanup(project_id)
             logger.info(f"Successfully cleaned up files for project {project_id}")
             return True

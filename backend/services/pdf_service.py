@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 import logging
 from fastapi import HTTPException
-from services.storage import storage_service
+from services.s3_storage import storage_service
 
 try:
     import pdfkit
