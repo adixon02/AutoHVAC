@@ -137,15 +137,31 @@ class JobService:
         if not project:
             return False
         
-        # Ensure all updates are JSON serializable
-        safe_updates = ensure_json_serializable(updates)
-        
-        for key, value in safe_updates.items():
-            if hasattr(project, key):
+        # Special handling for status field to prevent enum serialization issues
+        for key, value in updates.items():
+            if key == "status":
+                # Ensure status is a proper enum value, not a dict
+                if isinstance(value, dict):
+                    logger.error(f"ERROR: Attempting to set status as dict: {value}")
+                    raise ValueError(f"Status must be a JobStatus enum or string, not dict: {value}")
+                elif isinstance(value, JobStatus):
+                    setattr(project, key, value)
+                elif isinstance(value, str):
+                    # Convert string to JobStatus enum
+                    try:
+                        setattr(project, key, JobStatus(value))
+                    except ValueError:
+                        raise ValueError(f"Invalid status value: {value}")
+                else:
+                    raise ValueError(f"Invalid status type: {type(value)}")
+            elif key in ["result", "parsed_schema_json", "error"]:
+                # JSON fields need serialization
+                setattr(project, key, ensure_json_serializable(value))
+            elif hasattr(project, key):
                 setattr(project, key, value)
         
         # Set completion time if status changed to completed
-        if safe_updates.get("status") == JobStatus.COMPLETED:
+        if project.status == JobStatus.COMPLETED:
             project.completed_at = datetime.utcnow()
         
         session.add(project)
@@ -164,15 +180,31 @@ class JobService:
             if not project:
                 return False
             
-            # Ensure all updates are JSON serializable
-            safe_updates = ensure_json_serializable(updates)
-            
-            for key, value in safe_updates.items():
-                if hasattr(project, key):
+            # Special handling for status field to prevent enum serialization issues
+            for key, value in updates.items():
+                if key == "status":
+                    # Ensure status is a proper enum value, not a dict
+                    if isinstance(value, dict):
+                        logger.error(f"ERROR: Attempting to set status as dict: {value}")
+                        raise ValueError(f"Status must be a JobStatus enum or string, not dict: {value}")
+                    elif isinstance(value, JobStatus):
+                        setattr(project, key, value)
+                    elif isinstance(value, str):
+                        # Convert string to JobStatus enum
+                        try:
+                            setattr(project, key, JobStatus(value))
+                        except ValueError:
+                            raise ValueError(f"Invalid status value: {value}")
+                    else:
+                        raise ValueError(f"Invalid status type: {type(value)}")
+                elif key in ["result", "parsed_schema_json", "error"]:
+                    # JSON fields need serialization
+                    setattr(project, key, ensure_json_serializable(value))
+                elif hasattr(project, key):
                     setattr(project, key, value)
             
             # Set completion time if status changed to completed
-            if safe_updates.get("status") == JobStatus.COMPLETED:
+            if project.status == JobStatus.COMPLETED:
                 project.completed_at = datetime.utcnow()
             
             session.add(project)

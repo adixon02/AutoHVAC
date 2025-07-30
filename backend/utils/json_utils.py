@@ -7,6 +7,7 @@ from uuid import UUID
 from datetime import datetime, date
 from decimal import Decimal
 from typing import Any, Dict
+from enum import Enum
 import logging
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,9 @@ class SafeJSONEncoder(json.JSONEncoder):
             return obj.isoformat()
         elif isinstance(obj, Decimal):
             return float(obj)
+        elif isinstance(obj, Enum):
+            # Return the enum's value, not its dict representation
+            return obj.value
         elif hasattr(obj, '__dict__'):
             # For objects with __dict__, try to serialize their attributes
             return obj.__dict__
@@ -74,7 +78,15 @@ def ensure_json_serializable(data: Any) -> Any:
         return data.isoformat()
     elif isinstance(data, Decimal):
         return float(data)
+    elif isinstance(data, Enum):
+        # Return the enum's value, not its dict representation
+        return data.value
     elif isinstance(data, dict):
+        # Skip the problematic __objclass__ and other internal attributes
+        if '_value_' in data and '_name_' in data and '__objclass__' in data:
+            # This looks like an enum that was converted to dict - extract just the value
+            logger.warning(f"Found enum dict representation, extracting value: {data.get('_value_')}")
+            return data.get('_value_')
         return {k: ensure_json_serializable(v) for k, v in data.items()}
     elif isinstance(data, list):
         return [ensure_json_serializable(item) for item in data]
@@ -84,7 +96,9 @@ def ensure_json_serializable(data: Any) -> Any:
         # Pydantic model
         return ensure_json_serializable(data.dict())
     elif hasattr(data, '__dict__'):
-        # Regular object
+        # Regular object - but check if it's an Enum first
+        if isinstance(data, Enum):
+            return data.value
         return ensure_json_serializable(data.__dict__)
     else:
         return data

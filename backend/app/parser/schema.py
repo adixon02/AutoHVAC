@@ -3,8 +3,8 @@ Pydantic schemas for AutoHVAC blueprint data structures
 Enhanced with comprehensive parsing metadata and auditability
 """
 
-from pydantic import BaseModel, Field
-from typing import List, Tuple, Optional, Dict, Any
+from pydantic import BaseModel, Field, validator
+from typing import List, Tuple, Optional, Dict, Any, Union
 from uuid import UUID, uuid4
 from datetime import datetime
 from enum import Enum
@@ -127,7 +127,7 @@ class Room(BaseModel):
 
 class BlueprintSchema(BaseModel):
     """Complete parsed blueprint structure with comprehensive metadata"""
-    project_id: UUID = Field(default_factory=uuid4, description="Unique project identifier")
+    project_id: Union[UUID, str] = Field(default_factory=uuid4, description="Unique project identifier")
     zip_code: str = Field(..., description="Project location zip code")
     sqft_total: float = Field(..., description="Total square footage")
     stories: int = Field(..., description="Number of stories/floors")
@@ -144,6 +144,16 @@ class BlueprintSchema(BaseModel):
     
     # Comprehensive metadata
     parsing_metadata: ParsingMetadata = Field(..., description="Complete parsing metadata and audit trail")
+    
+    @validator('project_id', pre=True)
+    def validate_project_id(cls, v):
+        """Convert string UUID to UUID object if needed"""
+        if isinstance(v, str):
+            try:
+                return UUID(v)
+            except ValueError:
+                raise ValueError(f"Invalid UUID string: {v}")
+        return v
 
     def dict(self, **kwargs):
         """Override dict method to ensure UUID serialization"""

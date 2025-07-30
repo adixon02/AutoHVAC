@@ -10,7 +10,7 @@ import time
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
-from uuid import uuid4
+from uuid import uuid4, UUID
 from io import BytesIO
 from PIL import Image
 
@@ -501,7 +501,7 @@ Return only valid JSON. Be conservative - it's better to mark things as "unknown
             }
             
             return BlueprintSchema(
-                project_id=project_id,
+                project_id=UUID(project_id) if isinstance(project_id, str) else project_id,
                 zip_code=zip_code,
                 sqft_total=total_area,
                 stories=stories,
@@ -573,7 +573,7 @@ Return only valid JSON. Be conservative - it's better to mark things as "unknown
         )
         
         return BlueprintSchema(
-            project_id=project_id or str(uuid4()),
+            project_id=UUID(project_id) if project_id and isinstance(project_id, str) else project_id or uuid4(),
             zip_code=zip_code,
             sqft_total=300.0,
             stories=1,
