@@ -83,7 +83,7 @@ services:
     name: autohvac-redis
     ipAllowList: []
     maxmemoryPolicy: allkeys-lru
-    plan: starter
+    plan: standard
 
 databases:
   - name: autohvac-postgres
