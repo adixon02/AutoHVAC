@@ -1,6 +1,6 @@
 #!/bin/bash
 export DEBUG=true
-export DEV_VERIFIED_EMAILS=austind02@gmail.com
+export DEV_VERIFIED_EMAILS="${DEV_VERIFIED_EMAILS:-}"
 export DISABLE_PDF=true
 export STRIPE_SECRET_KEY=""
 export STRIPE_PUBLISHABLE_KEY=""

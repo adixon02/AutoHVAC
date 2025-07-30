@@ -5,5 +5,5 @@ services:
     environment:
       - DEBUG=true
       - LOG_LEVEL=DEBUG
-      - DEV_VERIFIED_EMAILS=austind02@gmail.com
+      - DEV_VERIFIED_EMAILS=${DEV_VERIFIED_EMAILS:-}
       - DISABLE_PDF=true
