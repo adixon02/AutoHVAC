@@ -17,6 +17,10 @@ services:
       cd backend && pip install --only-binary=:all: -r requirements.txt
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
+    disk:
+      name: shared-storage
+      mountPath: /var/data
+      sizeGB: 10
     envVars:
       - key: REDIS_URL
         fromService:
@@ -41,6 +45,8 @@ services:
         value: "1"
       - key: WEB_CONCURRENCY
         value: "2"
+      - key: RENDER_DISK_PATH
+        value: /var/data/uploads
 
   - type: worker
     name: autohvac-worker
@@ -50,7 +56,7 @@ services:
       cd backend && pip install --only-binary=:all: -r requirements.txt
     startCommand: cd backend && celery -A tasks.calculate_hvac_loads worker --loglevel=info --concurrency=2 --max-tasks-per-child=50 --max-memory-per-child=512000 --time-limit=1800 --soft-time-limit=1740 --without-gossip --without-mingle --without-heartbeat
     disk:
-      name: worker-storage
+      name: shared-storage
       mountPath: /var/data
       sizeGB: 10
     envVars:

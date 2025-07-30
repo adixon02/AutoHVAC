@@ -335,14 +335,10 @@ class JobService:
         
         success = JobService.sync_update_project(project_id, updates)
         
-        # Cleanup uploaded file after successful completion
+        # CRITICAL: Do NOT cleanup files here - let a separate cleanup process handle it
+        # This ensures files remain available until all processing is complete
         if success:
-            try:
-                from services.storage import storage_service
-                storage_service.cleanup(project_id)
-                logger.info(f"Cleaned up files for completed project {project_id}")
-            except Exception as e:
-                logger.error(f"Failed to cleanup files for project {project_id}: {e}")
+            logger.info(f"Project {project_id} completed successfully. File cleanup will be handled separately.")
         
         return success
     
@@ -357,18 +353,42 @@ class JobService:
             {"status": JobStatus.FAILED, "error": error}
         )
         
-        # Cleanup uploaded file after failure (disabled in debug mode)
-        if success and CLEANUP_ON_FAILURE:
-            try:
-                from services.storage import storage_service
-                storage_service.cleanup(project_id)
-                logger.info(f"Cleaned up files for failed project {project_id}")
-            except Exception as e:
-                logger.error(f"Failed to cleanup files for project {project_id}: {e}")
-        elif success and not CLEANUP_ON_FAILURE:
-            logger.warning(f"⚠️ CLEANUP DISABLED: Files preserved for failed project {project_id} for debugging")
+        # CRITICAL: Do NOT cleanup files here - let a separate cleanup process handle it
+        # Files should be preserved for debugging and potential retry
+        if success:
+            logger.warning(f"Project {project_id} failed with error: {error}. Files preserved for debugging.")
         
         return success
+    
+    @staticmethod
+    async def cleanup_completed_project(
+        project_id: str,
+        session: AsyncSession
+    ) -> bool:
+        """
+        Cleanup files for a completed project.
+        Should only be called after ensuring all processing is complete.
+        """
+        try:
+            # Verify project is actually completed
+            project = await JobService.get_project(project_id, session)
+            if not project:
+                logger.error(f"Project {project_id} not found for cleanup")
+                return False
+            
+            if project.status not in [JobStatus.COMPLETED, JobStatus.FAILED]:
+                logger.warning(f"Cannot cleanup project {project_id} - status is {project.status}")
+                return False
+            
+            # Perform cleanup
+            from services.storage import storage_service
+            storage_service.cleanup(project_id)
+            logger.info(f"Successfully cleaned up files for project {project_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to cleanup project {project_id}: {e}")
+            return False
     
     # Legacy assumption handling methods removed - all parameters now collected upfront
 

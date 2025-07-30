@@ -469,6 +469,13 @@ async def upload_blueprint(
                     pre_celery_info = log_file_state(project_id, "PRE_CELERY", temp_path)
                     logger.info(f"About to start Celery task. File info: {pre_celery_info}")
                     
+                    # Double-check file exists before dispatching Celery task
+                    if not os.path.exists(temp_path):
+                        error_msg = f"File disappeared before Celery dispatch: {temp_path}"
+                        logger.error(error_msg)
+                        await job_service.set_project_failed(project_id, error_msg, session)
+                        raise HTTPException(status_code=500, detail=error_msg)
+                    
                     # Start comprehensive HVAC load calculation task
                     # CRITICAL: Pass file path, not content, to prevent threading issues
                     calculate_hvac_loads.delay(
@@ -484,6 +491,10 @@ async def upload_blueprint(
                     # Log file state after Celery task dispatch
                     post_celery_info = log_file_state(project_id, "POST_CELERY", temp_path)
                     logger.info(f"Celery task dispatched. File info: {post_celery_info}")
+                    
+                    # One final check to ensure file still exists
+                    if not os.path.exists(temp_path):
+                        logger.warning(f"File disappeared after Celery dispatch (non-critical): {temp_path}")
                     
                 except Exception as e:
                     logger.error(f"❌ Failed to start Celery task: {type(e).__name__}: {str(e)}")

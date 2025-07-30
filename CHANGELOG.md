@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **AI-First Blueprint Parsing System**
+  - GPT-4V is now the default parsing method (AI_PARSING_ENABLED=true)
+  - No element count restrictions for AI parsing (handles 40k+ elements)
+  - Smart image compression: PNG first for line art, then progressive JPEG
+  - Minimum resolution floor (1000px) to maintain readability
+  - Dynamic compression to stay under 19MB GPT-4V limit
+- **Enhanced File Handling**
+  - Support for blueprints up to 50MB (previously failed at complex drawings)
+  - Warning messages for large files (>20MB): "AI processing may take 2-3 minutes"
+  - Files preserved on failure for debugging (CLEANUP_ON_FAILURE=false)
+- **Comprehensive Metrics Logging**
+  - [METRICS] tags for parsing duration, file size, rooms found
+  - Tracks which parser (AI vs legacy) was used for each upload
+  - Total processing time and stage-by-stage metrics
+- **Improved Error Handling**
+  - Clear messaging when AI unavailable: "AI parsing temporarily unavailable"
+  - Legacy parser errors suggest AI parsing for complex files
+  - Debug mode returns full exception details in API responses
+
+### Changed
+- **AI parsing is now default** - USE_GPT4V_PARSING deprecated in favor of AI_PARSING_ENABLED
+- **Element count validation removed for AI path** - Complex AutoCAD files now process without issues
+- **Better fallback behavior** - Legacy parser only used when AI fails, not by default
+- **Error messages improved** - Users understand why validation failed and what alternatives exist
+
+### Fixed
+- **Missing PIL Image import** in blueprint_ai_parser.py causing NameError
+- **Complex blueprints rejected** - 38k+ element drawings now process successfully
+- **Overly restrictive validation** - Element count checks only apply to legacy parser
+
+### Added (Previous)
 - GPT-4V (Vision) AI blueprint parsing integration
   - Direct PDF-to-structured-data parsing using OpenAI's GPT-4V
   - Confidence scoring for all extracted values
@@ -54,10 +85,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - poppler system dependency no longer required
 - Obsolete test files and development artifacts
 
+### Configuration
+- `AI_PARSING_ENABLED` (default: true) - Enable AI-first parsing
+- `LEGACY_ELEMENT_LIMIT` (default: 20000) - Max elements for legacy parser
+- `FILE_SIZE_WARNING_MB` (default: 20) - Show warning for large files
+- `DEBUG_EXCEPTIONS` (default: true) - Return detailed errors in responses
+- `CLEANUP_ON_FAILURE` (default: false) - Preserve files for debugging
+
 ### Dependencies
 - Added: PyMuPDF>=1.24.0
 - Removed: pdf2image
 - Updated: openai>=1.97.1 (for GPT-4V support)
+- Required: Pillow>=10.2.0 (for image compression)
 
 ## [1.0.0] - 2024-11-27
 

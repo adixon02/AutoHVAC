@@ -123,13 +123,28 @@ def calculate_hvac_loads(
     # CRITICAL: Use the file from disk, don't create temp files
     logger.info(f"Using PDF file from disk: {file_path}")
     
+    # Retry logic for file existence check (containers might be slow to sync)
+    max_retries = 5
+    retry_delay = 2  # seconds
+    file_found = False
+    
+    for retry in range(max_retries):
+        if os.path.exists(file_path):
+            file_found = True
+            break
+        
+        if retry < max_retries - 1:
+            logger.warning(f"File not found on attempt {retry + 1}/{max_retries}, retrying in {retry_delay}s: {file_path}")
+            time.sleep(retry_delay)
+    
     # Log file state at the start of Celery task
     file_info = {
         "path": file_path,
-        "exists": os.path.exists(file_path)
+        "exists": file_found,
+        "retries_needed": retry if file_found else max_retries
     }
     
-    if file_info["exists"]:
+    if file_found:
         try:
             file_info["size"] = os.path.getsize(file_path)
             with open(file_path, 'rb') as f:
@@ -145,9 +160,23 @@ def calculate_hvac_loads(
     
     logger.info(f"[CELERY START] File check for {project_id}: {file_info}")
     
-    if not file_info["exists"]:
-        error_msg = f"PDF file not found at start of Celery task: {file_path}"
+    if not file_found:
+        error_msg = f"PDF file not found at start of Celery task after {max_retries} retries: {file_path}"
         logger.error(error_msg)
+        
+        # Additional debugging info
+        logger.error(f"Storage path check: RENDER_DISK_PATH={os.getenv('RENDER_DISK_PATH')}")
+        logger.error(f"Directory listing of parent dir:")
+        try:
+            parent_dir = os.path.dirname(file_path)
+            if os.path.exists(parent_dir):
+                files = os.listdir(parent_dir)
+                logger.error(f"Files in {parent_dir}: {files[:10]}...")  # List first 10 files
+            else:
+                logger.error(f"Parent directory does not exist: {parent_dir}")
+        except Exception as e:
+            logger.error(f"Failed to list directory: {e}")
+        
         audit_data['errors_encountered'].append({
             'stage': 'file_check',
             'error': error_msg,
