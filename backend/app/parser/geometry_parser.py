@@ -49,19 +49,28 @@ class GeometryParser:
         """
         thread_id = threading.get_ident()
         thread_name = threading.current_thread().name
-        logger.info(f"[Thread {thread_name}:{thread_id}] Starting thread-safe geometry parsing for {pdf_path}, page {page_number + 1}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Starting thread-safe geometry parsing")
+        logger.info(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Thread ID: {thread_id}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Thread name: {thread_name}")
         
         try:
             # Extract basic page info and geometry using thread-safe pdfplumber operation
             def pdfplumber_operation(pdf):
+                logger.info(f"[Thread {thread_name}:{thread_id}] Opening PDF in pdfplumber operation for: {pdf_path}")
+                
                 if not pdf.pages:
+                    logger.error(f"[Thread {thread_name}:{thread_id}] PDF has no pages: {pdf_path}")
                     raise ValueError("PDF has no pages")
                 
                 if page_number >= len(pdf.pages) or page_number < 0:
+                    logger.error(f"[Thread {thread_name}:{thread_id}] Invalid page number {page_number + 1}, PDF has {len(pdf.pages)} pages")
                     raise ValueError(f"Page {page_number + 1} does not exist (PDF has {len(pdf.pages)} pages)")
                 
                 page = pdf.pages[page_number]
-                logger.info(f"[Thread {thread_name}:{thread_id}] Processing page {page_number + 1} of {len(pdf.pages)}")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Processing page {page_number + 1} of {len(pdf.pages)} via pdfplumber")
+                logger.info(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
                 
                 # Extract basic page info
                 page_width = float(page.width)
@@ -118,11 +127,33 @@ class GeometryParser:
             )
             
             logger.info(f"[Thread {thread_name}:{thread_id}] Geometry parsing completed successfully")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Final result - Lines: {len(result.lines)}, Rectangles: {len(result.rectangles)}, Polylines: {len(result.polylines)}")
             return result
                 
         except Exception as e:
-            logger.error(f"[Thread {thread_name}:{thread_id}] Geometry parsing failed: {type(e).__name__}: {str(e)}")
-            logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
+            error_str = str(e).lower()
+            
+            # CRITICAL: Check for document closed errors and log full context
+            if any(error_phrase in error_str for error_phrase in [
+                "document closed", 
+                "seek of closed file", 
+                "closed file", 
+                "bad file descriptor",
+                "document has been closed"
+            ]):
+                logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR in geometry parsing")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error type: {type(e).__name__}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error message: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Thread ID: {thread_id}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Thread name: {thread_name}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] FULL STACK TRACE:\n{traceback.format_exc()}")
+            else:
+                logger.error(f"[Thread {thread_name}:{thread_id}] Geometry parsing failed: {type(e).__name__}: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
             raise
     
     def _detect_scale(self, page) -> Optional[float]:
@@ -265,18 +296,25 @@ class GeometryParser:
         thread_id = threading.get_ident()
         thread_name = threading.current_thread().name
         
+        logger.info(f"[Thread {thread_name}:{thread_id}] Starting PyMuPDF polyline extraction")
+        logger.info(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+        
         def pymupdf_operation(doc):
             """PyMuPDF operation to be executed thread-safely"""
+            logger.info(f"[Thread {thread_name}:{thread_id}] Opening PDF in PyMuPDF operation for: {pdf_path}")
+            
             if len(doc) == 0:
-                logger.warning(f"[Thread {thread_name}:{thread_id}] PDF has no pages for PyMuPDF processing")
+                logger.warning(f"[Thread {thread_name}:{thread_id}] PDF has no pages for PyMuPDF processing: {pdf_path}")
                 return []
             
             if page_number >= len(doc) or page_number < 0:
-                logger.warning(f"[Thread {thread_name}:{thread_id}] Invalid page number {page_number + 1} for PyMuPDF")
+                logger.warning(f"[Thread {thread_name}:{thread_id}] Invalid page number {page_number + 1} for PyMuPDF, PDF has {len(doc)} pages")
                 return []
             
             page = doc[page_number]
-            logger.info(f"[Thread {thread_name}:{thread_id}] Getting drawings from page {page_number + 1}")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Getting drawings from page {page_number + 1} via PyMuPDF")
+            logger.info(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
             
             # Get all drawing paths with timeout protection
             drawings = page.get_drawings()
@@ -347,14 +385,40 @@ class GeometryParser:
             return polylines
         
         try:
-            return safe_pymupdf_operation(
+            result = safe_pymupdf_operation(
                 pdf_path,
                 pymupdf_operation,
                 f"pymupdf_polyline_extraction_page_{page_number + 1}",
                 max_retries=2
             )
+            logger.info(f"[Thread {thread_name}:{thread_id}] PyMuPDF polyline extraction completed, found {len(result)} polylines")
+            return result
+            
         except Exception as e:
-            logger.error(f"[Thread {thread_name}:{thread_id}] PyMuPDF polyline extraction failed: {type(e).__name__}: {str(e)}")
+            error_str = str(e).lower()
+            
+            # CRITICAL: Check for document closed errors and log full context
+            if any(error_phrase in error_str for error_phrase in [
+                "document closed", 
+                "seek of closed file", 
+                "closed file", 
+                "bad file descriptor",
+                "document has been closed"
+            ]):
+                logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR in PyMuPDF polyline extraction")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error type: {type(e).__name__}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error message: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Thread ID: {thread_id}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Thread name: {thread_name}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] FULL STACK TRACE:\n{traceback.format_exc()}")
+            else:
+                logger.error(f"[Thread {thread_name}:{thread_id}] PyMuPDF polyline extraction failed: {type(e).__name__}: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
+            
             return []  # Don't fail completely, just return empty results
     
     def _classify_line(self, line: Dict, length: float) -> str:

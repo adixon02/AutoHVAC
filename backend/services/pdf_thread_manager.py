@@ -81,13 +81,19 @@ class PDFThreadManager:
             except Exception as e:
                 error_str = str(e).lower()
                 
-                # Check for document closed errors
+                # Check for document closed errors - comprehensive pattern matching
                 if any(error_phrase in error_str for error_phrase in [
                     "document closed", 
                     "seek of closed file", 
                     "closed file", 
                     "bad file descriptor",
-                    "document has been closed"
+                    "document has been closed",
+                    "i/o operation on closed file",
+                    "cannot access closed file",
+                    "file is closed",
+                    "invalid file descriptor",
+                    "pdf document closed",
+                    "stream closed"
                 ]):
                     logger.error(
                         f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR on attempt {attempt + 1}/{max_retries + 1} "
@@ -131,18 +137,21 @@ class PDFThreadManager:
         timeout = timeout_seconds or self.default_timeout
         
         try:
-            logger.info(f"Submitting {operation_name} to worker thread pool (timeout: {timeout}s)")
-            future = self._executor.submit(operation_func)
-            result = future.result(timeout=timeout)
-            logger.info(f"Successfully completed {operation_name} in worker thread")
+            thread_id = threading.get_ident()
+        thread_name = threading.current_thread().name
+        
+        logger.info(f"[Thread {thread_name}:{thread_id}] Submitting {operation_name} to worker thread pool (timeout: {timeout}s)")
+        future = self._executor.submit(operation_func)
+        result = future.result(timeout=timeout)
+        logger.info(f"[Thread {thread_name}:{thread_id}] Successfully completed {operation_name} in worker thread")
             return result
             
         except FutureTimeoutError:
             error_msg = f"{operation_name} timed out after {timeout} seconds"
-            logger.error(error_msg)
+            logger.error(f"[Thread {thread_name}:{thread_id}] {error_msg}")
             raise PDFProcessingTimeoutError(error_msg)
         except Exception as e:
-            logger.error(f"Error in worker thread executing {operation_name}: {type(e).__name__}: {str(e)}")
+            logger.error(f"[Thread {thread_name}:{thread_id}] Error in worker thread executing {operation_name}: {type(e).__name__}: {str(e)}")
             raise
     
     @contextmanager
@@ -172,15 +181,24 @@ class PDFThreadManager:
         logger.info(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
         
         try:
-            # Verify file exists and is accessible
+            # CRITICAL: Comprehensive file validation before PDF operations
+            logger.info(f"[Thread {thread_name}:{thread_id}] Validating PDF file access")
+            
             if not os.path.exists(pdf_path):
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF file not found: {pdf_path}")
                 raise FileNotFoundError(f"PDF file not found: {pdf_path}")
             
             if not os.access(pdf_path, os.R_OK):
+                logger.error(f"[Thread {thread_name}:{thread_id}] Cannot read PDF file: {pdf_path}")
                 raise PermissionError(f"Cannot read PDF file: {pdf_path}")
             
             file_size = os.path.getsize(pdf_path)
-            logger.info(f"[Thread {thread_name}:{thread_id}] PDF file size: {file_size} bytes")
+            if file_size == 0:
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF file is empty: {pdf_path}")
+                raise ValueError(f"PDF file is empty: {pdf_path}")
+            
+            logger.info(f"[Thread {thread_name}:{thread_id}] PDF file validation passed - size: {file_size} bytes")
+            logger.info(f"[Thread {thread_name}:{thread_id}] PDF file path: {pdf_path}")
             
             yield pdf_path
             
@@ -294,8 +312,26 @@ def safe_pdfplumber_operation(pdf_path: str, operation_func: Callable, operation
     """
     def processor(path: str):
         import pdfplumber
-        with pdfplumber.open(path) as pdf:
-            return operation_func(pdf)
+        import threading
+        
+        thread_id = threading.get_ident()
+        thread_name = threading.current_thread().name
+        
+        logger.info(f"[Thread {thread_name}:{thread_id}] Opening PDF with pdfplumber: {path}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Operation: {operation_name}")
+        
+        try:
+            with pdfplumber.open(path) as pdf:
+                logger.info(f"[Thread {thread_name}:{thread_id}] pdfplumber PDF opened successfully, pages: {len(pdf.pages)}")
+                result = operation_func(pdf)
+                logger.info(f"[Thread {thread_name}:{thread_id}] pdfplumber operation completed successfully")
+                return result
+        except Exception as e:
+            logger.error(f"[Thread {thread_name}:{thread_id}] pdfplumber operation failed: {type(e).__name__}: {str(e)}")
+            logger.error(f"[Thread {thread_name}:{thread_id}] PDF path: {path}")
+            raise
+        finally:
+            logger.info(f"[Thread {thread_name}:{thread_id}] pdfplumber PDF closed automatically by context manager")
     
     return pdf_thread_manager.process_pdf_with_retry(
         pdf_path=pdf_path,
@@ -320,11 +356,35 @@ def safe_pymupdf_operation(pdf_path: str, operation_func: Callable, operation_na
     """
     def processor(path: str):
         import fitz
-        doc = fitz.open(path)
+        import threading
+        
+        thread_id = threading.get_ident()
+        thread_name = threading.current_thread().name
+        
+        logger.info(f"[Thread {thread_name}:{thread_id}] Opening PDF with PyMuPDF: {path}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Operation: {operation_name}")
+        
+        doc = None
         try:
-            return operation_func(doc)
+            doc = fitz.open(path)
+            logger.info(f"[Thread {thread_name}:{thread_id}] PyMuPDF document opened successfully, pages: {len(doc)}")
+            
+            result = operation_func(doc)
+            logger.info(f"[Thread {thread_name}:{thread_id}] PyMuPDF operation completed successfully")
+            return result
+            
+        except Exception as e:
+            logger.error(f"[Thread {thread_name}:{thread_id}] PyMuPDF operation failed: {type(e).__name__}: {str(e)}")
+            logger.error(f"[Thread {thread_name}:{thread_id}] PDF path: {path}")
+            raise
         finally:
-            doc.close()
+            if doc is not None:
+                try:
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Closing PyMuPDF document")
+                    doc.close()
+                    logger.info(f"[Thread {thread_name}:{thread_id}] PyMuPDF document closed successfully")
+                except Exception as close_error:
+                    logger.error(f"[Thread {thread_name}:{thread_id}] Error closing PyMuPDF document: {close_error}")
     
     return pdf_thread_manager.process_pdf_with_retry(
         pdf_path=pdf_path,

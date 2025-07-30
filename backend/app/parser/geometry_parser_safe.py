@@ -469,18 +469,17 @@ class GeometryParserSafe:
             thread_id = threading.get_ident()
             thread_name = threading.current_thread().name
             logger.info(f"[Thread {thread_name}:{thread_id}] Starting geometry extraction for page {page_number + 1} in worker thread")
+            logger.info(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
             
             # Add checkpoints throughout parsing
             checkpoint_start = time.time()
             
-            # Call the actual parser - we need to modify it to accept page numbers
-            # For now, we'll use a temporary approach where we extract just one page
-            # In production, you'd want to modify GeometryParser to support page selection
-            
-            # Create a temporary single-page PDF for parsing
-            temp_single_page_path = self._extract_single_page(pdf_path, page_number)
+            # CRITICAL: All PDF operations (create temp file, parse, cleanup) happen in this worker thread
+            # Create a temporary single-page PDF for parsing - ENTIRELY IN THIS THREAD
+            temp_single_page_path = self._extract_single_page_in_worker(pdf_path, page_number)
             
             try:
+                logger.info(f"[Thread {thread_name}:{thread_id}] Parsing single-page PDF: {temp_single_page_path}")
                 # Parse the single page
                 result = self.parser.parse(temp_single_page_path)
                 
@@ -504,87 +503,144 @@ class GeometryParserSafe:
                 return result
                 
             finally:
-                # Clean up temporary file
+                # CRITICAL: Clean up temporary file in the SAME THREAD that created it
                 if os.path.exists(temp_single_page_path):
                     try:
-                        logger.info(f"[Thread {thread_name}:{thread_id}] Cleaning up temporary file: {temp_single_page_path}")
+                        logger.info(f"[Thread {thread_name}:{thread_id}] Cleaning up temporary file in worker thread: {temp_single_page_path}")
                         os.unlink(temp_single_page_path)
-                    except Exception as e:
-                        logger.warning(f"[Thread {thread_name}:{thread_id}] Failed to clean up temporary file {temp_single_page_path}: {e}")
+                        logger.info(f"[Thread {thread_name}:{thread_id}] Successfully cleaned up temporary file")
+                    except Exception as cleanup_error:
+                        logger.error(f"[Thread {thread_name}:{thread_id}] Failed to clean up temporary file {temp_single_page_path}: {cleanup_error}")
             
         except Exception as e:
-            # Log any exception with full context
-            logger.error(f"[Thread {thread_name}:{thread_id}] Exception in geometry parser thread for page {page_number + 1}: {type(e).__name__}: {str(e)}")
-            logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
-            logger.error(f"[Thread {thread_name}:{thread_id}] PDF path: {pdf_path}")
-            logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+            error_str = str(e).lower()
+            
+            # CRITICAL: Check for document closed errors and log full context
+            if any(error_phrase in error_str for error_phrase in [
+                "document closed", 
+                "seek of closed file", 
+                "closed file", 
+                "bad file descriptor",
+                "document has been closed"
+            ]):
+                logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR in page parsing for page {page_number + 1}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error type: {type(e).__name__}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error message: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Thread ID: {thread_id}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Thread name: {thread_name}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] FULL STACK TRACE:\n{traceback.format_exc()}")
+            else:
+                # Log any other exception with full context
+                logger.error(f"[Thread {thread_name}:{thread_id}] Exception in geometry parser thread for page {page_number + 1}: {type(e).__name__}: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
             
             # Re-raise for the main thread to handle
             raise
     
-    def _extract_single_page(self, pdf_path: str, page_number: int) -> str:
+    def _extract_single_page_in_worker(self, pdf_path: str, page_number: int) -> str:
         """
         Extract a single page to a temporary PDF file
-        CRITICAL: This runs in the worker thread, ensuring file operations happen in correct thread
+        CRITICAL: This runs ENTIRELY in the worker thread - create temp file, process, return path
+        The calling function is responsible for cleanup in the same thread
         
         Args:
             pdf_path: Original PDF path
             page_number: Zero-based page number
             
         Returns:
-            Path to temporary single-page PDF
+            Path to temporary single-page PDF (to be cleaned up by caller in same thread)
         """
         import tempfile
         
         thread_id = threading.get_ident()
         thread_name = threading.current_thread().name
         
-        # Create temporary file
+        logger.info(f"[Thread {thread_name}:{thread_id}] Starting single-page extraction for page {page_number + 1}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Source PDF: {pdf_path}")
+        
+        # CRITICAL: Create temporary file in worker thread
         temp_fd, temp_path = tempfile.mkstemp(suffix='.pdf', prefix=f'page_{page_number + 1}_')
         os.close(temp_fd)
+        logger.info(f"[Thread {thread_name}:{thread_id}] Created temporary file: {temp_path}")
         
         source_doc = None
         target_doc = None
         
         try:
-            logger.info(f"[Thread {thread_name}:{thread_id}] Opening source PDF for page extraction: {pdf_path}")
-            # CRITICAL: Open source document in worker thread
+            logger.info(f"[Thread {thread_name}:{thread_id}] Opening source PDF in worker thread: {pdf_path}")
+            # CRITICAL: Open source document in worker thread - NEVER pass to another thread
             source_doc = fitz.open(pdf_path)
-            logger.info(f"[Thread {thread_name}:{thread_id}] Source document opened successfully")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Source document opened successfully, pages: {len(source_doc)}")
+            
+            # Validate page number
+            if page_number >= len(source_doc) or page_number < 0:
+                raise ValueError(f"Page {page_number + 1} does not exist (PDF has {len(source_doc)} pages)")
             
             # Create new document with just the target page
             logger.info(f"[Thread {thread_name}:{thread_id}] Creating single-page document for page {page_number + 1}")
-            target_doc = fitz.open()
+            target_doc = fitz.open()  # Create empty document
             target_doc.insert_pdf(source_doc, from_page=page_number, to_page=page_number)
+            logger.info(f"[Thread {thread_name}:{thread_id}] Inserted page {page_number + 1} into target document")
             
             # Save to temporary file
             logger.info(f"[Thread {thread_name}:{thread_id}] Saving single page to: {temp_path}")
             target_doc.save(temp_path)
             
-            logger.info(f"[Thread {thread_name}:{thread_id}] Page {page_number + 1} extracted successfully to temporary file")
+            # Verify file was created
+            if not os.path.exists(temp_path):
+                raise Exception(f"Temporary file was not created: {temp_path}")
+            
+            file_size = os.path.getsize(temp_path)
+            logger.info(f"[Thread {thread_name}:{thread_id}] Page {page_number + 1} extracted successfully to temporary file, size: {file_size} bytes")
             return temp_path
             
         except Exception as e:
-            if "document closed" in str(e).lower() or "seek of closed file" in str(e).lower():
-                logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR in page extraction: {type(e).__name__}: {str(e)}")
-                logger.error(f"[Thread {thread_name}:{thread_id}] PDF path: {pdf_path}")
+            error_str = str(e).lower()
+            
+            # CRITICAL: Check for document closed errors and log full context
+            if any(error_phrase in error_str for error_phrase in [
+                "document closed", 
+                "seek of closed file", 
+                "closed file", 
+                "bad file descriptor",
+                "document has been closed"
+            ]):
+                logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR in page extraction")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error type: {type(e).__name__}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error message: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Source PDF: {pdf_path}")
                 logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
-                logger.error(f"[Thread {thread_name}:{thread_id}] Call stack:\n{traceback.format_exc()}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Temp file: {temp_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Thread ID: {thread_id}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Thread name: {thread_name}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] FULL STACK TRACE:\n{traceback.format_exc()}")
             else:
                 logger.error(f"[Thread {thread_name}:{thread_id}] Failed to extract page {page_number + 1}: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF path: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Temp path: {temp_path}")
                 logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
             
-            # Clean up on failure
+            # Clean up temp file on failure in the same thread
             if os.path.exists(temp_path):
-                os.unlink(temp_path)
+                try:
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Cleaning up failed temp file: {temp_path}")
+                    os.unlink(temp_path)
+                except Exception as cleanup_error:
+                    logger.error(f"[Thread {thread_name}:{thread_id}] Failed to cleanup temp file: {cleanup_error}")
+            
             raise Exception(f"Failed to extract page {page_number + 1}: {str(e)}")
             
         finally:
-            # Clean up documents in the same thread that opened them
+            # CRITICAL: Clean up PDF documents in the same thread that opened them
             if target_doc is not None:
                 try:
                     logger.info(f"[Thread {thread_name}:{thread_id}] Closing target document")
                     target_doc.close()
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Target document closed successfully")
                 except Exception as e:
                     logger.error(f"[Thread {thread_name}:{thread_id}] Error closing target document: {e}")
                     
@@ -592,6 +648,7 @@ class GeometryParserSafe:
                 try:
                     logger.info(f"[Thread {thread_name}:{thread_id}] Closing source document")
                     source_doc.close()
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Source document closed successfully")
                 except Exception as e:
                     logger.error(f"[Thread {thread_name}:{thread_id}] Error closing source document: {e}")
 

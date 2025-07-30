@@ -60,16 +60,24 @@ class TextParser:
         """
         thread_id = threading.get_ident()
         thread_name = threading.current_thread().name
-        logger.info(f"[Thread {thread_name}:{thread_id}] Starting thread-safe text parsing for {pdf_path}, page {page_number + 1}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Starting thread-safe text parsing")
+        logger.info(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Thread ID: {thread_id}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Thread name: {thread_name}")
         
         try:
             # Extract words using thread-safe pdfplumber operation
             def pdfplumber_operation(pdf):
+                logger.info(f"[Thread {thread_name}:{thread_id}] Opening PDF in pdfplumber operation for: {pdf_path}")
+                
                 if page_number >= len(pdf.pages) or page_number < 0:
+                    logger.error(f"[Thread {thread_name}:{thread_id}] Invalid page number {page_number + 1}, PDF has {len(pdf.pages)} pages")
                     raise ValueError(f"Page {page_number + 1} does not exist (PDF has {len(pdf.pages)} pages)")
                 
                 page = pdf.pages[page_number]
-                logger.info(f"[Thread {thread_name}:{thread_id}] Processing page {page_number + 1} of {len(pdf.pages)}")
+                logger.info(f"[Thread {thread_name}:{thread_id}] Processing page {page_number + 1} of {len(pdf.pages)} via pdfplumber")
+                logger.info(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
                 
                 return self._extract_words_pdfplumber(page)
             
@@ -95,6 +103,7 @@ class TextParser:
             notes = self._identify_notes(all_words)
             
             logger.info(f"[Thread {thread_name}:{thread_id}] Text parsing completed: {len(room_labels)} rooms, {len(dimensions)} dimensions, {len(notes)} notes")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Final word count: {len(all_words)}")
             
             return RawText(
                 words=all_words,
@@ -104,8 +113,29 @@ class TextParser:
             )
             
         except Exception as e:
-            logger.error(f"[Thread {thread_name}:{thread_id}] Text parsing failed: {type(e).__name__}: {str(e)}")
-            logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
+            error_str = str(e).lower()
+            
+            # CRITICAL: Check for document closed errors and log full context
+            if any(error_phrase in error_str for error_phrase in [
+                "document closed", 
+                "seek of closed file", 
+                "closed file", 
+                "bad file descriptor",
+                "document has been closed"
+            ]):
+                logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR in text parsing")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error type: {type(e).__name__}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error message: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Thread ID: {thread_id}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Thread name: {thread_name}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] FULL STACK TRACE:\n{traceback.format_exc()}")
+            else:
+                logger.error(f"[Thread {thread_name}:{thread_id}] Text parsing failed: {type(e).__name__}: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
             raise
     
     def _extract_words_pdfplumber(self, page) -> List[Dict[str, Any]]:
@@ -118,8 +148,9 @@ class TextParser:
         logger.info(f"[Thread {thread_name}:{thread_id}] Extracting words from pdfplumber page")
         
         try:
+            logger.info(f"[Thread {thread_name}:{thread_id}] Extracting words from pdfplumber page object")
             raw_words = page.extract_words()
-            logger.info(f"[Thread {thread_name}:{thread_id}] Found {len(raw_words)} raw words")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Found {len(raw_words)} raw words from pdfplumber")
             
             for word in raw_words:
                 words.append({
@@ -136,8 +167,25 @@ class TextParser:
                 })
                 
         except Exception as e:
-            logger.error(f"[Thread {thread_name}:{thread_id}] Error extracting words from pdfplumber: {e}")
-            logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
+            error_str = str(e).lower()
+            
+            # CRITICAL: Check for document closed errors and log full context  
+            if any(error_phrase in error_str for error_phrase in [
+                "document closed", 
+                "seek of closed file", 
+                "closed file", 
+                "bad file descriptor",
+                "document has been closed"
+            ]):
+                logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR in pdfplumber word extraction")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error type: {type(e).__name__}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error message: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Thread ID: {thread_id}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Thread name: {thread_name}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] FULL STACK TRACE:\n{traceback.format_exc()}")
+            else:
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error extracting words from pdfplumber: {e}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
             raise
         
         return words
@@ -146,6 +194,10 @@ class TextParser:
         """Extract words using OCR with thread-safe operations"""
         thread_id = threading.get_ident()
         thread_name = threading.current_thread().name
+        
+        logger.info(f"[Thread {thread_name}:{thread_id}] Starting OCR text extraction")
+        logger.info(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
+        logger.info(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
         
         if not PYTESSERACT_AVAILABLE:
             logger.info(f"[Thread {thread_name}:{thread_id}] OCR not available, skipping")
@@ -160,12 +212,15 @@ class TextParser:
         
         def ocr_operation(doc):
             """OCR operation to be executed thread-safely"""
+            logger.info(f"[Thread {thread_name}:{thread_id}] Opening PDF in OCR operation for: {pdf_path}")
+            
             if page_number >= len(doc) or page_number < 0:
-                logger.warning(f"[Thread {thread_name}:{thread_id}] Invalid page number {page_number + 1} for OCR")
+                logger.warning(f"[Thread {thread_name}:{thread_id}] Invalid page number {page_number + 1} for OCR, PDF has {len(doc)} pages")
                 return []
                 
             page = doc[page_number]
             logger.info(f"[Thread {thread_name}:{thread_id}] Rendering page {page_number + 1} for OCR")
+            logger.info(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
             
             # Render page as image
             mat = fitz.Matrix(2, 2)  # 2x zoom for better OCR
@@ -210,14 +265,40 @@ class TextParser:
             return words
         
         try:
-            return safe_pymupdf_operation(
+            result = safe_pymupdf_operation(
                 pdf_path,
                 ocr_operation,
                 f"ocr_extraction_page_{page_number + 1}",
                 max_retries=2
             )
+            logger.info(f"[Thread {thread_name}:{thread_id}] OCR extraction completed, found {len(result)} words")
+            return result
+            
         except Exception as e:
-            logger.error(f"[Thread {thread_name}:{thread_id}] OCR extraction failed: {type(e).__name__}: {str(e)}")
+            error_str = str(e).lower()
+            
+            # CRITICAL: Check for document closed errors and log full context
+            if any(error_phrase in error_str for error_phrase in [
+                "document closed", 
+                "seek of closed file", 
+                "closed file", 
+                "bad file descriptor",
+                "document has been closed"
+            ]):
+                logger.error(f"[Thread {thread_name}:{thread_id}] DOCUMENT CLOSED ERROR in OCR extraction")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error type: {type(e).__name__}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Error message: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Thread ID: {thread_id}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Thread name: {thread_name}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] FULL STACK TRACE:\n{traceback.format_exc()}")
+            else:
+                logger.error(f"[Thread {thread_name}:{thread_id}] OCR extraction failed: {type(e).__name__}: {str(e)}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
+                logger.error(f"[Thread {thread_name}:{thread_id}] Full traceback:\n{traceback.format_exc()}")
+            
             return []  # Don't fail completely, just return empty results
     
     def _merge_word_lists(self, words1: List[Dict], words2: List[Dict]) -> List[Dict]:
