@@ -25,6 +25,7 @@ import logging
 import hashlib
 import traceback
 from typing import Dict, Any, Optional
+from utils.json_utils import safe_dict, ensure_json_serializable
 
 from services.job_service import job_service
 from services.manualj import calculate_manualj_with_audit
@@ -235,7 +236,7 @@ def calculate_hvac_loads(
             
             # Store the comprehensive JSON in the database as canonical representation
             job_service.sync_update_project(project_id, {
-                'parsed_schema_json': blueprint_schema.dict()
+                'parsed_schema_json': safe_dict(blueprint_schema)
             })
             
             # Extract metadata for audit
@@ -243,10 +244,10 @@ def calculate_hvac_loads(
             
             # Now log the parsing path after parsing_metadata is assigned
             logger.info(f"[METRICS] Parsing path used: {parsing_metadata.ai_status.value if hasattr(parsing_metadata, 'ai_status') else 'unknown'}")
-            audit_data['blueprint_schema'] = blueprint_schema.dict()
+            audit_data['blueprint_schema'] = safe_dict(blueprint_schema)
             audit_data['rooms_identified'] = len(blueprint_schema.rooms)
             audit_data['total_area'] = blueprint_schema.sqft_total
-            audit_data['parsing_metadata'] = parsing_metadata.dict()
+            audit_data['parsing_metadata'] = safe_dict(parsing_metadata)
             
             # Extract page analysis info
             if parsing_metadata and hasattr(parsing_metadata, 'page_analyses') and parsing_metadata.page_analyses:
@@ -259,7 +260,7 @@ def calculate_hvac_loads(
                         'selected_page': parsing_metadata.selected_page,
                         'total_pages_analyzed': len(parsing_metadata.page_analyses),
                         'best_score': selected_page_analysis.score,
-                        'page_details': [p.dict() for p in parsing_metadata.page_analyses]
+                        'page_details': [safe_dict(p) for p in parsing_metadata.page_analyses]
                     }
             
             # Report parsing results
@@ -280,7 +281,7 @@ def calculate_hvac_loads(
                 'stage': 'blueprint_parsing', 
                 'error': error_msg, 
                 'error_type': 'BlueprintParsingError',
-                'parsing_metadata': parsing_metadata.dict() if parsing_metadata else None
+                'parsing_metadata': safe_dict(parsing_metadata) if parsing_metadata else None
             })
             update_progress_sync("failed", 0, f"Blueprint parsing failed: {str(e)[:100]}")
             raise ValueError(error_msg)
@@ -291,7 +292,7 @@ def calculate_hvac_loads(
                 'stage': 'blueprint_parsing', 
                 'error': error_msg, 
                 'error_type': type(e).__name__,
-                'parsing_metadata': parsing_metadata.dict() if parsing_metadata else None
+                'parsing_metadata': safe_dict(parsing_metadata) if parsing_metadata else None
             })
             update_progress_sync("failed", 0, f"Blueprint parsing failed: {str(e)[:100]}")
             raise ValueError(error_msg)
@@ -328,7 +329,7 @@ def calculate_hvac_loads(
                     )
                 )
                 if envelope_data:
-                    audit_data['envelope_data'] = envelope_data.__dict__
+                    audit_data['envelope_data'] = safe_dict(envelope_data)
             finally:
                 loop.close()
                 
@@ -455,7 +456,8 @@ def calculate_hvac_loads(
         
         # Update project with final results
         # NOTE: File cleanup happens automatically via job_service.sync_set_project_completed
-        job_service.sync_set_project_completed(project_id, final_results)
+        # Ensure all data is JSON serializable before sending to database
+        job_service.sync_set_project_completed(project_id, ensure_json_serializable(final_results))
         
         logger.info(f"HVAC calculation completed successfully for {project_id}")
         return final_results

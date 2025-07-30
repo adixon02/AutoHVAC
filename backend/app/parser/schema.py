@@ -145,7 +145,19 @@ class BlueprintSchema(BaseModel):
     # Comprehensive metadata
     parsing_metadata: ParsingMetadata = Field(..., description="Complete parsing metadata and audit trail")
 
+    def dict(self, **kwargs):
+        """Override dict method to ensure UUID serialization"""
+        data = super().dict(**kwargs)
+        # Ensure project_id is always a string
+        if 'project_id' in data and not isinstance(data['project_id'], str):
+            data['project_id'] = str(data['project_id'])
+        return data
+    
     class Config:
+        json_encoders = {
+            UUID: str,  # Automatically convert UUIDs to strings for JSON serialization
+            datetime: lambda v: v.isoformat()
+        }
         schema_extra = {
             "example": {
                 "project_id": "550e8400-e29b-41d4-a716-446655440000",

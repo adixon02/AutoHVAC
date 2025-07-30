@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import uuid
 import logging
 from fastapi import HTTPException
+from utils.json_utils import ensure_json_serializable
 
 logger = logging.getLogger(__name__)
 
@@ -136,12 +137,15 @@ class JobService:
         if not project:
             return False
         
-        for key, value in updates.items():
+        # Ensure all updates are JSON serializable
+        safe_updates = ensure_json_serializable(updates)
+        
+        for key, value in safe_updates.items():
             if hasattr(project, key):
                 setattr(project, key, value)
         
         # Set completion time if status changed to completed
-        if updates.get("status") == JobStatus.COMPLETED:
+        if safe_updates.get("status") == JobStatus.COMPLETED:
             project.completed_at = datetime.utcnow()
         
         session.add(project)
@@ -160,12 +164,15 @@ class JobService:
             if not project:
                 return False
             
-            for key, value in updates.items():
+            # Ensure all updates are JSON serializable
+            safe_updates = ensure_json_serializable(updates)
+            
+            for key, value in safe_updates.items():
                 if hasattr(project, key):
                     setattr(project, key, value)
             
             # Set completion time if status changed to completed
-            if updates.get("status") == JobStatus.COMPLETED:
+            if safe_updates.get("status") == JobStatus.COMPLETED:
                 project.completed_at = datetime.utcnow()
             
             session.add(project)
@@ -273,7 +280,7 @@ class JobService:
         """Mark project as completed with results and cleanup files"""
         updates = {
             "status": JobStatus.COMPLETED,
-            "result": result
+            "result": ensure_json_serializable(result)
         }
         
         if pdf_report_path:
@@ -327,7 +334,7 @@ class JobService:
         """Sync version of set_project_completed for Celery workers"""
         updates = {
             "status": JobStatus.COMPLETED,
-            "result": result
+            "result": ensure_json_serializable(result)
         }
         
         if pdf_report_path:

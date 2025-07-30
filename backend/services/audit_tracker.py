@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import time
+from utils.json_utils import safe_dict, ensure_json_serializable
 
 from app.parser.schema import BlueprintSchema
 from .envelope_extractor import EnvelopeExtraction
@@ -80,7 +81,7 @@ class AuditSnapshot:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
-        return asdict(self)
+        return ensure_json_serializable(asdict(self))
     
     def to_json(self) -> str:
         """Convert to JSON string"""
@@ -174,7 +175,7 @@ class AuditTracker:
             user_id=user_id,
             
             # Input data
-            blueprint_schema=blueprint_schema.dict(),
+            blueprint_schema=safe_dict(blueprint_schema),
             construction_vintage=construction_vintage,
             duct_config=kwargs.get('duct_config', 'ducted_attic'),
             heating_fuel=kwargs.get('heating_fuel', 'gas'),
@@ -430,15 +431,15 @@ def create_calculation_audit(
             # Create main audit record
             calculation_audit = CalculationAudit(
                 audit_id=audit_id,
-                project_id=str(blueprint_schema.project_id) if blueprint_schema else "unknown",
+                project_id=str(blueprint_schema.project_id) if blueprint_schema and hasattr(blueprint_schema, 'project_id') else "unknown",
                 user_id=user_id or "system",
                 calculation_timestamp=datetime.utcnow(),
                 calculation_method="ACCA Manual J 8th Edition",
                 software_version=f"AutoHVAC v{CALCULATION_VERSION}",
                 
                 # Input data
-                blueprint_schema=blueprint_schema.dict() if blueprint_schema else None,
-                climate_data=climate_data,
+                blueprint_schema=safe_dict(blueprint_schema) if blueprint_schema else None,
+                climate_data=ensure_json_serializable(climate_data),
                 system_parameters={
                     'duct_config': duct_config,
                     'heating_fuel': heating_fuel,
@@ -446,7 +447,7 @@ def create_calculation_audit(
                     'include_ventilation': include_ventilation,
                     'page_selection': page_selection_data
                 },
-                envelope_data=envelope_data.__dict__ if envelope_data else None,
+                envelope_data=safe_dict(envelope_data) if envelope_data else None,
                 
                 # Results
                 calculation_results=calculation_result,
@@ -500,7 +501,7 @@ def create_calculation_audit(
                     data_completeness=1.0 if climate_data.get('found') else 0.5,
                     data_confidence=0.95 if climate_data.get('found') else 0.7,
                     extraction_method="database_lookup",
-                    source_metadata=climate_data
+                    source_metadata=ensure_json_serializable(climate_data)
                 )
                 session.add(climate_metadata)
             
@@ -526,7 +527,7 @@ def create_calculation_audit(
                     data_completeness=envelope_data.overall_confidence if hasattr(envelope_data, 'overall_confidence') else 0.8,
                     data_confidence=envelope_data.overall_confidence if hasattr(envelope_data, 'overall_confidence') else 0.8,
                     extraction_method="ai_analysis",
-                    source_metadata=envelope_data.__dict__
+                    source_metadata=safe_dict(envelope_data)
                 )
                 session.add(envelope_metadata)
             
