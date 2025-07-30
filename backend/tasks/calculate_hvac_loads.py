@@ -34,6 +34,10 @@ from services.blueprint_parser import parse_blueprint_to_json, BlueprintParsingE
 from services.envelope_extractor import extract_envelope_data, EnvelopeExtractorError
 from services.audit_tracker import create_calculation_audit
 from services.s3_storage import storage_service
+from services.error_types import (
+    CriticalError, NonCriticalError, AuditError, 
+    ValidationError, categorize_exception, log_error_with_context
+)
 from database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
@@ -174,22 +178,22 @@ def calculate_hvac_loads(
         
         # Verify file exists and is accessible
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"PDF file not found at {file_path}")
+            raise ValidationError(f"PDF file not found at {file_path}")
         
         if not os.access(file_path, os.R_OK):
-            raise PermissionError(f"Cannot read PDF file at {file_path}")
+            raise ValidationError(f"Cannot read PDF file at {file_path}")
         
         # Validate file size
         file_size = os.path.getsize(file_path)
         file_size_mb = file_size / (1024 * 1024)
         if file_size_mb > MAX_PDF_SIZE_MB:
-            raise ValueError(f"PDF file too large: {file_size_mb:.1f}MB (max: {MAX_PDF_SIZE_MB}MB)")
+            raise ValidationError(f"PDF file too large: {file_size_mb:.1f}MB (max: {MAX_PDF_SIZE_MB}MB)")
         
         # Quick PDF validation by reading header
         with open(file_path, 'rb') as f:
             header = f.read(4)
             if header != b'%PDF':
-                raise ValueError("Invalid PDF file format")
+                raise ValidationError("Invalid PDF file format")
             
         # Validate climate data availability
         try:
@@ -284,7 +288,7 @@ def calculate_hvac_loads(
                 'parsing_metadata': safe_dict(parsing_metadata) if parsing_metadata else None
             })
             update_progress_sync("failed", 0, f"Blueprint parsing failed: {str(e)[:100]}")
-            raise ValueError(error_msg)
+            raise CriticalError(error_msg, {'error_type': 'BlueprintParsingError'})
         except Exception as e:
             error_msg = f"Unexpected blueprint parsing error: {str(e)}"
             logger.error(f"Unexpected blueprint parsing error for {project_id}: {error_msg}", exc_info=True)
@@ -295,7 +299,9 @@ def calculate_hvac_loads(
                 'parsing_metadata': safe_dict(parsing_metadata) if parsing_metadata else None
             })
             update_progress_sync("failed", 0, f"Blueprint parsing failed: {str(e)[:100]}")
-            raise ValueError(error_msg)
+            # Categorize the error appropriately
+            categorized_error = categorize_exception(e)
+            raise categorized_error
         
         # Stage 5: Envelope analysis (optional enhancement)
         update_progress_sync("envelope_analysis", 65, "Analyzing building envelope")
@@ -382,7 +388,7 @@ def calculate_hvac_loads(
             logger.error(f"Manual J calculation error for {project_id}: {error_msg}", exc_info=True)
             audit_data['errors_encountered'].append({'stage': 'calculations', 'error': error_msg})
             update_progress_sync("failed", 0, f"Load calculations failed: {str(e)[:100]}")
-            raise ValueError(error_msg)
+            raise CriticalError(error_msg, {'original_error': type(e).__name__})
         
         # Stage 7: Result compilation and audit
         update_progress_sync("finalizing", 95, "Compiling results and creating audit trail")
@@ -408,12 +414,12 @@ def calculate_hvac_loads(
             'audit_id': manualj_results.get('audit_id'),
             'calculation_method': 'ACCA Manual J 8th Edition',
             'blueprint_analysis': {
-                'rooms_identified': len(blueprint_schema.rooms),
-                'total_area': blueprint_schema.sqft_total,
-                'stories': blueprint_schema.stories,
+                'rooms_identified': len(blueprint_schema.rooms) if blueprint_schema and hasattr(blueprint_schema, 'rooms') else 0,
+                'total_area': getattr(blueprint_schema, 'sqft_total', 0) if blueprint_schema else 0,
+                'stories': getattr(blueprint_schema, 'stories', 1) if blueprint_schema else 1,
                 'geometry_confidence': 'high' if parsing_metadata and hasattr(parsing_metadata, 'overall_confidence') and parsing_metadata.overall_confidence > 0.8 else 'medium',
-                'selected_page': parsing_metadata.selected_page if parsing_metadata else 1,
-                'page_selection_score': selected_page_analysis.score if 'selected_page_analysis' in locals() else 0.0,
+                'selected_page': getattr(parsing_metadata, 'selected_page', 1) if parsing_metadata else 1,
+                'page_selection_score': getattr(selected_page_analysis, 'score', 0.0) if selected_page_analysis else 0.0,
                 'total_pages_analyzed': len(parsing_metadata.page_analyses) if parsing_metadata and hasattr(parsing_metadata, 'page_analyses') else 1
             },
             
@@ -440,7 +446,8 @@ def calculate_hvac_loads(
             )
             final_results['comprehensive_audit_id'] = audit_id
         except Exception as e:
-            logger.warning(f"Failed to create comprehensive audit record: {e}")
+            logger.error(f"Failed to create comprehensive audit record (non-critical): {type(e).__name__}: {str(e)}")
+            logger.info("Calculation results are still valid, continuing without audit record")
         
         # Stage 8: Store results and complete
         update_progress_sync("completed", 100, "Calculation completed successfully")
@@ -450,8 +457,8 @@ def calculate_hvac_loads(
         logger.info(f"[METRICS] Total processing time: {total_duration:.2f}s")
         logger.info(f"[METRICS] File size: {file_size_mb:.1f}MB")
         logger.info(f"[METRICS] Parsing duration: {parsing_duration:.2f}s")
-        logger.info(f"[METRICS] Rooms found: {len(blueprint_schema.rooms)}")
-        logger.info(f"[METRICS] Total area: {blueprint_schema.sqft_total} sqft")
+        logger.info(f"[METRICS] Rooms found: {len(blueprint_schema.rooms) if blueprint_schema and hasattr(blueprint_schema, 'rooms') else 0}")
+        logger.info(f"[METRICS] Total area: {getattr(blueprint_schema, 'sqft_total', 0) if blueprint_schema else 0} sqft")
         logger.info(f"[METRICS] Heating load: {manualj_results['heating_total']} BTU/h")
         logger.info(f"[METRICS] Cooling load: {manualj_results['cooling_total']} BTU/h")
         
@@ -463,32 +470,36 @@ def calculate_hvac_loads(
         logger.info(f"HVAC calculation completed successfully for {project_id}")
         return final_results
         
-    except Exception as e:
-        # Comprehensive error handling
+    except (CriticalError, ValidationError, TimeoutError) as e:
+        # Known critical errors - handle specifically
         error_type = type(e).__name__
         error_message = str(e)
         
-        # Log detailed error information
-        logger.exception(f"HVAC calculation failed for {project_id}: {error_type}: {error_message}")
+        log_error_with_context(e, {
+            'project_id': project_id,
+            'stage': audit_data.get('stages_completed', [])[-1]['stage'] if audit_data.get('stages_completed') else 'unknown',
+            'processing_time': time.time() - calculation_start_time
+        })
         
         # Store error information in audit
         audit_data['final_error'] = {
             'type': error_type,
             'message': error_message,
             'timestamp': time.time(),
-            'total_processing_time': time.time() - calculation_start_time
+            'total_processing_time': time.time() - calculation_start_time,
+            'is_critical': True
         }
         
-        # Update project with failure status and cleanup files
+        # Update project with failure status
         job_service.sync_set_project_failed(project_id, f"{error_type}: {error_message[:500]}")
         
         # Try to save audit data even on failure
         try:
             create_calculation_audit(
-                blueprint_schema=None,
+                blueprint_schema=blueprint_schema if 'blueprint_schema' in locals() else None,
                 calculation_result=None,
                 climate_data=climate_data if 'climate_data' in locals() else None,
-                envelope_data=None,
+                envelope_data=envelope_data if 'envelope_data' in locals() else None,
                 user_id=email,
                 duct_config=duct_config,
                 heating_fuel=heating_fuel,
@@ -499,8 +510,54 @@ def calculate_hvac_loads(
         except Exception as audit_error:
             logger.warning(f"Failed to save error audit data: {audit_error}")
         
-        # Re-raise the original exception
+        # Re-raise the original error
         raise
+        
+    except Exception as e:
+        # Unknown errors - categorize and handle
+        categorized_error = categorize_exception(e)
+        error_type = type(categorized_error).__name__
+        error_message = str(categorized_error)
+        
+        log_error_with_context(categorized_error, {
+            'project_id': project_id,
+            'original_error': type(e).__name__,
+            'stage': audit_data.get('stages_completed', [])[-1]['stage'] if audit_data.get('stages_completed') else 'unknown',
+            'processing_time': time.time() - calculation_start_time
+        })
+        
+        # Store error information in audit
+        audit_data['final_error'] = {
+            'type': error_type,
+            'original_type': type(e).__name__,
+            'message': error_message,
+            'timestamp': time.time(),
+            'total_processing_time': time.time() - calculation_start_time,
+            'is_critical': isinstance(categorized_error, CriticalError)
+        }
+        
+        # Update project with failure status and cleanup files
+        job_service.sync_set_project_failed(project_id, f"{error_type}: {error_message[:500]}")
+        
+        # Try to save audit data even on failure
+        try:
+            create_calculation_audit(
+                blueprint_schema=blueprint_schema if 'blueprint_schema' in locals() else None,
+                calculation_result=None,
+                climate_data=climate_data if 'climate_data' in locals() else None,
+                envelope_data=envelope_data if 'envelope_data' in locals() else None,
+                user_id=email,
+                duct_config=duct_config,
+                heating_fuel=heating_fuel,
+                processing_metadata=audit_data,
+                error_details={'type': error_type, 'original_type': type(e).__name__, 'message': error_message},
+                page_selection_data=audit_data.get('page_analysis')
+            )
+        except Exception as audit_error:
+            logger.warning(f"Failed to save error audit data: {audit_error}")
+        
+        # Re-raise the categorized exception
+        raise categorized_error
         
     finally:
         # Clean up the temporary file downloaded from S3

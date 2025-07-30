@@ -26,6 +26,15 @@ import logging
 # Version tracking for calculation changes
 CALCULATION_VERSION = "2.0.0"  # Updated for Phase 2 enhancements
 
+# Import database health check
+try:
+    from services.db_health import check_table_exists, AUDIT_TABLES_EXIST
+except ImportError:
+    # Fallback if db_health module not available yet
+    AUDIT_TABLES_EXIST = None
+    def check_table_exists(table_name: str) -> bool:
+        return True  # Assume tables exist if we can't check
+
 
 @dataclass
 class AuditSnapshot:
@@ -156,7 +165,7 @@ class AuditTracker:
                 'estimated_vintage': envelope_data.estimated_vintage,
                 'overall_confidence': envelope_data.overall_confidence
             }
-            confidence_flags = envelope_data.needs_confirmation
+            confidence_flags = getattr(envelope_data, 'needs_confirmation', [])
         
         # Create validation warnings
         validation_warnings = self._generate_validation_warnings(
@@ -183,11 +192,11 @@ class AuditTracker:
             
             # Climate data
             climate_data=climate_data,
-            zip_code=blueprint_schema.zip_code,
-            climate_zone=climate_data.get('climate_zone'),
+            zip_code=getattr(blueprint_schema, 'zip_code', None) if blueprint_schema else None,
+            climate_zone=climate_data.get('climate_zone') if climate_data else None,
             design_temps={
-                'heating_db_99': climate_data.get('heating_db_99'),
-                'cooling_db_1': climate_data.get('cooling_db_1'),
+                'heating_db_99': climate_data.get('heating_db_99') if climate_data else None,
+                'cooling_db_1': climate_data.get('cooling_db_1') if climate_data else None,
                 'outdoor_heating_temp': design_params.get('outdoor_heating_temp'),
                 'outdoor_cooling_temp': design_params.get('outdoor_cooling_temp')
             },
@@ -306,10 +315,15 @@ class AuditTracker:
         """Generate validation warnings for calculation"""
         warnings = []
         
+        # Safety check for missing blueprint schema
+        if not blueprint_schema:
+            warnings.append("Blueprint schema missing - cannot validate calculations")
+            return warnings
+        
         # Check for unrealistic loads
-        heating_total = calculation_result.get('heating_total', 0)
-        cooling_total = calculation_result.get('cooling_total', 0)
-        total_sqft = blueprint_schema.sqft_total if blueprint_schema else 0
+        heating_total = calculation_result.get('heating_total', 0) if calculation_result else 0
+        cooling_total = calculation_result.get('cooling_total', 0) if calculation_result else 0
+        total_sqft = getattr(blueprint_schema, 'sqft_total', 0) if blueprint_schema else 0
         
         if total_sqft > 0:
             heating_per_sqft = heating_total / total_sqft
@@ -325,7 +339,7 @@ class AuditTracker:
                 warnings.append(f"Low heating load: {heating_per_sqft:.1f} BTU/hr/sqft (may indicate missing data)")
         
         # Check room count vs total area
-        room_count = len(blueprint_schema.rooms)
+        room_count = len(blueprint_schema.rooms) if blueprint_schema and hasattr(blueprint_schema, 'rooms') else 0
         if room_count > 0:
             avg_room_size = total_sqft / room_count
             if avg_room_size < 50:
@@ -425,6 +439,30 @@ def create_calculation_audit(
     """
     logger = logging.getLogger(__name__)
     audit_id = str(uuid.uuid4())
+    
+    # Check if audit tables exist before attempting database operations
+    if AUDIT_TABLES_EXIST is False:
+        logger.warning("Audit tables do not exist in database, falling back to file-based audit")
+        # Jump directly to file-based fallback
+        try:
+            tracker = get_audit_tracker()
+            snapshot = tracker.create_snapshot(
+                blueprint_schema=blueprint_schema,
+                calculation_result=calculation_result or {},
+                climate_data=climate_data or {},
+                construction_vintage=construction_vintage,
+                envelope_data=envelope_data,
+                user_id=user_id,
+                duct_config=duct_config,
+                heating_fuel=heating_fuel,
+                include_ventilation=include_ventilation
+            )
+            filepath = tracker.save_snapshot(snapshot)
+            logger.info(f"File-based audit snapshot saved: {filepath}")
+            return snapshot.calculation_id
+        except Exception as fallback_error:
+            logger.error(f"Even file-based audit failed: {fallback_error}")
+            return audit_id
     
     try:
         with SyncSessionLocal() as session:
