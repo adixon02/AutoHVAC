@@ -83,10 +83,10 @@ services:
     name: autohvac-redis
     ipAllowList: []
     maxmemoryPolicy: allkeys-lru
-    plan: standard
+    plan: starter-shared
 
 databases:
   - name: autohvac-postgres
     databaseName: autohvac
     user: autohvac
-    plan: standard  # ← must not be 'starter'
+    plan: starter-shared  # ← must not be 'starter'
