@@ -19,7 +19,6 @@ services:
     healthCheckPath: /healthz
     # IMPORTANT: You must manually attach the shared-storage disk to this service
     # in the Render dashboard with mount path: /var/data
-    # This is required because Render doesn't support the disks: field for web services
     envVars:
       - key: REDIS_URL
         fromService:
@@ -44,10 +43,8 @@ services:
         value: "1"
       - key: WEB_CONCURRENCY
         value: "2"
-      # MUST match the mount path exactly - Render mounts at /var/data
       - key: RENDER_DISK_PATH
         value: /var/data
-      # Optional: grace period for file cleanup (days)
       - key: FILE_CLEANUP_GRACE_DAYS
         value: "7"
 
@@ -57,11 +54,9 @@ services:
     buildCommand: |
       apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng libpoppler-utils poppler-utils libgl1-mesa-glx libglib2.0-0 libmupdf-dev mupdf-tools fonts-liberation fonts-dejavu-core file psmisc
       cd backend && pip install --only-binary=:all: -r requirements.txt
-    # Import both task modules
     startCommand: cd backend && celery -A tasks worker --loglevel=info --concurrency=2 --max-tasks-per-child=50 --max-memory-per-child=512000 --time-limit=1800 --soft-time-limit=1740 --without-gossip --without-mingle --without-heartbeat
     # IMPORTANT: You must manually attach the shared-storage disk to this worker
     # in the Render dashboard with mount path: /var/data
-    # This is required because Render doesn't support the disks: field in YAML
     envVars:
       - key: REDIS_URL
         fromService:
@@ -78,10 +73,8 @@ services:
         value: "1"
       - key: C_FORCE_ROOT
         value: "true"
-      # MUST be the same as backend to access the same files
       - key: RENDER_DISK_PATH
         value: /var/data
-      # Optional: grace period for file cleanup (days)
       - key: FILE_CLEANUP_GRACE_DAYS
         value: "7"
     autoDeploy: false
@@ -96,4 +89,4 @@ databases:
   - name: autohvac-postgres
     databaseName: autohvac
     user: autohvac
-    plan: starter
+    plan: standard  # ← must not be 'starter'
