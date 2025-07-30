@@ -8,6 +8,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **"First Report Free" Flow with Payment Gating**
+  - First blueprint upload proceeds without email verification requirement
+  - Automatic user creation on first upload for frictionless experience
+  - Subsequent uploads require Stripe subscription with clear payment gate
+  - Structured 402 Payment Required responses with upgrade benefits
+  - Graceful handling of existing subscribers (unlimited uploads)
+- **Enhanced Email Notifications**
+  - New `send_report_ready_with_upgrade_cta()` method in email service
+  - Report completion emails with strong upgrade CTAs
+  - Customer testimonials and value propositions in emails
+  - Limited-time offer messaging (20% off) for conversions
+  - Different templates for first-time vs returning users
+- **Analytics Tracking for User Insights**
+  - Added fields to projects table: `client_ip`, `user_agent`, `referrer`
+  - Captures analytics data on first upload for attribution
+  - Browser fingerprinting support for future expansion
+  - Marketing attribution through referrer tracking
+- **Frontend API Enhancements**
+  - Job status endpoint returns `upgrade_prompt` object for completed jobs
+  - Structured data for frontend modals with benefits and CTAs
+  - Clear messaging about free report usage and upgrade path
+- **Email Validation**
+  - Basic regex validation to prevent spam signups
+  - Blocks common spam patterns (test@test.com, asdf@asdf.com)
+  - Blocks disposable email domains (mailinator, throwaway)
+  - Still allows first report even with less common email providers
+- **Comprehensive Utility Functions**
+  - `check_free_report_eligibility()`: Detailed eligibility checking
+  - `sync_check_is_first_report()`: Synchronous version for Celery workers
+  - Returns detailed status including email verification and subscription state
+- **Database Migrations**
+  - Migration for analytics tracking fields
+  - Backward compatible with existing deployments
 - **Organized Storage Directory Structure**
   - New `/var/data` subdirectories: `uploads/`, `processed/`, `reports/`, `temp/`
   - Automatic directory initialization with permission checks on startup
@@ -34,6 +67,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `PROCESSED_RETENTION_DAYS`: Days to keep processed data (default: 90)
 
 ### Changed
+- **Upload Flow** - Email verification now only required after free report is used
+- **User Creation** - Users automatically created on first upload (no pre-registration needed)
+- **API Responses** - Upload endpoint returns structured payment data on 402 status
+- **Email Service** - Enhanced with upgrade-focused messaging and CTAs
+- **Job Status API** - Returns upgrade prompts for users who've used free report
 - **PDF Reports** now saved to dedicated `reports/` directory
 - **Download endpoints** handle both legacy (full path) and new (relative path) formats
 - **File operations** now use centralized storage service

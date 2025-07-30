@@ -614,13 +614,46 @@ When GPT-4V is disabled or fails, the system falls back to the original pipeline
 
 ### Blueprint Processing
 - `POST /api/v1/blueprint/upload` - Upload PDF blueprint
-  - Requires: `email` (string), `file` (PDF)
-  - Returns: `{job_id, status}`
-  - Billing: First job free, subsequent jobs require subscription
+  - Requires: `email` (string), `file` (PDF), `project_label` (string), `zip_code` (string)
+  - Optional: `duct_config` (string), `heating_fuel` (string)
+  - Returns: `{job_id, status, project_label}` on success
+  - First upload: Proceeds without email verification (free report)
+  - Subsequent uploads: Returns 402 Payment Required with structured response:
+    ```json
+    {
+      "error": "free_report_used",
+      "message": "You've used your free analysis. Upgrade to Pro for unlimited reports.",
+      "checkout_url": "https://checkout.stripe.com/...",
+      "upgrade_benefits": [
+        "Unlimited blueprint analyses",
+        "Priority processing",
+        "Bulk upload support",
+        "API access",
+        "Premium support"
+      ],
+      "cta_text": "Unlock Unlimited Reports"
+    }
+    ```
+  - Email validation: Basic format checking, blocks spam patterns
+  - Analytics: Tracks IP, user agent, and referrer on uploads
 
 - `GET /api/v1/job/{job_id}` - Get processing status
-  - Returns: `{status, stage, progress, result?, error?}`
+  - Returns: `{status, stage, progress, result?, error?, upgrade_prompt?}`
   - Stages: `extracting_geometry` → `extracting_text` → `ai_processing` → `calculating_loads` → `complete`
+  - For completed jobs, includes `upgrade_prompt` if user has used free report:
+    ```json
+    {
+      "upgrade_prompt": {
+        "show": true,
+        "title": "Love AutoHVAC? Go Pro!",
+        "subtitle": "You've used your free report. Upgrade for unlimited analyses.",
+        "benefits": ["Process unlimited blueprints", "Priority processing queue", ...],
+        "cta_text": "Upgrade Now",
+        "cta_url": "/subscribe",
+        "limited_time_offer": "20% OFF - Limited Time"
+      }
+    }
+    ```
 
 ### Billing (Stripe Integration)
 - `POST /api/v1/subscribe` - Create subscription checkout
@@ -869,7 +902,9 @@ STRIPE_PRICE_ID=price_...
 - **Advanced HVAC Analysis**: Comprehensive ACCA Manual J implementation with climate zone precision
 - **Comprehensive Climate Data**: ASHRAE design temperatures and county-based climate mapping
 - **Professional Reporting**: PDF generation with detailed HVAC analysis and recommendations
-- **Billing Integration**: Stripe subscription with "first job free"
+- **Smart Monetization**: "First report free" flow with seamless payment gating
+- **Email Marketing**: Automated report notifications with upgrade CTAs and testimonials
+- **Analytics Tracking**: User behavior insights with IP, browser, and referrer tracking
 - **Real-time Status**: Progress tracking through processing stages
 - **Production Ready**: Docker, CI/CD, monitoring, error handling, audit logging
 - **HVAC Expertise**: ACCA Manual J compliance with equipment recommendations
@@ -877,7 +912,16 @@ STRIPE_PRICE_ID=price_...
 
 ## Recent Updates
 
-### GPT-4V AI Vision Integration (Latest)
+### "First Report Free" Flow Implementation (Latest)
+- **Frictionless First Experience**: Users can upload their first blueprint without email verification
+- **Smart Payment Gating**: Subsequent uploads require Stripe subscription with clear messaging
+- **Enhanced Email Marketing**: Report completion emails with strong upgrade CTAs and testimonials
+- **Analytics Tracking**: Captures user behavior data (IP, user agent, referrer) for insights
+- **Frontend API Enhancements**: Job status includes upgrade prompts for seamless modal integration
+- **Email Validation**: Basic spam prevention while maintaining low friction for legitimate users
+- **Backward Compatible**: Existing subscribers unaffected, all logic backend-controlled
+
+### GPT-4V AI Vision Integration (Previous)
 - **GPT-4V Blueprint Parsing**: Direct PDF-to-structured-data parsing using OpenAI's GPT-4 Vision model
 - **PyMuPDF Integration**: Replaced pdf2image/poppler dependencies with PyMuPDF for better performance
 - **Enhanced Data Extraction**: Exterior wall counts, corner room detection, orientation awareness
