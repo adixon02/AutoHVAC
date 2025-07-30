@@ -19,10 +19,30 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create enum types that PostgreSQL expects
-    op.execute("CREATE TYPE ductconfig AS ENUM ('ducted_attic', 'ducted_crawl', 'ductless')")
-    op.execute("CREATE TYPE heatingfuel AS ENUM ('gas', 'heat_pump', 'electric')")
-    op.execute("CREATE TYPE jobstatus AS ENUM ('pending', 'processing', 'completed', 'failed')")
+    # Create enum types that PostgreSQL expects (idempotent)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE ductconfig AS ENUM ('ducted_attic', 'ducted_crawl', 'ductless');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE heatingfuel AS ENUM ('gas', 'heat_pump', 'electric');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE jobstatus AS ENUM ('pending', 'processing', 'completed', 'failed');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
 
 
 def downgrade() -> None:

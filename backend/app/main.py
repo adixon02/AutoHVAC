@@ -43,6 +43,7 @@ app.add_middleware(UploadSizeLimiter, max_size=100*1024*1024)
 allowed_origins = [
     "http://localhost:3000",
     "https://autohvac-frontend.onrender.com",
+    "https://autohvac.ai",
 ]
 
 # Add custom CORS middleware that handles errors properly
