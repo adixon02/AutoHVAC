@@ -98,8 +98,3 @@ databases:
     databaseName: autohvac
     user: autohvac
     plan: starter
-
-# Shared disk definition - mounted by both backend and worker
-disks:
-  - name: shared-storage
-    sizeGB: 10
