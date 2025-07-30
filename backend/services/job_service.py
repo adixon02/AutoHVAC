@@ -58,6 +58,7 @@ class JobService:
         file_size: Optional[int] = None,
         duct_config: str = "ducted_attic",
         heating_fuel: str = "gas",
+        analytics_data: Optional[Dict[str, Any]] = None,
         session: Optional[AsyncSession] = None
     ) -> str:
         """Create a new project with Manual J assumptions already collected"""
@@ -65,7 +66,7 @@ class JobService:
             async with AsyncSessionLocal() as session:
                 return await JobService.create_project_with_assumptions(
                     user_email, project_label, filename, file_size, 
-                    duct_config, heating_fuel, session
+                    duct_config, heating_fuel, analytics_data, session
                 )
         
         project_id = str(uuid.uuid4())
@@ -77,17 +78,23 @@ class JobService:
             await user_service.get_or_create_user(user_email, session)
             logger.debug(f"User {user_email} confirmed/created for project {project_id}")
             
-            project = Project(
-                id=project_id,
-                user_email=user_email,
-                project_label=project_label,
-                filename=filename,
-                file_size=file_size,
-                status=JobStatus.PENDING,
-                duct_config=duct_config,
-                heating_fuel=heating_fuel,
-                assumptions_collected=True  # Already collected in multi-step flow
-            )
+            project_data = {
+                "id": project_id,
+                "user_email": user_email,
+                "project_label": project_label,
+                "filename": filename,
+                "file_size": file_size,
+                "status": JobStatus.PENDING,
+                "duct_config": duct_config,
+                "heating_fuel": heating_fuel,
+                "assumptions_collected": True  # Already collected in multi-step flow
+            }
+            
+            # Add analytics data if provided
+            if analytics_data:
+                project_data.update(analytics_data)
+            
+            project = Project(**project_data)
             
             session.add(project)
             logger.debug(f"Project {project_id} added to session, committing...")

@@ -1,6 +1,7 @@
 from typing import Optional
 from sqlmodel import Session, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session as SyncSession
 from models.db_models import User, EmailToken
 from database import get_async_session
 from app.config import DEBUG, DEV_VERIFIED_EMAILS
@@ -167,6 +168,49 @@ class UserService:
             await session.commit()
         
         return count
+    
+    @staticmethod
+    def sync_check_is_first_report(email: str, session: SyncSession) -> bool:
+        """Synchronous version to check if this is user's first report (for Celery)"""
+        statement = select(User).where(User.email == email)
+        result = session.execute(statement)
+        user = result.scalars().first()
+        
+        if not user:
+            return True  # New user, definitely first report
+        
+        # If free_report_used is False, this is their first report
+        return not user.free_report_used
+    
+    @staticmethod
+    async def check_free_report_eligibility(email: str, session: AsyncSession) -> dict:
+        """
+        Comprehensive check for free report eligibility
+        Returns detailed status about the user's eligibility
+        """
+        user = await UserService.get_user_by_email(email, session)
+        
+        if not user:
+            # New user - eligible for free report
+            return {
+                "eligible": True,
+                "reason": "new_user",
+                "email_exists": False,
+                "email_verified": False,
+                "free_report_used": False,
+                "has_subscription": False
+            }
+        
+        # Existing user - check their status
+        return {
+            "eligible": not user.free_report_used,
+            "reason": "existing_user",
+            "email_exists": True,
+            "email_verified": user.email_verified,
+            "free_report_used": user.free_report_used,
+            "has_subscription": user.active_subscription,
+            "user_created_at": user.created_at.isoformat()
+        }
     
     @staticmethod
     async def require_verified(email: str, session: AsyncSession) -> None:

@@ -9,6 +9,7 @@ import os
 import hashlib
 import traceback
 import sys
+import re
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_async_session
@@ -41,6 +42,34 @@ LEGACY_ELEMENT_LIMIT = int(os.getenv("LEGACY_ELEMENT_LIMIT", "20000"))
 FILE_SIZE_WARNING_MB = int(os.getenv("FILE_SIZE_WARNING_MB", "20"))
 
 router = APIRouter()
+
+def validate_email_format(email: str) -> bool:
+    """Basic email format validation to prevent obvious spam"""
+    # Basic regex pattern for email validation
+    email_pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+    
+    if not email_pattern.match(email):
+        return False
+    
+    # Block obvious spam patterns
+    spam_patterns = [
+        r'^test@test\.',
+        r'^asdf@asdf\.',
+        r'^aaa+@',
+        r'^123+@',
+        r'^xxx+@',
+        r'^fuck',
+        r'^shit',
+        r'@mailinator\.',
+        r'@throwaway\.',
+    ]
+    
+    email_lower = email.lower()
+    for pattern in spam_patterns:
+        if re.search(pattern, email_lower):
+            return False
+    
+    return True
 
 def should_use_ai_parsing() -> bool:
     """Check if AI parsing should be used (default: True)"""
@@ -139,6 +168,7 @@ async def upload_blueprint(
     file: UploadFile = File(...),
     duct_config: str = Form("ducted_attic"),
     heating_fuel: str = Form("gas"),
+    request: Request = None,
     session: AsyncSession = Depends(get_async_session)
 ):
     request_id = f"req_{uuid.uuid4().hex[:8]}"
@@ -147,8 +177,16 @@ async def upload_blueprint(
     logger.info(f"🔍 UPLOAD STARTED: email={email}, file={file.filename}, size={file.size}, project={project_label}")
     
     try:
+        # Validate email format first
+        logger.info("🔍 Step 1: Validating email format")
+        if not validate_email_format(email):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid email format. Please provide a valid email address."
+            )
+        
         # Validate assumptions
-        logger.info("🔍 Step 1: Starting assumption validation")
+        logger.info("🔍 Step 2: Starting assumption validation")
         valid_duct_configs = {"ducted_attic", "ducted_crawl", "ductless"}
         valid_heating_fuels = {"gas", "heat_pump", "electric"}
         
@@ -163,10 +201,10 @@ async def upload_blueprint(
                 status_code=400,
                 detail=f"Invalid heating_fuel. Must be one of: {valid_heating_fuels}"
             )
-        logger.info("🔍 Step 1 PASSED: Assumption validation successful")
+        logger.info("🔍 Step 2 PASSED: Assumption validation successful")
         
         # Validate file upload
-        logger.info("🔍 Step 2: Starting file validation")
+        logger.info("🔍 Step 3: Starting file validation")
         if not file.filename:
             raise HTTPException(status_code=400, detail="No file uploaded")
     
@@ -217,10 +255,10 @@ async def upload_blueprint(
         if not zip_code.isdigit() or len(zip_code) != 5:
             raise HTTPException(status_code=400, detail="Zip code must be exactly 5 digits")
         
-        logger.info("🔍 Step 2 PASSED: File and input validation successful")
+        logger.info("🔍 Step 3 PASSED: File and input validation successful")
         
         # Check rate limits (5 concurrent jobs per user)
-        logger.info("🔍 Step 3: Starting rate limit check")
+        logger.info("🔍 Step 4: Starting rate limit check")
         rate_check = await rate_limiter.check_rate_limit(
             key=email,
             limit=10,  # 10 requests per hour
@@ -234,24 +272,30 @@ async def upload_blueprint(
                 detail=f"Rate limit exceeded: {rate_check['reason']}",
                 headers={"Retry-After": str(int(rate_check['reset_time'] - datetime.now().timestamp()))}
             )
-        logger.info("🔍 Step 3 PASSED: Rate limit check successful")
+        logger.info("🔍 Step 4 PASSED: Rate limit check successful")
         
-        # Check if email is verified (unified through user_service)
-        logger.info("🔍 Step 4: Starting email verification check")
-        try:
-            await user_service.require_verified(email, session)
-        except HTTPException as e:
-            if e.status_code == 403:
-                # Send verification email if not verified
-                token = await user_service.create_email_token(email, session)
-                await email_service.send_verification_email(email, token)
-            raise
-        logger.info("🔍 Step 4 PASSED: Email verification successful")
+        # Ensure user exists (create if needed)
+        logger.info("🔍 Step 5: Ensuring user exists")
+        await user_service.get_or_create_user(email, session)
         
         # Check free report usage and subscription status
-        logger.info("🔍 Step 5: Starting subscription check")
+        logger.info("🔍 Step 6: Starting subscription and free report check")
         can_use_free = await user_service.can_use_free_report(email, session)
         has_subscription = await user_service.has_active_subscription(email, session)
+        
+        # Only require email verification if they've used their free report and don't have a subscription
+        if not can_use_free and not has_subscription:
+            logger.info("🔍 Step 6a: User has used free report, checking email verification")
+            try:
+                await user_service.require_verified(email, session)
+            except HTTPException as e:
+                if e.status_code == 403:
+                    # Send verification email if not verified
+                    token = await user_service.create_email_token(email, session)
+                    await email_service.send_verification_email(email, token)
+                raise
+        else:
+            logger.info("🔍 Step 5 SKIPPED: Email verification not required for first free report")
     
         # Bypass subscription check in debug mode for whitelisted emails
         if DEBUG or email in DEV_VERIFIED_EMAILS:
@@ -261,6 +305,7 @@ async def upload_blueprint(
             # Generate Stripe checkout session
             try:
                 stripe_client = get_stripe_client()
+                frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
                 checkout_session = stripe_client.checkout.Session.create(
                     payment_method_types=['card'],
                     line_items=[{
@@ -268,15 +313,31 @@ async def upload_blueprint(
                         'quantity': 1,
                     }],
                     mode='subscription',
-                    success_url='http://localhost:3000/payment/success?session_id={CHECKOUT_SESSION_ID}',
-                    cancel_url='http://localhost:3000/payment/cancel', 
+                    success_url=f'{frontend_url}/payment/success?session_id={{CHECKOUT_SESSION_ID}}',
+                    cancel_url=f'{frontend_url}/payment/cancel', 
                     customer_email=email,
                     metadata={'user_email': email}
                 )
                 
+                # Return structured payment required response
+                payment_response = {
+                    "error": "free_report_used",
+                    "message": "You've used your free analysis. Upgrade to Pro for unlimited reports.",
+                    "checkout_url": checkout_session.url,
+                    "upgrade_benefits": [
+                        "Unlimited blueprint analyses",
+                        "Priority processing",
+                        "Bulk upload support",
+                        "API access",
+                        "Premium support"
+                    ],
+                    "cta_text": "Unlock Unlimited Reports",
+                    "cta_button_text": "Upgrade to Pro"
+                }
+                
                 raise HTTPException(
                     status_code=402,
-                    detail="Free report already used. Subscription required.",
+                    detail=payment_response,
                     headers={"X-Checkout-URL": checkout_session.url}
                 )
                 
@@ -286,11 +347,25 @@ async def upload_blueprint(
                     status_code=500,
                     detail="Payment system error. Please try again."
                 )
-        logger.info("🔍 Step 5 PASSED: Subscription check successful")
+        logger.info("🔍 Step 6 PASSED: Subscription check successful")
         
         # Create project in database with all parameters
-        logger.info("🔍 Step 6: About to create project in database")
+        logger.info("🔍 Step 7: About to create project in database")
         try:
+            # Extract analytics data from request
+            analytics_data = {}
+            if request:
+                # Get client IP (handle proxy headers)
+                forwarded_for = request.headers.get("X-Forwarded-For")
+                if forwarded_for:
+                    analytics_data["client_ip"] = forwarded_for.split(",")[0].strip()
+                else:
+                    analytics_data["client_ip"] = request.client.host if request.client else None
+                
+                # Get user agent and referrer
+                analytics_data["user_agent"] = request.headers.get("User-Agent", "")[:512]
+                analytics_data["referrer"] = request.headers.get("Referer", "")[:512]
+            
             project_id = await job_service.create_project_with_assumptions(
                 user_email=email,
                 project_label=project_label.strip(),
@@ -298,17 +373,18 @@ async def upload_blueprint(
                 file_size=file.size,
                 duct_config=duct_config,
                 heating_fuel=heating_fuel,
+                analytics_data=analytics_data,
                 session=session
             )
-            logger.info(f"✅ Step 6 PASSED: Project {project_id} created successfully for user {email}")
+            logger.info(f"✅ Step 7 PASSED: Project {project_id} created successfully for user {email}")
             logger.info("job_created", extra={"jobId": project_id, "email": email})
         except HTTPException as e:
             # Database creation failed - return the error to user
-            logger.error(f"❌ Step 6 FAILED: Database creation failed for user {email}: {e.detail}")
+            logger.error(f"❌ Step 7 FAILED: Database creation failed for user {email}: {e.detail}")
             raise e
         except Exception as e:
             # Unexpected error during project creation
-            logger.error(f"❌ Step 6 FAILED: Unexpected error creating project for user {email}: {str(e)}")
+            logger.error(f"❌ Step 7 FAILED: Unexpected error creating project for user {email}: {str(e)}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to create project: {str(e)}"
@@ -325,7 +401,7 @@ async def upload_blueprint(
         # Track active job for rate limiting
         await rate_limiter.increment_active_jobs(email, project_id)
         
-        logger.info("🔍 Step 7: Streaming file to disk")
+        logger.info("🔍 Step 8: Streaming file to disk")
         try:
             # Read file content
             file_content = await file.read()
@@ -453,7 +529,7 @@ async def upload_blueprint(
             
             logger.info(f"✅ PDF validation completed successfully for project {project_id}")
             
-            logger.error("🔍 Step 8: Starting background job processor")
+            logger.error("🔍 Step 9: Starting background job processor")
             logger.error(f"Adding background task for job {project_id}")
             print(f">>> BLUEPRINT UPLOAD: About to start background job for {project_id}")
             print(f">>> USE_CELERY = {USE_CELERY}")
@@ -506,14 +582,14 @@ async def upload_blueprint(
                 raise HTTPException(status_code=500, detail=error_response)
                     
             logger.error(f"Celery task started for job {project_id}")
-            logger.error("🔍 Step 8 PASSED: Background job processor started")
+            logger.error("🔍 Step 9 PASSED: Background job processor started")
                 
         except HTTPException:
             # Re-raise HTTP exceptions
             await rate_limiter.decrement_active_jobs(email, project_id)
             raise
         except Exception as e:
-            logger.error(f"❌ Step 7/8 FAILED: File processing error: {type(e).__name__}: {str(e)}")
+            logger.error(f"❌ Step 8/9 FAILED: File processing error: {type(e).__name__}: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             if project_id:
                 logger.error(f"[UPLOAD_EXCEPTION] Error for project {project_id}")

@@ -467,6 +467,38 @@ def calculate_hvac_loads(
         # Ensure all data is JSON serializable before sending to database
         job_service.sync_set_project_completed(project_id, ensure_json_serializable(final_results))
         
+        # Send email notification with report link
+        try:
+            from core.email import email_service
+            from services.user_service import user_service
+            from database import SessionLocal
+            
+            # Check if this is the user's first report
+            with SessionLocal() as session:
+                is_first_report = user_service.sync_check_is_first_report(email, session)
+            
+            # Generate report view URL
+            frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+            view_url = f"{frontend_url}/report/{project_id}"
+            
+            # Send async email in background (don't block on email sending)
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(
+                email_service.send_report_ready_with_upgrade_cta(
+                    to_email=email,
+                    project_label=filename.replace('.pdf', '').replace('.png', '').replace('.jpg', '').replace('.jpeg', ''),
+                    view_url=view_url,
+                    is_first_report=is_first_report
+                )
+            )
+            loop.close()
+            logger.info(f"Report completion email sent to {email} for project {project_id}")
+        except Exception as e:
+            # Don't fail the task if email sending fails
+            logger.error(f"Failed to send report ready email: {str(e)}")
+        
         logger.info(f"HVAC calculation completed successfully for {project_id}")
         return final_results
         

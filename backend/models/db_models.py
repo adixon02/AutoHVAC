@@ -72,6 +72,11 @@ class Project(SQLModel, table=True):
         sa_column=Column(String(64), nullable=True, server_default="'initializing'")
     )
     
+    # Analytics tracking
+    client_ip: Optional[str] = Field(default=None, max_length=45)  # Supports IPv6
+    user_agent: Optional[str] = Field(default=None, max_length=512)
+    referrer: Optional[str] = Field(default=None, max_length=512)
+    
     # Relationships
     user: Optional[User] = Relationship(back_populates="projects")
 

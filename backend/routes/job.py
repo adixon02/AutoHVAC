@@ -68,6 +68,30 @@ async def get_job_status(
             "current_stage": project.current_stage
         }
         
+        # Add upgrade prompt for completed jobs if user has used their free report
+        if project.status == JobStatus.COMPLETED:
+            from services.user_service import user_service
+            eligibility = await user_service.check_free_report_eligibility(project.user_email, session)
+            
+            # Show upgrade prompt if they've used their free report and don't have subscription
+            if eligibility["free_report_used"] and not eligibility["has_subscription"]:
+                response_data["upgrade_prompt"] = {
+                    "show": True,
+                    "title": "Love AutoHVAC? Go Pro!",
+                    "subtitle": "You've used your free report. Upgrade for unlimited analyses.",
+                    "benefits": [
+                        "Process unlimited blueprints",
+                        "Priority processing queue",
+                        "Bulk upload support",
+                        "API access",
+                        "Premium support"
+                    ],
+                    "cta_text": "Upgrade Now",
+                    "cta_url": "/subscribe",
+                    "cta_button_text": "Get Unlimited Reports",
+                    "limited_time_offer": "20% OFF - Limited Time"
+                }
+        
         # Return appropriate status codes
         if project.status == JobStatus.FAILED:
             return JSONResponse(
@@ -83,7 +107,7 @@ async def get_job_status(
             )
         
         # Return 200 for completed
-        return JobStatusSchema(**response_data)
+        return response_data
     
     except HTTPException:
         # Re-raise HTTP exceptions (like 404)
