@@ -38,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved accuracy for HVAC sizing (typically 10-20% better)
 
 ### Fixed
+- **Critical: PDF "document closed" error during file processing**
+  - PDF files are now saved to disk BEFORE any validation
+  - All PDF operations use file paths instead of memory bytes
+  - Files are only deleted after job completion/failure
+  - Exception handlers no longer reference closed documents
+  - All PyMuPDF operations use thread-safe wrappers
+  - Added comprehensive logging with thread IDs and stack traces
 - Interior rooms no longer over-calculated (0 exterior walls)
 - Solar gains properly averaged when orientation unknown
 - Window sizes now variable based on count
