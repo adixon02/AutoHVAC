@@ -279,17 +279,34 @@ async def upload_blueprint(
         
         # Check if user can upload a new report (backend-enforced paywall)
         logger.info("🔍 Step 6: Checking upload eligibility")
-        can_upload = await user_service.can_upload_new_report(email, session)
         
-        # Bypass paywall check in debug mode for whitelisted emails
-        if DEBUG or email in DEV_VERIFIED_EMAILS:
-            can_upload = True
+        # Check if user can use free report
+        can_use_free = await user_service.can_use_free_report(email, session)
+        has_subscription = await user_service.has_active_subscription(email, session)
         
+        # Skip paywall for whitelisted emails and in debug mode
+        is_whitelisted = DEBUG or email in DEV_VERIFIED_EMAILS
+        
+        # Determine if user can proceed with upload
+        can_upload = can_use_free or has_subscription or is_whitelisted
+        
+        logger.info(f"Upload eligibility for {email}: can_use_free={can_use_free}, has_subscription={has_subscription}, is_whitelisted={is_whitelisted}, can_upload={can_upload}")
+        
+        # Enforce paywall if user cannot upload
         if not can_upload:
             # Generate Stripe checkout session
             try:
                 stripe_client = get_stripe_client()
                 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+                
+                # TODO: Configure Stripe test/live mode based on environment
+                # For testing, use test mode keys in .env:
+                # STRIPE_SECRET_KEY=sk_test_...
+                # STRIPE_PRICE_ID=price_test_...
+                # For production, use live mode keys:
+                # STRIPE_SECRET_KEY=sk_live_...
+                # STRIPE_PRICE_ID=price_live_...
+                
                 checkout_session = stripe_client.checkout.Session.create(
                     payment_method_types=['card'],
                     line_items=[{
@@ -319,6 +336,8 @@ async def upload_blueprint(
                     "cta_button_text": "Upgrade to Pro"
                 }
                 
+                logger.info(f"Created Stripe checkout session for {email}: {checkout_session.id}")
+                
                 raise HTTPException(
                     status_code=402,
                     detail=payment_response,
@@ -326,11 +345,18 @@ async def upload_blueprint(
                 )
                 
             except stripe.error.StripeError as e:
-                logger.error(f"Stripe error: {str(e)}")
+                logger.error(f"Stripe error creating checkout session for {email}: {str(e)}")
                 raise HTTPException(
                     status_code=500,
-                    detail="Payment system error. Please try again."
+                    detail="Payment system error. Please try again later."
                 )
+            except Exception as e:
+                logger.error(f"Unexpected error creating checkout session for {email}: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to create payment session. Please try again later."
+                )
+                
         logger.info("🔍 Step 6 PASSED: Subscription check successful")
         
         # Create project in database with all parameters
@@ -374,9 +400,10 @@ async def upload_blueprint(
                 detail=f"Failed to create project: {str(e)}"
             )
         
-        # Mark free report as used if this is their first
-        if can_use_free:
+        # Mark free report as used if this is their first (and not whitelisted)
+        if can_use_free and not is_whitelisted:
             await user_service.mark_free_report_used(email, session)
+            logger.info(f"Marked free report as used for {email}")
         
         # Set status to processing immediately
         await job_service.set_project_processing(project_id, session)
