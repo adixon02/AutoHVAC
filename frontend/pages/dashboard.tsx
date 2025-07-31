@@ -25,27 +25,20 @@ interface DashboardData {
 
 export default function Dashboard() {
   const router = useRouter()
-  const { data: session } = useSession()
+  const { data: session, status } = useSession()
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
   const [filter, setFilter] = useState<string>('all')
 
-  // Get email from session or cookies
+  // Get email from session
   useEffect(() => {
     if (session?.user?.email) {
       setUserEmail(session.user.email)
-    } else {
-      const emailFromCookie = Cookies.get('user_email')
-      if (emailFromCookie) {
-        setUserEmail(emailFromCookie)
-        // Prompt to sign in
-        router.push('/auth/signin?callbackUrl=/dashboard')
-      } else {
-        // No email, redirect to home
-        router.push('/')
-      }
+    } else if (status === 'unauthenticated') {
+      // Middleware will handle the redirect
+      router.push('/auth/signin?callbackUrl=/dashboard')
     }
-  }, [session, router])
+  }, [session, status, router])
 
   // Fetch user projects
   const { data, error, mutate } = useSWR<DashboardData>(
@@ -59,7 +52,6 @@ export default function Dashboard() {
   )
 
   const handleLogout = async () => {
-    Cookies.remove('user_email')
     await signOut({ callbackUrl: '/' })
   }
 
@@ -194,15 +186,7 @@ export default function Dashboard() {
             </p>
           </div>
 
-          {/* MVP Session Warning */}
-          {!session && (
-            <div className="mb-6 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <p className="text-sm text-yellow-800">
-                <strong>Note:</strong> You're using email-based authentication. Sessions may be lost during server updates. 
-                If this happens, just sign in again with your email.
-              </p>
-            </div>
-          )}
+          {/* MVP Session Warning - removed as sessions now persist properly */}
 
           {/* Usage Indicator */}
           {uploadEligibility && (
