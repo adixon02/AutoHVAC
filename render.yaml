@@ -90,7 +90,7 @@ services:
         value: autohvac-uploads
       - key: FILE_CLEANUP_GRACE_DAYS
         value: "7"
-    autoDeploy: false
+    autoDeploy: true
 
   - type: redis
     name: autohvac-redis
