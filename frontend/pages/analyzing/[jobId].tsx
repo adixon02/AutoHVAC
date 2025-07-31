@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import useSWR from 'swr'
 import { apiHelpers } from '../../lib/fetcher'
 import Head from 'next/head'
+import ShareModal from '../../components/ShareModal'
 
 interface JobStatus {
   job_id: string
@@ -121,6 +122,7 @@ export default function AnalyzingPage() {
   const { jobId } = router.query
   const [currentFactIndex, setCurrentFactIndex] = useState(0)
   const [startTime] = useState(Date.now())
+  const [showShareModal, setShowShareModal] = useState(false)
   
   // Poll job status every 2 seconds
   const { data: jobStatus, error, mutate } = useSWR<JobStatus>(
@@ -358,15 +360,26 @@ export default function AnalyzingPage() {
                       </div>
                     )}
                   </div>
-                  <p className="text-gray-600 mb-4">
+                  <p className="text-gray-600 mb-6">
                     Your detailed HVAC analysis report is ready to view!
                   </p>
-                  <button 
-                    onClick={() => router.push('/dashboard')}
-                    className="btn-primary"
-                  >
-                    View Dashboard
-                  </button>
+                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                    <button 
+                      onClick={() => router.push('/dashboard')}
+                      className="btn-primary"
+                    >
+                      View Dashboard
+                    </button>
+                    <button 
+                      onClick={() => setShowShareModal(true)}
+                      className="px-6 py-3 border border-brand-600 text-brand-600 rounded-xl hover:bg-brand-50 font-medium transition-colors flex items-center justify-center gap-2"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m9.632 4.368C18.886 16.938 19 17.482 19 18c0 1.657-1.343 3-3 3s-3-1.343-3-3 1.343-3 3-3c.482 0 .938.114 1.342.316m-7.658 0C11.886 12.938 12 12.482 12 12c0-1.657-1.343-3-3-3s-3 1.343-3 3 1.343 3 3 3c.482 0 .938-.114 1.342-.316z" />
+                      </svg>
+                      Share Report
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-8">
@@ -409,6 +422,14 @@ export default function AnalyzingPage() {
           </div>
         </div>
       </div>
+
+      {/* Share Modal */}
+      <ShareModal
+        isOpen={showShareModal}
+        onClose={() => setShowShareModal(false)}
+        projectId={jobId as string}
+        projectName={`HVAC Analysis ${jobId}`}
+      />
     </>
   )
 }

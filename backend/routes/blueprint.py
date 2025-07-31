@@ -43,33 +43,32 @@ FILE_SIZE_WARNING_MB = int(os.getenv("FILE_SIZE_WARNING_MB", "20"))
 
 router = APIRouter()
 
+@router.get("/users/{email}/can-upload")
+async def check_can_upload(
+    email: str,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Check if user can upload a new report"""
+    # Validate email format
+    if not validate_email_format(email):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid email format"
+        )
+    
+    can_upload = await user_service.can_upload_new_report(email, session)
+    has_subscription = await user_service.has_active_subscription(email, session)
+    free_report_used = not await user_service.can_use_free_report(email, session)
+    
+    return {
+        "can_upload": can_upload,
+        "has_subscription": has_subscription,
+        "free_report_used": free_report_used
+    }
+
 def validate_email_format(email: str) -> bool:
-    """Basic email format validation to prevent obvious spam"""
-    # Basic regex pattern for email validation
-    email_pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
-    
-    if not email_pattern.match(email):
-        return False
-    
-    # Block obvious spam patterns
-    spam_patterns = [
-        r'^test@test\.',
-        r'^asdf@asdf\.',
-        r'^aaa+@',
-        r'^123+@',
-        r'^xxx+@',
-        r'^fuck',
-        r'^shit',
-        r'@mailinator\.',
-        r'@throwaway\.',
-    ]
-    
-    email_lower = email.lower()
-    for pattern in spam_patterns:
-        if re.search(pattern, email_lower):
-            return False
-    
-    return True
+    """Use enhanced email validation from UserService"""
+    return user_service.validate_email_format(email)
 
 def should_use_ai_parsing() -> bool:
     """Check if AI parsing should be used (default: True)"""
@@ -278,30 +277,15 @@ async def upload_blueprint(
         logger.info("🔍 Step 5: Ensuring user exists")
         await user_service.get_or_create_user(email, session)
         
-        # Check free report usage and subscription status
-        logger.info("🔍 Step 6: Starting subscription and free report check")
-        can_use_free = await user_service.can_use_free_report(email, session)
-        has_subscription = await user_service.has_active_subscription(email, session)
+        # Check if user can upload a new report (backend-enforced paywall)
+        logger.info("🔍 Step 6: Checking upload eligibility")
+        can_upload = await user_service.can_upload_new_report(email, session)
         
-        # Only require email verification if they've used their free report and don't have a subscription
-        if not can_use_free and not has_subscription:
-            logger.info("🔍 Step 6a: User has used free report, checking email verification")
-            try:
-                await user_service.require_verified(email, session)
-            except HTTPException as e:
-                if e.status_code == 403:
-                    # Send verification email if not verified
-                    token = await user_service.create_email_token(email, session)
-                    await email_service.send_verification_email(email, token)
-                raise
-        else:
-            logger.info("🔍 Step 5 SKIPPED: Email verification not required for first free report")
-    
-        # Bypass subscription check in debug mode for whitelisted emails
+        # Bypass paywall check in debug mode for whitelisted emails
         if DEBUG or email in DEV_VERIFIED_EMAILS:
-            can_use_free = True
+            can_upload = True
         
-        if not can_use_free and not has_subscription:
+        if not can_upload:
             # Generate Stripe checkout session
             try:
                 stripe_client = get_stripe_client()

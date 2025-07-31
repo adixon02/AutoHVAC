@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Zero-Friction "First Report Free" User Experience**
+  - Completely removed email verification requirements for all users
+  - Users can upload first blueprint with just email (no password, no verification)
+  - Dashboard accessible with email-only parameter (no authentication required)
+  - Implemented backend-enforced paywall after free report usage
+  - Added `/users/{email}/can-upload` endpoint for eligibility checking
+  - Created professional PaywallModal component with Stripe integration
+  - Streamlined upload flow with email collection moved to step 2
+  - Added share functionality to results page with copyable links
+  - Enhanced spam email validation with comprehensive domain/pattern blocking
+  - All paywall logic enforced server-side (no client-side bypasses possible)
+  - Deprecated `require_verified()` method - verification no longer required
+  - Added `can_upload_new_report()` method to UserService for centralized logic
+  - Integrated PaywallModal into both dashboard and upload flows
+  - 402 Payment Required responses automatically trigger upgrade modal
+  - Share reports via email or copyable link for viral growth
+
+### Added (Previous)
 - **"First Report Free" Flow with Payment Gating**
   - First blueprint upload proceeds without email verification requirement
   - Automatic user creation on first upload for frictionless experience

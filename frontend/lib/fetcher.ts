@@ -158,6 +158,14 @@ export const apiHelpers = {
   // Subscription
   createSubscription: (email: string) =>
     postFetcher({ url: '/api/v1/subscribe', data: { email } }),
+  
+  // Stripe checkout
+  createCheckoutSession: (email: string) =>
+    postFetcher({ url: '/api/v1/billing/subscribe', data: { email } }),
+  
+  // Check upload eligibility
+  checkCanUpload: (email: string) =>
+    fetcher(`/api/v1/blueprint/users/${encodeURIComponent(email)}/can-upload`),
 }
 
 // Download helper (doesn't use SWR since it's a file download)

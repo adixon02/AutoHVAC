@@ -11,8 +11,10 @@ AutoHVAC/
 │   │   ├── Hero.tsx                   # Landing page hero section
 │   │   ├── FeatureSteps.tsx           # 4-step process walkthrough
 │   │   ├── Testimonials.tsx           # Customer testimonial slider
-│   │   ├── MultiStepUpload.tsx        # Multi-step upload with progress tracking
+│   │   ├── MultiStepUpload.tsx        # Multi-step upload with email at step 2
 │   │   ├── AssumptionModal.tsx        # Building envelope assumptions collection
+│   │   ├── PaywallModal.tsx           # Professional upgrade modal with Stripe
+│   │   ├── ShareModal.tsx             # Report sharing with link/email options
 │   │   ├── NavBar.tsx                 # Navigation bar component
 │   │   ├── ProjectCard.tsx            # Project display card
 │   │   └── UploadModal.tsx.old        # Legacy upload modal (reference)
@@ -76,7 +78,7 @@ AutoHVAC/
 │   │   ├── __init__.py
 │   │   ├── manualj.py                 # ACCA Manual J load calculations
 │   │   ├── job_service.py             # Core job management and orchestration
-│   │   ├── user_service.py            # User management with email verification
+│   │   ├── user_service.py            # User management (no verification required)
 │   │   ├── database_rate_limiter.py   # Database-backed rate limiting service
 │   │   ├── pdf_service.py             # PDF generation service
 │   │   ├── pdf_thread_manager.py      # PDF processing thread management
@@ -317,8 +319,10 @@ AutoHVAC/
 - **`components/Hero.tsx`**: Benefit-focused landing with interactive mockup
 - **`components/FeatureSteps.tsx`**: 4-step process walkthrough with animations
 - **`components/Testimonials.tsx`**: Customer testimonial slider with social proof
-- **`components/MultiStepUpload.tsx`**: Enhanced multi-step upload process with progress tracking and assumption collection
+- **`components/MultiStepUpload.tsx`**: Streamlined multi-step upload with email collection at step 2 (no verification)
 - **`components/AssumptionModal.tsx`**: Interactive modal for collecting building envelope assumptions (insulation, windows, construction materials)
+- **`components/PaywallModal.tsx`**: Professional upgrade modal with pricing, testimonials, and Stripe checkout integration
+- **`components/ShareModal.tsx`**: Report sharing functionality with copyable links and email options
 - **`components/UploadModal.tsx.old`**: Legacy upload modal retained for reference during transition
 - **`constants/api.ts`**: Centralized API configuration and endpoint definitions
   - Environment-based API URL configuration
@@ -617,7 +621,8 @@ When GPT-4V is disabled or fails, the system falls back to the original pipeline
   - Requires: `email` (string), `file` (PDF), `project_label` (string), `zip_code` (string)
   - Optional: `duct_config` (string), `heating_fuel` (string)
   - Returns: `{job_id, status, project_label}` on success
-  - First upload: Proceeds without email verification (free report)
+  - No email verification required ever (removed from flow)
+  - First upload: Proceeds immediately (free report)
   - Subsequent uploads: Returns 402 Payment Required with structured response:
     ```json
     {
@@ -634,8 +639,9 @@ When GPT-4V is disabled or fails, the system falls back to the original pipeline
       "cta_text": "Unlock Unlimited Reports"
     }
     ```
-  - Email validation: Basic format checking, blocks spam patterns
+  - Email validation: Enhanced spam blocking with domain and pattern lists
   - Analytics: Tracks IP, user agent, and referrer on uploads
+  - Dashboard access: Use `/dashboard?email=user@example.com` (no login required)
 
 - `GET /api/v1/job/{job_id}` - Get processing status
   - Returns: `{status, stage, progress, result?, error?, upgrade_prompt?}`
@@ -655,9 +661,14 @@ When GPT-4V is disabled or fails, the system falls back to the original pipeline
     }
     ```
 
+### User Management
+- `GET /api/v1/blueprint/users/{email}/can-upload` - Check upload eligibility
+  - Returns: `{can_upload: boolean, has_subscription: boolean, free_report_used: boolean}`
+  - Used by frontend to show/hide paywall before upload attempt
+
 ### Billing (Stripe Integration)
-- `POST /api/v1/subscribe` - Create subscription checkout
-- `POST /api/v1/webhook` - Stripe webhook handler
+- `POST /api/v1/billing/subscribe` - Create subscription checkout session
+- `POST /api/v1/billing/webhook` - Stripe webhook handler
 
 ### Admin
 - Admin endpoints for system management (authentication required)
@@ -898,11 +909,13 @@ STRIPE_PRICE_ID=price_...
 ### Key Features
 - **Elite Parsing**: Advanced geometry + text extraction with AI cleanup
 - **Professional UI**: Modern SaaS design targeting HVAC contractors
+- **Zero-Friction Onboarding**: No email verification, password, or login required
 - **Interactive User Experience**: Multi-step upload with building envelope assumption collection
 - **Advanced HVAC Analysis**: Comprehensive ACCA Manual J implementation with climate zone precision
 - **Comprehensive Climate Data**: ASHRAE design temperatures and county-based climate mapping
 - **Professional Reporting**: PDF generation with detailed HVAC analysis and recommendations
-- **Smart Monetization**: "First report free" flow with seamless payment gating
+- **Smart Monetization**: "First report free" with backend-enforced paywall
+- **Viral Sharing**: Reports shareable via copyable links and email
 - **Email Marketing**: Automated report notifications with upgrade CTAs and testimonials
 - **Analytics Tracking**: User behavior insights with IP, browser, and referrer tracking
 - **Real-time Status**: Progress tracking through processing stages
@@ -912,13 +925,15 @@ STRIPE_PRICE_ID=price_...
 
 ## Recent Updates
 
-### "First Report Free" Flow Implementation (Latest)
-- **Frictionless First Experience**: Users can upload their first blueprint without email verification
-- **Smart Payment Gating**: Subsequent uploads require Stripe subscription with clear messaging
-- **Enhanced Email Marketing**: Report completion emails with strong upgrade CTAs and testimonials
-- **Analytics Tracking**: Captures user behavior data (IP, user agent, referrer) for insights
-- **Frontend API Enhancements**: Job status includes upgrade prompts for seamless modal integration
-- **Email Validation**: Basic spam prevention while maintaining low friction for legitimate users
+### Zero-Friction "First Report Free" Experience (Latest)
+- **No Email Verification Ever**: Completely removed email verification from the entire flow
+- **Email-Only Access**: Dashboard accessible with just email parameter (no passwords)
+- **Streamlined Upload**: Email collection moved to step 2 for better UX
+- **Backend-Enforced Paywall**: All paywall logic server-side (no client bypasses)
+- **Professional PaywallModal**: Clean upgrade flow with pricing and testimonials
+- **Viral Sharing**: Share reports via copyable links or email
+- **Enhanced Spam Blocking**: Comprehensive domain and pattern lists
+- **Seamless Integration**: 402 responses automatically trigger upgrade modal
 - **Backward Compatible**: Existing subscribers unaffected, all logic backend-controlled
 
 ### GPT-4V AI Vision Integration (Previous)

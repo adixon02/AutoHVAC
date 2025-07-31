@@ -5,6 +5,7 @@ import Head from 'next/head'
 import { apiHelpers } from '../lib/fetcher'
 import ProjectCard from '../components/ProjectCard'
 import MultiStepUpload from '../components/MultiStepUpload'
+import PaywallModal from '../components/PaywallModal'
 import Cookies from 'js-cookie'
 
 interface Project {
@@ -26,6 +27,7 @@ export default function Dashboard() {
   const router = useRouter()
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
+  const [isPaywallModalOpen, setIsPaywallModalOpen] = useState(false)
   const [filter, setFilter] = useState<string>('all')
 
   // Get email from URL params or cookies
@@ -88,6 +90,21 @@ export default function Dashboard() {
 
   const stats = getProjectStats()
 
+  // Check if user can upload new reports
+  const { data: uploadEligibility } = useSWR(
+    userEmail ? `can-upload-${userEmail}` : null,
+    () => apiHelpers.checkCanUpload(userEmail!),
+    { refreshInterval: 30000 } // Check every 30 seconds
+  )
+
+  const handleNewAnalysis = () => {
+    if (uploadEligibility?.can_upload) {
+      setIsUploadModalOpen(true)
+    } else {
+      setIsPaywallModalOpen(true)
+    }
+  }
+
   if (!userEmail) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -148,7 +165,7 @@ export default function Dashboard() {
                   {userEmail}
                 </span>
                 <button 
-                  onClick={() => setIsUploadModalOpen(true)}
+                  onClick={handleNewAnalysis}
                   className="btn-primary"
                 >
                   New Analysis
@@ -303,7 +320,7 @@ export default function Dashboard() {
               </p>
               {filter === 'all' && (
                 <button 
-                  onClick={() => setIsUploadModalOpen(true)}
+                  onClick={handleNewAnalysis}
                   className="btn-primary"
                 >
                   Upload Blueprint
@@ -331,6 +348,13 @@ export default function Dashboard() {
       <MultiStepUpload 
         isOpen={isUploadModalOpen} 
         onClose={() => setIsUploadModalOpen(false)} 
+      />
+
+      {/* Paywall Modal */}
+      <PaywallModal
+        isOpen={isPaywallModalOpen}
+        onClose={() => setIsPaywallModalOpen(false)}
+        userEmail={userEmail || ''}
       />
     </>
   )

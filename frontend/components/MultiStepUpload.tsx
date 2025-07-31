@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useRouter } from 'next/router'
 import { apiHelpers } from '../lib/fetcher'
+import PaywallModal from './PaywallModal'
 import Cookies from 'js-cookie'
 
 interface ProjectData {
@@ -22,6 +23,7 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
   const [currentStep, setCurrentStep] = useState(1)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showPaywall, setShowPaywall] = useState(false)
   
   const [projectData, setProjectData] = useState<ProjectData>({
     projectName: '',
@@ -32,7 +34,7 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
     email: ''
   })
 
-  const totalSteps = 5
+  const totalSteps = 5 // Still 5 steps but email moved to step 2
 
   const nextStep = () => {
     if (currentStep < totalSteps) {
@@ -68,6 +70,20 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
 
   if (!isOpen) return null
 
+  // Show paywall if user hit their limit
+  if (showPaywall) {
+    return (
+      <PaywallModal
+        isOpen={true}
+        onClose={() => {
+          setShowPaywall(false)
+          handleClose()
+        }}
+        userEmail={projectData.email}
+      />
+    )
+  }
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="card max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -76,17 +92,17 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
           <div>
             <h2 className="text-2xl font-semibold text-brand-700">
               {currentStep === 1 && 'Start Your HVAC Analysis'}
-              {currentStep === 2 && 'What type of ductwork?'}
-              {currentStep === 3 && 'What heating system will you use?'}
-              {currentStep === 4 && 'What\'s the project location?'}
-              {currentStep === 5 && 'Where should we send your analysis?'}
+              {currentStep === 2 && 'Where should we send your analysis?'}
+              {currentStep === 3 && 'What type of ductwork?'}
+              {currentStep === 4 && 'What heating system will you use?'}
+              {currentStep === 5 && 'What\'s the project location?'}
             </h2>
             <p className="text-gray-600 mt-1">
               {currentStep === 1 && 'Upload your blueprint and give your project a name'}
-              {currentStep === 2 && 'This affects your system efficiency calculations'}
-              {currentStep === 3 && 'This determines equipment recommendations'}
-              {currentStep === 4 && 'We need the ZIP code for accurate climate data'}
-              {currentStep === 5 && `Your detailed Manual J report for "${projectData.projectName}" will be ready in 30 seconds`}
+              {currentStep === 2 && 'Enter your email to access your report'}
+              {currentStep === 3 && 'This affects your system efficiency calculations'}
+              {currentStep === 4 && 'This determines equipment recommendations'}
+              {currentStep === 5 && 'We need the ZIP code for accurate climate data'}
             </p>
           </div>
           <button
@@ -132,29 +148,9 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
             />
           )}
 
-          {/* Step 2: Duct Configuration */}
+          {/* Step 2: Email Collection (moved earlier for better UX) */}
           {currentStep === 2 && (
-            <Step2DuctConfig
-              projectData={projectData}
-              updateProjectData={updateProjectData}
-              onNext={nextStep}
-              onPrev={prevStep}
-            />
-          )}
-
-          {/* Step 3: Heating System */}
-          {currentStep === 3 && (
-            <Step3HeatingSystem
-              projectData={projectData}
-              updateProjectData={updateProjectData}
-              onNext={nextStep}
-              onPrev={prevStep}
-            />
-          )}
-
-          {/* Step 4: ZIP Code Collection */}
-          {currentStep === 4 && (
-            <Step4ZipCode
+            <Step2EmailCollection
               projectData={projectData}
               updateProjectData={updateProjectData}
               onNext={nextStep}
@@ -164,9 +160,29 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
             />
           )}
 
-          {/* Step 5: Email Collection */}
+          {/* Step 3: Duct Configuration */}
+          {currentStep === 3 && (
+            <Step3DuctConfig
+              projectData={projectData}
+              updateProjectData={updateProjectData}
+              onNext={nextStep}
+              onPrev={prevStep}
+            />
+          )}
+
+          {/* Step 4: Heating System */}
+          {currentStep === 4 && (
+            <Step4HeatingSystem
+              projectData={projectData}
+              updateProjectData={updateProjectData}
+              onNext={nextStep}
+              onPrev={prevStep}
+            />
+          )}
+
+          {/* Step 5: ZIP Code Collection */}
           {currentStep === 5 && (
-            <Step5EmailCollection
+            <Step5ZipCode
               projectData={projectData}
               updateProjectData={updateProjectData}
               onPrev={prevStep}
@@ -210,16 +226,24 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
       router.push(`/analyzing/${result.jobId}`)
       handleClose()
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Upload error:', error)
-      setError('Upload failed. Please try again.')
+      
+      // Check if it's a payment required error
+      if (error.response?.status === 402) {
+        setShowPaywall(true)
+        setIsLoading(false)
+        return
+      }
+      
+      setError(error.message || 'Upload failed. Please try again.')
     } finally {
       setIsLoading(false)
     }
   }
 }
 
-// Step Components will be implemented next
+// Step Components
 function Step1ProjectSetup({ projectData, updateProjectData, onNext, error, setError }: any) {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -327,7 +351,74 @@ function Step1ProjectSetup({ projectData, updateProjectData, onNext, error, setE
   )
 }
 
-function Step2DuctConfig({ projectData, updateProjectData, onNext, onPrev }: any) {
+function Step2EmailCollection({ projectData, updateProjectData, onNext, onPrev, error, setError }: any) {
+  const handleNext = () => {
+    if (!projectData.email.trim()) {
+      setError('Please enter your email address')
+      return
+    }
+    if (!/\S+@\S+\.\S+/.test(projectData.email)) {
+      setError('Please enter a valid email address')
+      return
+    }
+    setError(null)
+    onNext()
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Email Input */}
+      <div>
+        <label className="block text-sm font-medium text-brand-700 mb-2">
+          Email Address
+        </label>
+        <input
+          type="email"
+          value={projectData.email}
+          onChange={(e) => updateProjectData({ email: e.target.value })}
+          placeholder="your@email.com"
+          className="w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
+        />
+        <p className="mt-2 text-sm text-gray-500">
+          ✨ Your first blueprint analysis is completely free! No password or verification required.
+        </p>
+      </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+          <div className="flex items-start">
+            <svg className="w-5 h-5 text-red-500 mt-0.5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div className="flex-1">
+              <h4 className="text-sm font-medium text-red-800 mb-1">Please Complete</h4>
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Navigation Buttons */}
+      <div className="flex space-x-4">
+        <button
+          onClick={onPrev}
+          className="flex-1 px-6 py-3 border border-gray-300 rounded-xl font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          Back
+        </button>
+        <button
+          onClick={handleNext}
+          className="flex-1 btn-primary text-lg py-3"
+        >
+          Continue
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function Step3DuctConfig({ projectData, updateProjectData, onNext, onPrev }: any) {
   const ductOptions = [
     { 
       value: 'ducted_attic', 
@@ -397,7 +488,7 @@ function Step2DuctConfig({ projectData, updateProjectData, onNext, onPrev }: any
   )
 }
 
-function Step3HeatingSystem({ projectData, updateProjectData, onNext, onPrev }: any) {
+function Step4HeatingSystem({ projectData, updateProjectData, onNext, onPrev }: any) {
   const heatingOptions = [
     { 
       value: 'gas', 
@@ -467,8 +558,8 @@ function Step3HeatingSystem({ projectData, updateProjectData, onNext, onPrev }: 
   )
 }
 
-function Step4ZipCode({ projectData, updateProjectData, onNext, onPrev, error, setError }: any) {
-  const handleNext = () => {
+function Step5ZipCode({ projectData, updateProjectData, onPrev, onSubmit, isLoading, error, setError }: any) {
+  const handleSubmit = () => {
     if (!projectData.zipCode.trim()) {
       setError('Please enter a ZIP code')
       return
@@ -478,7 +569,7 @@ function Step4ZipCode({ projectData, updateProjectData, onNext, onPrev, error, s
       return
     }
     setError(null)
-    onNext()
+    onSubmit()
   }
 
   return (
@@ -525,91 +616,24 @@ function Step4ZipCode({ projectData, updateProjectData, onNext, onPrev, error, s
           Back
         </button>
         <button
-          onClick={handleNext}
-          className="flex-1 btn-primary text-lg py-4"
-        >
-          Next: Get Results
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function Step5EmailCollection({ projectData, updateProjectData, onPrev, onSubmit, isLoading, error, setError }: any) {
-  const handleSubmit = () => {
-    if (!projectData.email.trim()) {
-      setError('Please enter your email address')
-      return
-    }
-    if (!/\S+@\S+\.\S+/.test(projectData.email)) {
-      setError('Please enter a valid email address')
-      return
-    }
-    setError(null)
-    onSubmit()
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Email Input */}
-      <div>
-        <label className="block text-sm font-medium text-brand-700 mb-2">
-          Email Address
-        </label>
-        <input
-          type="email"
-          value={projectData.email}
-          onChange={(e) => updateProjectData({ email: e.target.value })}
-          placeholder="your@email.com"
-          className="w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
-        />
-        <p className="mt-2 text-sm text-gray-500">
-          ✨ Your first blueprint analysis is completely free!
-        </p>
-      </div>
-
-      {/* Error Display */}
-      {error && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
-          <div className="flex items-start">
-            <svg className="w-5 h-5 text-red-500 mt-0.5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div className="flex-1">
-              <h4 className="text-sm font-medium text-red-800 mb-1">Please Complete</h4>
-              <p className="text-sm text-red-700">{error}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Navigation Buttons */}
-      <div className="flex space-x-4">
-        <button
-          onClick={onPrev}
-          disabled={isLoading}
-          className="flex-1 btn-secondary text-lg py-4 disabled:opacity-50"
-        >
-          Back
-        </button>
-        <button
           onClick={handleSubmit}
           disabled={isLoading}
-          className="flex-1 btn-primary text-lg py-4 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex-1 btn-primary text-lg py-4"
         >
           {isLoading ? (
-            <div className="flex items-center justify-center">
-              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            <span className="flex items-center justify-center gap-2">
+              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
               </svg>
-              Generating Analysis...
-            </div>
+              Analyzing...
+            </span>
           ) : (
-            'Generate My Analysis'
+            'Start Analysis'
           )}
         </button>
       </div>
     </div>
   )
 }
+

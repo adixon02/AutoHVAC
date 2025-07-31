@@ -8,9 +8,57 @@ from app.config import DEBUG, DEV_VERIFIED_EMAILS
 import secrets
 from datetime import datetime, timezone, timedelta
 import hashlib
+import re
 
 class UserService:
     """PostgreSQL-backed user service replacing InMemoryUserStore"""
+    
+    # Spam email patterns and domains
+    SPAM_DOMAINS = [
+        'mailinator.com', 'guerrillamail.com', '10minutemail.com',
+        'throwawaymail.com', 'yopmail.com', 'trashmail.com',
+        'tempmail.com', 'disposablemail.com', 'fakeinbox.com',
+        'temp-mail.org', 'tempmailo.com', 'sharklasers.com'
+    ]
+    
+    SPAM_PATTERNS = [
+        r'^test@test\.',
+        r'^asdf@asdf\.',
+        r'^aaa+@',
+        r'^123+@',
+        r'^xxx+@',
+        r'^fuck',
+        r'^shit',
+        r'^spam',
+        r'^fake@fake\.',
+        r'^user@user\.',
+        r'^email@email\.',
+        r'^abc+@',
+        r'^qwerty@'
+    ]
+    
+    @staticmethod
+    def validate_email_format(email: str) -> bool:
+        """Enhanced email validation to prevent spam"""
+        # Basic regex pattern for email validation
+        email_pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+        
+        if not email_pattern.match(email):
+            return False
+        
+        email_lower = email.lower()
+        
+        # Check against spam domains
+        domain = email_lower.split('@')[1] if '@' in email_lower else ''
+        if domain in UserService.SPAM_DOMAINS:
+            return False
+        
+        # Check against spam patterns
+        for pattern in UserService.SPAM_PATTERNS:
+            if re.search(pattern, email_lower):
+                return False
+        
+        return True
     
     @staticmethod
     async def get_or_create_user(email: str, session: AsyncSession) -> User:
@@ -52,6 +100,16 @@ class UserService:
         if not user:
             return True  # New users get free report
         return not user.free_report_used
+    
+    @staticmethod
+    async def can_upload_new_report(email: str, session: AsyncSession) -> bool:
+        """Check if user can upload a new report (either has free report or active subscription)"""
+        user = await UserService.get_user_by_email(email, session)
+        if not user:
+            return True  # New users can upload their first report
+        
+        # Can upload if they haven't used free report OR have active subscription
+        return not user.free_report_used or user.active_subscription
     
     @staticmethod
     async def has_active_subscription(email: str, session: AsyncSession) -> bool:
@@ -214,19 +272,10 @@ class UserService:
     
     @staticmethod
     async def require_verified(email: str, session: AsyncSession) -> None:
-        """Require email to be verified, with dev bypass for whitelisted emails"""
-        # Dev shortcut - bypass if DEBUG mode OR email in whitelist
-        if DEBUG or email in DEV_VERIFIED_EMAILS:
-            return
-        
-        # Regular verification check
-        if not await UserService.is_email_verified(email, session):
-            from fastapi import HTTPException
-            raise HTTPException(
-                status_code=403,
-                detail="Email verification required. Check your email for verification link.",
-                headers={"X-Verification-Required": "true"}
-            )
+        """DEPRECATED: Email verification no longer required for free users"""
+        # This method is kept for backward compatibility but does nothing
+        # Email verification is completely removed from the flow
+        return
 
 # Global instance for easy access
 user_service = UserService()
