@@ -69,7 +69,7 @@ app.add_exception_handler(Exception, traceback_exception_handler)
 
 app.include_router(blueprint.router, prefix="/api/v1/blueprint")
 app.include_router(job.router, prefix="/api/v1/job")
-app.include_router(billing.router, prefix="/api/v1")
+app.include_router(billing.router, prefix="/api/v1/billing")
 app.include_router(auth.router, prefix="/api/v1/auth")
 app.include_router(jobs.router, prefix="/api/v1/jobs")
 app.include_router(admin.router, prefix="/api/v1/admin")
@@ -141,6 +141,19 @@ async def root():
 async def health():
     return {"status": "healthy"}
 
+@app.get("/api/routes")
+async def list_routes():
+    """List all registered routes for debugging"""
+    routes = []
+    for route in app.routes:
+        if hasattr(route, "methods"):
+            routes.append({
+                "path": route.path,
+                "methods": list(route.methods),
+                "name": route.name
+            })
+    return {"routes": sorted(routes, key=lambda x: x["path"])}
+
 @app.get("/healthz")
 async def healthz(session: AsyncSession = Depends(get_async_session)):
     """Comprehensive health check endpoint"""
@@ -200,6 +213,8 @@ async def catch_all(request: Request, path: str):
         "available_routes": [
             "POST /api/v1/blueprint/upload",
             "GET /api/v1/job/{job_id}",
+            "POST /api/v1/billing/subscribe",
+            "POST /api/v1/billing/webhook",
             "GET /healthz"
         ]
     }
