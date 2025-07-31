@@ -5,8 +5,8 @@ import Head from 'next/head'
 import { apiHelpers } from '../lib/fetcher'
 import ProjectCard from '../components/ProjectCard'
 import MultiStepUpload from '../components/MultiStepUpload'
-import PaywallModal from '../components/PaywallModal'
 import Cookies from 'js-cookie'
+import { useSession, signOut } from 'next-auth/react'
 
 interface Project {
   id: string
@@ -25,26 +25,27 @@ interface DashboardData {
 
 export default function Dashboard() {
   const router = useRouter()
+  const { data: session } = useSession()
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
-  const [isPaywallModalOpen, setIsPaywallModalOpen] = useState(false)
   const [filter, setFilter] = useState<string>('all')
 
-  // Get email from URL params or cookies
+  // Get email from session or cookies
   useEffect(() => {
-    const emailFromQuery = router.query.email as string
-    const emailFromCookie = Cookies.get('user_email')
-    
-    if (emailFromQuery) {
-      setUserEmail(emailFromQuery)
-      Cookies.set('user_email', emailFromQuery, { expires: 30 }) // 30 days
-    } else if (emailFromCookie) {
-      setUserEmail(emailFromCookie)
+    if (session?.user?.email) {
+      setUserEmail(session.user.email)
     } else {
-      // Redirect to home if no email
-      router.push('/')
+      const emailFromCookie = Cookies.get('user_email')
+      if (emailFromCookie) {
+        setUserEmail(emailFromCookie)
+        // Prompt to sign in
+        router.push('/auth/signin?callbackUrl=/dashboard')
+      } else {
+        // No email, redirect to home
+        router.push('/')
+      }
     }
-  }, [router])
+  }, [session, router])
 
   // Fetch user projects
   const { data, error, mutate } = useSWR<DashboardData>(
@@ -57,9 +58,9 @@ export default function Dashboard() {
     }
   )
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     Cookies.remove('user_email')
-    router.push('/')
+    await signOut({ callbackUrl: '/' })
   }
 
   const filteredProjects = data?.projects?.filter(project => {
@@ -101,7 +102,8 @@ export default function Dashboard() {
     if (uploadEligibility?.can_upload) {
       setIsUploadModalOpen(true)
     } else {
-      setIsPaywallModalOpen(true)
+      // Redirect to full page upgrade experience
+      router.push('/upgrade')
     }
   }
 
@@ -191,6 +193,57 @@ export default function Dashboard() {
               Manage and track your blueprint analyses
             </p>
           </div>
+
+          {/* MVP Session Warning */}
+          {!session && (
+            <div className="mb-6 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <p className="text-sm text-yellow-800">
+                <strong>Note:</strong> You're using email-based authentication. Sessions may be lost during server updates. 
+                If this happens, just sign in again with your email.
+              </p>
+            </div>
+          )}
+
+          {/* Usage Indicator */}
+          {uploadEligibility && (
+            <div className={`mb-8 p-4 rounded-xl border ${
+              uploadEligibility.can_upload 
+                ? 'bg-green-50 border-green-200' 
+                : 'bg-yellow-50 border-yellow-200'
+            }`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  {uploadEligibility.can_upload ? (
+                    <>
+                      <h3 className="font-medium text-green-900">
+                        {uploadEligibility.has_subscription ? 'Pro Subscription Active' : 'Free Upload Available'}
+                      </h3>
+                      <p className="text-sm text-green-700 mt-1">
+                        {uploadEligibility.has_subscription 
+                          ? 'You have unlimited blueprint analyses'
+                          : 'You have 1 free blueprint analysis available'}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <h3 className="font-medium text-yellow-900">Free Upload Used</h3>
+                      <p className="text-sm text-yellow-700 mt-1">
+                        Upgrade to Pro for unlimited blueprint analyses
+                      </p>
+                    </>
+                  )}
+                </div>
+                {!uploadEligibility.has_subscription && !uploadEligibility.can_upload && (
+                  <button
+                    onClick={() => router.push('/upgrade')}
+                    className="btn-primary text-sm"
+                  >
+                    Upgrade to Pro
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -348,13 +401,6 @@ export default function Dashboard() {
       <MultiStepUpload 
         isOpen={isUploadModalOpen} 
         onClose={() => setIsUploadModalOpen(false)} 
-      />
-
-      {/* Paywall Modal */}
-      <PaywallModal
-        isOpen={isPaywallModalOpen}
-        onClose={() => setIsPaywallModalOpen(false)}
-        userEmail={userEmail || ''}
       />
     </>
   )

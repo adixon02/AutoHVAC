@@ -8,6 +8,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **World-Class MVP User Experience Improvements**
+  - **Smooth Progress Animation**
+    - Replaced janky 25%→65%→100% jumps with natural easing curve
+    - Progress smoothly animates from 0-100% over realistic timeframes
+    - Micro-variations added for lifelike feel (random ±2% variations)
+    - Uses easeOutQuart function for professional motion design
+    - Holds at 90% until analysis actually completes
+  - **Rotating Technical Status Messages**
+    - 10 sophisticated technical messages during analysis phase
+    - Messages rotate every 3 seconds showing active processing
+    - Examples: "📐 Extracting room dimensions...", "🌡️ Calculating heat transfer coefficients..."
+    - Adds credibility and shows real work happening
+  - **Magic Link Fallback Options**
+    - "Resend magic link" button if email doesn't arrive
+    - "Continue without magic link (MVP mode)" for instant access
+    - Sets cookie-based session for MVP simplicity
+    - Honest session persistence warnings for transparency
+  - **Welcome Back Experience**
+    - Email saved in 30-day cookie after first use
+    - Homepage shows personalized "Welcome back!" banner
+    - Email pre-filled in upload flow for returning users
+    - Special welcome message in email collection step
+    - Reduces friction for repeat usage
+  - **Email Configuration**
+    - Simple Gmail SMTP setup with app passwords
+    - Clear documentation for 5-minute email setup
+    - Console fallback for development without email
+  - **MVP Session Warnings**
+    - Added to signin and dashboard pages
+    - Honest about session loss during server restarts
+    - Sets proper user expectations for MVP stage
+
+### Changed
+- **Email Collection Moved to Final Step**
+  - MultiStepUpload now has 6 steps with email as the last
+  - Maximizes micro-engagement before asking for contact info
+  - Pre-selected sensible defaults (ducted attic, gas heating)
+- **Progress Display**
+  - Now uses smooth `displayProgress` state instead of hardcoded percentages
+  - Transitions feel natural and professional
+- **Error Handling**
+  - All 402/paywall errors redirect to full-page /upgrade
+  - Removed modal paywalls in favor of dedicated upgrade page
+
+### Added (Previous)
 - **Zero-Friction "First Report Free" User Experience**
   - Completely removed email verification requirements for all users
   - Users can upload first blueprint with just email (no password, no verification)

@@ -1,0 +1,135 @@
+import NextAuth, { NextAuthOptions } from 'next-auth'
+import EmailProvider from 'next-auth/providers/email'
+import { createTransport } from 'nodemailer'
+
+// Simple in-memory adapter for MVP (replace with database adapter in production)
+const users: Record<string, any> = {}
+const verificationTokens: Record<string, any> = {}
+
+export const authOptions: NextAuthOptions = {
+  providers: [
+    EmailProvider({
+      server: {
+        host: process.env.EMAIL_SERVER_HOST || 'smtp.gmail.com',
+        port: Number(process.env.EMAIL_SERVER_PORT) || 587,
+        auth: {
+          user: process.env.EMAIL_SERVER_USER,
+          pass: process.env.EMAIL_SERVER_PASSWORD,
+        },
+      },
+      from: process.env.EMAIL_FROM || 'noreply@autohvac.com',
+      async sendVerificationRequest({ identifier: email, url, provider }) {
+        const transport = createTransport(provider.server)
+        const result = await transport.sendMail({
+          to: email,
+          from: provider.from,
+          subject: 'Sign in to AutoHVAC',
+          text: `Sign in to AutoHVAC\n\n${url}\n\n`,
+          html: `
+            <div style="max-width: 600px; margin: 0 auto; font-family: Arial, sans-serif;">
+              <h1 style="color: #1a56db; text-align: center;">Sign in to AutoHVAC</h1>
+              <p style="color: #374151; font-size: 16px;">Click the button below to sign in to your account:</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${url}" style="background-color: #1a56db; color: white; padding: 12px 30px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">
+                  Sign In
+                </a>
+              </div>
+              <p style="color: #6b7280; font-size: 14px;">Or copy and paste this URL into your browser:</p>
+              <p style="color: #6b7280; font-size: 14px; word-break: break-all;">${url}</p>
+              <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+              <p style="color: #9ca3af; font-size: 12px; text-align: center;">
+                If you didn't request this email, you can safely ignore it.
+              </p>
+            </div>
+          `,
+        })
+        
+        const failed = result.rejected.concat(result.pending).filter(Boolean)
+        if (failed.length) {
+          throw new Error(`Email(s) (${failed.join(', ')}) could not be sent`)
+        }
+      },
+    }),
+  ],
+  
+  adapter: {
+    // Simple in-memory adapter for MVP
+    async createUser(user) {
+      const id = crypto.randomUUID()
+      users[id] = { ...user, id }
+      return users[id]
+    },
+    async getUser(id) {
+      return users[id] || null
+    },
+    async getUserByEmail(email) {
+      return Object.values(users).find((u: any) => u.email === email) || null
+    },
+    async getUserByAccount({ providerAccountId }) {
+      return users[providerAccountId] || null
+    },
+    async updateUser(user) {
+      users[user.id] = user
+      return user
+    },
+    async linkAccount(account) {
+      return account
+    },
+    async createSession(session) {
+      return session
+    },
+    async getSessionAndUser(sessionToken) {
+      // For magic links, we don't need complex session management
+      return null
+    },
+    async updateSession(session) {
+      return session
+    },
+    async deleteSession(sessionToken) {
+      // No-op for in-memory
+    },
+    async createVerificationToken(verificationToken) {
+      verificationTokens[verificationToken.identifier] = verificationToken
+      return verificationToken
+    },
+    async useVerificationToken({ identifier, token }) {
+      const stored = verificationTokens[identifier]
+      if (stored && stored.token === token && stored.expires > new Date()) {
+        delete verificationTokens[identifier]
+        return stored
+      }
+      return null
+    },
+  },
+  
+  session: {
+    strategy: 'jwt',
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+  },
+  
+  pages: {
+    signIn: '/auth/signin',
+    verifyRequest: '/auth/verify',
+    error: '/auth/error',
+  },
+  
+  callbacks: {
+    async session({ session, token }) {
+      if (session?.user?.email) {
+        // Add user email to session
+        session.user.email = token.email as string
+      }
+      return session
+    },
+    async jwt({ token, user }) {
+      if (user) {
+        token.email = user.email
+      }
+      return token
+    },
+  },
+  
+  debug: process.env.NODE_ENV === 'development',
+}
+
+export default NextAuth(authOptions)

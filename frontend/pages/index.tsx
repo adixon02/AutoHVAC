@@ -1,12 +1,21 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Hero from '../components/Hero'
 import FeatureSteps from '../components/FeatureSteps'
 import Testimonials from '../components/Testimonials'
 import MultiStepUpload from '../components/MultiStepUpload'
 import NavBar from '../components/NavBar'
+import Cookies from 'js-cookie'
 
 export default function Home() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
+  const [savedEmail, setSavedEmail] = useState<string | null>(null)
+
+  useEffect(() => {
+    const email = Cookies.get('user_email')
+    if (email) {
+      setSavedEmail(email)
+    }
+  }, [])
 
   const handleGetStarted = () => {
     setIsUploadModalOpen(true)
@@ -16,6 +25,28 @@ export default function Home() {
     <div className="min-h-screen">
       {/* Navigation */}
       <NavBar onGetStarted={handleGetStarted} />
+
+      {/* Welcome Back Banner */}
+      {savedEmail && (
+        <div className="bg-gradient-to-r from-brand-600 to-brand-700 text-white py-3">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-sm font-medium">
+                Welcome back! Ready for another blueprint analysis?
+              </span>
+            </div>
+            <button 
+              onClick={handleGetStarted}
+              className="text-sm font-medium bg-white text-brand-700 px-4 py-1 rounded-lg hover:bg-brand-50 transition-colors"
+            >
+              Start New Analysis
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Hero Section */}
       <Hero onGetStarted={handleGetStarted} />

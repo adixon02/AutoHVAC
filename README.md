@@ -374,6 +374,37 @@ AutoHVAC/
 - **`render.yaml`**: Production deployment configuration with auto-scaling
 - **`.github/workflows/ci.yaml`**: Comprehensive CI/CD with linting, testing, and deployment
 
+## Features
+
+### Core Capabilities
+- **AI-Powered Blueprint Analysis**: GPT-4V integration for intelligent PDF parsing
+- **ACCA Manual J Compliance**: Professional HVAC load calculations following industry standards
+- **Multi-Page PDF Support**: Intelligent page selection for complex blueprints
+- **Zero-Friction Onboarding**: First report free with email-only signup
+- **Professional Reports**: Detailed PDF reports with equipment sizing recommendations
+
+### User Experience (MVP Enhancements)
+- **Smooth Progress Animation**: Natural progress bar with easing curves and micro-variations
+- **Technical Status Messages**: Rotating technical updates during analysis (e.g., "📐 Extracting room dimensions...")
+- **Welcome Back Experience**: 30-day email cookie for returning users with pre-filled forms
+- **Magic Link Authentication**: Passwordless login with Gmail SMTP integration
+- **Session Fallback**: "Continue without magic link" option for instant MVP access
+- **Mobile Responsive**: Full mobile support for on-site usage
+
+### Technical Features
+- **Dual Parser System**: AI-first parsing with legacy geometry parser fallback
+- **Thread-Safe PDF Processing**: Concurrent job handling with proper resource management
+- **Comprehensive Audit Trail**: Full ACCA compliance documentation
+- **Climate Zone Integration**: ASHRAE design temperature database
+- **Automatic File Cleanup**: Scheduled maintenance tasks for storage optimization
+- **Rate Limiting**: Database-backed rate limiting per user
+
+### Business Features
+- **Stripe Integration**: Subscription management and payment processing
+- **Email Notifications**: SendGrid integration for transactional emails
+- **Share Functionality**: Viral growth through report sharing
+- **Analytics Tracking**: User behavior and attribution tracking
+
 ## Quick Start
 
 ### Prerequisites
@@ -399,8 +430,9 @@ pip install PyMuPDF
 
 ### Environment Variables
 
-Create `.env` file in project root (see `.env.example` for full template):
+Create `.env` file in backend and `.env.local` in frontend:
 
+**Backend `.env`:**
 ```bash
 # OpenAI (Required)
 OPENAI_API_KEY=sk-...
@@ -425,6 +457,25 @@ DATABASE_URL=postgresql://user:pass@host:5432/db
 MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin
 ```
+
+**Frontend `.env.local`:**
+```bash
+# API Configuration
+NEXT_PUBLIC_API_URL=http://localhost:8000
+
+# NextAuth Configuration
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=generate-with-openssl-rand-base64-32
+
+# Email Configuration (Magic Links)
+EMAIL_SERVER_HOST=smtp.gmail.com
+EMAIL_SERVER_PORT=587
+EMAIL_SERVER_USER=your-email@gmail.com
+EMAIL_SERVER_PASSWORD=your-app-password  # Gmail app password, not regular password
+EMAIL_FROM=AutoHVAC <your-email@gmail.com>
+```
+
+See `frontend/GMAIL_SETUP.md` for detailed Gmail configuration instructions.
 
 ### Local Development
 

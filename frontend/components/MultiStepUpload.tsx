@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useRouter } from 'next/router'
 import { apiHelpers } from '../lib/fetcher'
-import PaywallModal from './PaywallModal'
+// PaywallModal removed - using full page upgrade instead
 import Cookies from 'js-cookie'
 
 interface ProjectData {
@@ -23,7 +23,10 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
   const [currentStep, setCurrentStep] = useState(1)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [showPaywall, setShowPaywall] = useState(false)
+  // Removed showPaywall state - using full page upgrade instead
+  
+  // Check for saved email on mount
+  const savedEmail = typeof window !== 'undefined' ? Cookies.get('user_email') || '' : ''
   
   const [projectData, setProjectData] = useState<ProjectData>({
     projectName: '',
@@ -31,10 +34,10 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
     ductConfig: 'ducted_attic', // Pre-selected default
     heatingFuel: 'gas', // Pre-selected default
     zipCode: '',
-    email: ''
+    email: savedEmail // Pre-fill email if we have it
   })
 
-  const totalSteps = 5 // Still 5 steps but email moved to step 2
+  const totalSteps = 6 // 6 steps with email moved to the end
 
   const nextStep = () => {
     if (currentStep < totalSteps) {
@@ -70,19 +73,7 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
 
   if (!isOpen) return null
 
-  // Show paywall if user hit their limit
-  if (showPaywall) {
-    return (
-      <PaywallModal
-        isOpen={true}
-        onClose={() => {
-          setShowPaywall(false)
-          handleClose()
-        }}
-        userEmail={projectData.email}
-      />
-    )
-  }
+  // Remove modal paywall - we'll redirect to full page instead
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -92,17 +83,19 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
           <div>
             <h2 className="text-2xl font-semibold text-brand-700">
               {currentStep === 1 && 'Start Your HVAC Analysis'}
-              {currentStep === 2 && 'Where should we send your analysis?'}
-              {currentStep === 3 && 'What type of ductwork?'}
-              {currentStep === 4 && 'What heating system will you use?'}
-              {currentStep === 5 && 'What\'s the project location?'}
+              {currentStep === 2 && 'What type of ductwork?'}
+              {currentStep === 3 && 'What heating system will you use?'}
+              {currentStep === 4 && 'What\'s the project location?'}
+              {currentStep === 5 && 'Almost done!'}
+              {currentStep === 6 && 'Where should we send your analysis?'}
             </h2>
             <p className="text-gray-600 mt-1">
               {currentStep === 1 && 'Upload your blueprint and give your project a name'}
-              {currentStep === 2 && 'Enter your email to access your report'}
-              {currentStep === 3 && 'This affects your system efficiency calculations'}
-              {currentStep === 4 && 'This determines equipment recommendations'}
-              {currentStep === 5 && 'We need the ZIP code for accurate climate data'}
+              {currentStep === 2 && 'This affects your system efficiency calculations'}
+              {currentStep === 3 && 'This determines equipment recommendations'}
+              {currentStep === 4 && 'We need the ZIP code for accurate climate data'}
+              {currentStep === 5 && 'Review your selections'}
+              {currentStep === 6 && 'Enter your email to receive your HVAC analysis report'}
             </p>
           </div>
           <button
@@ -117,23 +110,21 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
         </div>
 
         {/* Progress Indicator */}
-        {currentStep > 1 && (
-          <div className="px-6 py-4 border-b border-gray-100">
-            <div className="flex items-center justify-center space-x-2">
-              {Array.from({ length: 4 }, (_, i) => (
-                <div
-                  key={i}
-                  className={`w-3 h-3 rounded-full ${
-                    i < currentStep - 1 ? 'bg-brand-600' : 'bg-gray-300'
-                  }`}
-                />
-              ))}
-            </div>
-            <div className="text-center mt-2 text-sm text-gray-600">
-              Step {currentStep - 1} of 4
-            </div>
+        <div className="px-6 py-4 border-b border-gray-100">
+          <div className="flex items-center justify-center space-x-2">
+            {Array.from({ length: totalSteps }, (_, i) => (
+              <div
+                key={i}
+                className={`w-3 h-3 rounded-full ${
+                  i < currentStep ? 'bg-brand-600' : 'bg-gray-300'
+                }`}
+              />
+            ))}
           </div>
-        )}
+          <div className="text-center mt-2 text-sm text-gray-600">
+            Step {currentStep} of {totalSteps}
+          </div>
+        </div>
 
         {/* Content */}
         <div className="p-6">
@@ -148,9 +139,29 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
             />
           )}
 
-          {/* Step 2: Email Collection (moved earlier for better UX) */}
+          {/* Step 2: Duct Configuration */}
           {currentStep === 2 && (
-            <Step2EmailCollection
+            <Step2DuctConfig
+              projectData={projectData}
+              updateProjectData={updateProjectData}
+              onNext={nextStep}
+              onPrev={prevStep}
+            />
+          )}
+
+          {/* Step 3: Heating System */}
+          {currentStep === 3 && (
+            <Step3HeatingSystem
+              projectData={projectData}
+              updateProjectData={updateProjectData}
+              onNext={nextStep}
+              onPrev={prevStep}
+            />
+          )}
+
+          {/* Step 4: ZIP Code Collection */}
+          {currentStep === 4 && (
+            <Step4ZipCode
               projectData={projectData}
               updateProjectData={updateProjectData}
               onNext={nextStep}
@@ -160,29 +171,18 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
             />
           )}
 
-          {/* Step 3: Duct Configuration */}
-          {currentStep === 3 && (
-            <Step3DuctConfig
-              projectData={projectData}
-              updateProjectData={updateProjectData}
-              onNext={nextStep}
-              onPrev={prevStep}
-            />
-          )}
-
-          {/* Step 4: Heating System */}
-          {currentStep === 4 && (
-            <Step4HeatingSystem
-              projectData={projectData}
-              updateProjectData={updateProjectData}
-              onNext={nextStep}
-              onPrev={prevStep}
-            />
-          )}
-
-          {/* Step 5: ZIP Code Collection */}
+          {/* Step 5: Review */}
           {currentStep === 5 && (
-            <Step5ZipCode
+            <Step5Review
+              projectData={projectData}
+              onNext={nextStep}
+              onPrev={prevStep}
+            />
+          )}
+
+          {/* Step 6: Email Collection (moved to end for micro-engagement) */}
+          {currentStep === 6 && (
+            <Step6EmailCollection
               projectData={projectData}
               updateProjectData={updateProjectData}
               onPrev={prevStep}
@@ -231,8 +231,10 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
       
       // Check if it's a payment required error
       if (error.response?.status === 402) {
-        setShowPaywall(true)
-        setIsLoading(false)
+        // Store email for the upgrade page
+        Cookies.set('user_email', projectData.email, { expires: 30 })
+        // Redirect to full-page upgrade experience
+        router.push('/upgrade')
         return
       }
       
@@ -351,8 +353,11 @@ function Step1ProjectSetup({ projectData, updateProjectData, onNext, error, setE
   )
 }
 
-function Step2EmailCollection({ projectData, updateProjectData, onNext, onPrev, error, setError }: any) {
-  const handleNext = () => {
+function Step6EmailCollection({ projectData, updateProjectData, onPrev, onSubmit, isLoading, error, setError }: any) {
+  const savedEmail = typeof window !== 'undefined' ? Cookies.get('user_email') || '' : ''
+  const isReturningUser = savedEmail && savedEmail === projectData.email
+  
+  const handleSubmit = () => {
     if (!projectData.email.trim()) {
       setError('Please enter your email address')
       return
@@ -362,11 +367,28 @@ function Step2EmailCollection({ projectData, updateProjectData, onNext, onPrev, 
       return
     }
     setError(null)
-    onNext()
+    onSubmit()
   }
 
   return (
     <div className="space-y-6">
+      {/* Welcome Back Message */}
+      {isReturningUser && (
+        <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
+          <div className="flex items-start">
+            <svg className="w-5 h-5 text-green-500 mt-0.5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <h4 className="text-sm font-medium text-green-800">Welcome back!</h4>
+              <p className="text-sm text-green-700 mt-1">
+                We've pre-filled your email. Just click continue to proceed.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Email Input */}
       <div>
         <label className="block text-sm font-medium text-brand-700 mb-2">
@@ -380,7 +402,10 @@ function Step2EmailCollection({ projectData, updateProjectData, onNext, onPrev, 
           className="w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors"
         />
         <p className="mt-2 text-sm text-gray-500">
-          ✨ Your first blueprint analysis is completely free! No password or verification required.
+          {isReturningUser 
+            ? '🎉 As a returning user, you know the drill! We\'ll email your analysis when it\'s ready.'
+            : '✨ Your first blueprint analysis is completely free! No password or verification required.'
+          }
         </p>
       </div>
 
@@ -408,17 +433,28 @@ function Step2EmailCollection({ projectData, updateProjectData, onNext, onPrev, 
           Back
         </button>
         <button
-          onClick={handleNext}
+          onClick={handleSubmit}
+          disabled={isLoading}
           className="flex-1 btn-primary text-lg py-3"
         >
-          Continue
+          {isLoading ? (
+            <span className="flex items-center justify-center gap-2">
+              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              Analyzing...
+            </span>
+          ) : (
+            'Start Analysis'
+          )}
         </button>
       </div>
     </div>
   )
 }
 
-function Step3DuctConfig({ projectData, updateProjectData, onNext, onPrev }: any) {
+function Step2DuctConfig({ projectData, updateProjectData, onNext, onPrev }: any) {
   const ductOptions = [
     { 
       value: 'ducted_attic', 
@@ -488,7 +524,7 @@ function Step3DuctConfig({ projectData, updateProjectData, onNext, onPrev }: any
   )
 }
 
-function Step4HeatingSystem({ projectData, updateProjectData, onNext, onPrev }: any) {
+function Step3HeatingSystem({ projectData, updateProjectData, onNext, onPrev }: any) {
   const heatingOptions = [
     { 
       value: 'gas', 
@@ -558,8 +594,8 @@ function Step4HeatingSystem({ projectData, updateProjectData, onNext, onPrev }: 
   )
 }
 
-function Step5ZipCode({ projectData, updateProjectData, onPrev, onSubmit, isLoading, error, setError }: any) {
-  const handleSubmit = () => {
+function Step4ZipCode({ projectData, updateProjectData, onNext, onPrev, error, setError }: any) {
+  const handleNext = () => {
     if (!projectData.zipCode.trim()) {
       setError('Please enter a ZIP code')
       return
@@ -569,7 +605,7 @@ function Step5ZipCode({ projectData, updateProjectData, onPrev, onSubmit, isLoad
       return
     }
     setError(null)
-    onSubmit()
+    onNext()
   }
 
   return (
@@ -616,21 +652,78 @@ function Step5ZipCode({ projectData, updateProjectData, onPrev, onSubmit, isLoad
           Back
         </button>
         <button
-          onClick={handleSubmit}
-          disabled={isLoading}
+          onClick={handleNext}
           className="flex-1 btn-primary text-lg py-4"
         >
-          {isLoading ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              Analyzing...
+          Continue
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function Step5Review({ projectData, onNext, onPrev }: any) {
+  return (
+    <div className="space-y-6">
+      {/* Review Summary */}
+      <div className="bg-gray-50 rounded-xl p-6 space-y-4">
+        <h3 className="font-medium text-brand-700 mb-4">Review Your Project Details</h3>
+        
+        <div className="space-y-3">
+          <div className="flex justify-between items-center py-2 border-b border-gray-200">
+            <span className="text-sm text-gray-600">Project Name</span>
+            <span className="text-sm font-medium text-gray-900">{projectData.projectName}</span>
+          </div>
+          
+          <div className="flex justify-between items-center py-2 border-b border-gray-200">
+            <span className="text-sm text-gray-600">Blueprint File</span>
+            <span className="text-sm font-medium text-gray-900">{projectData.blueprintFile?.name}</span>
+          </div>
+          
+          <div className="flex justify-between items-center py-2 border-b border-gray-200">
+            <span className="text-sm text-gray-600">Duct Configuration</span>
+            <span className="text-sm font-medium text-gray-900">
+              {projectData.ductConfig === 'ducted_attic' && 'Ducted – Attic'}
+              {projectData.ductConfig === 'ducted_crawl' && 'Ducted – Crawl Space'}
+              {projectData.ductConfig === 'ductless' && 'Ductless / Mini-split'}
             </span>
-          ) : (
-            'Start Analysis'
-          )}
+          </div>
+          
+          <div className="flex justify-between items-center py-2 border-b border-gray-200">
+            <span className="text-sm text-gray-600">Heating System</span>
+            <span className="text-sm font-medium text-gray-900">
+              {projectData.heatingFuel === 'gas' && 'Natural Gas Furnace'}
+              {projectData.heatingFuel === 'heat_pump' && 'Heat Pump'}
+              {projectData.heatingFuel === 'electric' && 'Electric Resistance'}
+            </span>
+          </div>
+          
+          <div className="flex justify-between items-center py-2">
+            <span className="text-sm text-gray-600">ZIP Code</span>
+            <span className="text-sm font-medium text-gray-900">{projectData.zipCode}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-brand-50 border border-brand-200 rounded-xl p-4">
+        <p className="text-sm text-brand-800">
+          <strong>Next step:</strong> Enter your email to receive your comprehensive HVAC analysis report.
+        </p>
+      </div>
+
+      {/* Navigation Buttons */}
+      <div className="flex space-x-4">
+        <button
+          onClick={onPrev}
+          className="flex-1 btn-secondary text-lg py-4"
+        >
+          Back
+        </button>
+        <button
+          onClick={onNext}
+          className="flex-1 btn-primary text-lg py-4"
+        >
+          Continue to Final Step
         </button>
       </div>
     </div>

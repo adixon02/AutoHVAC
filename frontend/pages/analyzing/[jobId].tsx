@@ -4,6 +4,8 @@ import useSWR from 'swr'
 import { apiHelpers } from '../../lib/fetcher'
 import Head from 'next/head'
 import ShareModal from '../../components/ShareModal'
+import { useSession } from 'next-auth/react'
+import Cookies from 'js-cookie'
 
 interface JobStatus {
   job_id: string
@@ -48,6 +50,19 @@ const hvacFacts = [
     fact: "Heat pumps can provide both heating and cooling, and are 2-3 times more efficient than traditional electric heating.",
     icon: "♻️"
   }
+]
+
+const technicalStatusMessages = [
+  "📐 Extracting room dimensions from blueprint layers...",
+  "🏠 Identifying HVAC zones and thermal boundaries...",
+  "🌡️ Calculating heat transfer coefficients for each surface...",
+  "🪟 Analyzing window placement and solar heat gain factors...",
+  "📊 Computing sensible and latent cooling loads per zone...",
+  "💨 Determining optimal airflow requirements (CFM) for each room...",
+  "⚡ Calculating peak heating and cooling demands...",
+  "🔧 Sizing equipment based on ACCA Manual S guidelines...",
+  "📈 Optimizing system efficiency and comfort parameters...",
+  "✅ Generating comprehensive load calculation report..."
 ]
 
 function ProcessingStage({ title, description, status, stats }: ProcessingStage) {
@@ -120,9 +135,23 @@ function EducationalFact({ fact, icon }: { fact: string; icon: string }) {
 export default function AnalyzingPage() {
   const router = useRouter()
   const { jobId } = router.query
+  const { data: session } = useSession()
   const [currentFactIndex, setCurrentFactIndex] = useState(0)
   const [startTime] = useState(Date.now())
   const [showShareModal, setShowShareModal] = useState(false)
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [displayProgress, setDisplayProgress] = useState(0)
+  const [currentStatusMessage, setCurrentStatusMessage] = useState(0)
+  
+  useEffect(() => {
+    // Get email from cookie if not logged in
+    if (!session?.user?.email) {
+      const email = Cookies.get('user_email')
+      if (email) {
+        setUserEmail(email)
+      }
+    }
+  }, [session])
   
   // Poll job status every 2 seconds
   const { data: jobStatus, error, mutate } = useSWR<JobStatus>(
@@ -145,6 +174,55 @@ export default function AnalyzingPage() {
       const interval = setInterval(() => {
         setCurrentFactIndex((prev) => (prev + 1) % hvacFacts.length)
       }, 4000)
+      return () => clearInterval(interval)
+    }
+  }, [jobStatus?.status])
+
+  // Smooth progress animation
+  useEffect(() => {
+    if (jobStatus?.status === 'pending') {
+      // Start at 0 and quickly move to 15%
+      setDisplayProgress(0)
+      setTimeout(() => setDisplayProgress(15), 100)
+    } else if (jobStatus?.status === 'processing') {
+      // Smooth increase from 15% to 90% over time
+      setDisplayProgress(15)
+      const targetProgress = 90
+      const duration = 45000 // 45 seconds
+      const startTime = Date.now()
+      
+      const interval = setInterval(() => {
+        const elapsed = Date.now() - startTime
+        const progress = Math.min(elapsed / duration, 1)
+        
+        // Easing function for more natural feel
+        const easeOutQuart = 1 - Math.pow(1 - progress, 4)
+        const currentProgress = 15 + (targetProgress - 15) * easeOutQuart
+        
+        // Add small random variations for realism
+        const variation = (Math.random() - 0.5) * 2
+        setDisplayProgress(Math.min(currentProgress + variation, 90))
+        
+        if (progress >= 1) {
+          clearInterval(interval)
+        }
+      }, 100)
+      
+      return () => clearInterval(interval)
+    } else if (jobStatus?.status === 'completed') {
+      // Smooth transition to 100%
+      setDisplayProgress(100)
+    } else if (jobStatus?.status === 'failed') {
+      // Keep at current progress
+    }
+  }, [jobStatus?.status])
+
+  // Rotate technical status messages
+  useEffect(() => {
+    if (jobStatus?.status === 'processing') {
+      const interval = setInterval(() => {
+        setCurrentStatusMessage((prev) => (prev + 1) % technicalStatusMessages.length)
+      }, 3000)
       return () => clearInterval(interval)
     }
   }, [jobStatus?.status])
@@ -320,10 +398,15 @@ export default function AnalyzingPage() {
               </h1>
               
               {jobStatus.status === 'processing' && (
-                <p className="text-gray-600 mb-6">
-                  Our AI is carefully examining your blueprint to extract room dimensions, 
-                  detect HVAC requirements, and calculate precise load requirements.
-                </p>
+                <div className="mb-6">
+                  <p className="text-gray-600 mb-3">
+                    Our AI is carefully examining your blueprint to extract room dimensions, 
+                    detect HVAC requirements, and calculate precise load requirements.
+                  </p>
+                  <p className="text-sm text-brand-600 font-medium animate-pulse">
+                    {technicalStatusMessages[currentStatusMessage]}
+                  </p>
+                </div>
               )}
               
               <div className="flex justify-center items-center space-x-6 text-sm text-gray-500">
@@ -360,24 +443,38 @@ export default function AnalyzingPage() {
                       </div>
                     )}
                   </div>
+                  {!session && userEmail && (
+                    <div className="mb-6 p-4 bg-brand-50 border border-brand-200 rounded-lg">
+                      <p className="text-brand-800 text-sm">
+                        <strong>Create an account</strong> to save your report and access it anytime.
+                        We'll send a magic link to <strong>{userEmail}</strong>.
+                      </p>
+                    </div>
+                  )}
                   <p className="text-gray-600 mb-6">
                     Your detailed HVAC analysis report is ready to view!
                   </p>
                   <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                    {session ? (
+                      <button 
+                        onClick={() => router.push('/dashboard')}
+                        className="btn-primary"
+                      >
+                        View Dashboard
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => router.push('/auth/signin?callbackUrl=/dashboard')}
+                        className="btn-primary"
+                      >
+                        Create Account & View Report
+                      </button>
+                    )}
                     <button 
-                      onClick={() => router.push('/dashboard')}
-                      className="btn-primary"
+                      onClick={() => router.push('/')}
+                      className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium transition-colors"
                     >
-                      View Dashboard
-                    </button>
-                    <button 
-                      onClick={() => setShowShareModal(true)}
-                      className="px-6 py-3 border border-brand-600 text-brand-600 rounded-xl hover:bg-brand-50 font-medium transition-colors flex items-center justify-center gap-2"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m9.632 4.368C18.886 16.938 19 17.482 19 18c0 1.657-1.343 3-3 3s-3-1.343-3-3 1.343-3 3-3c.482 0 .938.114 1.342.316m-7.658 0C11.886 12.938 12 12.482 12 12c0-1.657-1.343-3-3-3s-3 1.343-3 3 1.343 3 3 3c.482 0 .938-.114 1.342-.316z" />
-                      </svg>
-                      Share Report
+                      Upload Another Blueprint
                     </button>
                   </div>
                 </div>
@@ -398,14 +495,14 @@ export default function AnalyzingPage() {
                   
                   {/* Progress Bar */}
                   <div className="space-y-2">
-                    <div className="bg-gray-200 rounded-full h-3">
+                    <div className="bg-gray-200 rounded-full h-3 overflow-hidden">
                       <div 
-                        className="bg-gradient-to-r from-brand-500 to-blue-500 h-3 rounded-full transition-all duration-500 ease-out"
-                        style={{ width: `${getOverallProgress(jobStatus.status)}%` }}
+                        className="bg-gradient-to-r from-brand-500 to-blue-500 h-3 rounded-full transition-all duration-300 ease-out"
+                        style={{ width: `${displayProgress}%` }}
                       />
                     </div>
                     <p className="text-center text-sm text-gray-600">
-                      {getOverallProgress(jobStatus.status)}% Complete
+                      {Math.round(displayProgress)}% Complete
                     </p>
                   </div>
                   
