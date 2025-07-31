@@ -19,7 +19,7 @@ from core.email import email_service
 from models.schemas import JobResponse, PaymentRequiredResponse, UploadResponse
 from models.enums import DuctConfig, HeatingFuel
 # Import stripe config first to ensure stripe is configured
-from core.stripe_config import STRIPE_PRICE_ID, get_stripe_client
+from core.stripe_config import STRIPE_PRICE_ID
 import stripe
 from app.config import DEBUG, DEV_VERIFIED_EMAILS
 

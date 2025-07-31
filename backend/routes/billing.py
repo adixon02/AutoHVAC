@@ -4,7 +4,7 @@ import os
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 # Import stripe config first to ensure stripe is configured
-from core.stripe_config import STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID, validate_stripe_config, get_stripe_client
+from core.stripe_config import STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID, validate_stripe_config
 import stripe
 from services.user_service import user_service
 from database import get_async_session
@@ -45,9 +45,6 @@ async def create_subscription(
         cancel_url = f"{frontend_url}/payment/cancel"
         
         logger.info(f"Creating Stripe checkout session with URLs - Success: {success_url}, Cancel: {cancel_url}")
-        
-        # Log stripe module state for debugging
-        logger.info(f"Stripe module type: {type(stripe)}, has checkout attr: {hasattr(stripe, 'checkout')}")
         
         # Create Stripe checkout session
         checkout_session = stripe.checkout.Session.create(

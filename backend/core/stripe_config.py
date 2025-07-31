@@ -7,13 +7,6 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Emergency debug logging
-logger.error("=== STRIPE CONFIGURATION DEBUG ===")
-logger.error(f"STRIPE_MODE env var: {os.getenv('STRIPE_MODE')}")
-logger.error(f"STRIPE_SECRET_KEY_TEST env var: {os.getenv('STRIPE_SECRET_KEY_TEST', 'NOT SET')[:20]}..." if os.getenv('STRIPE_SECRET_KEY_TEST') else "STRIPE_SECRET_KEY_TEST: NOT SET")
-logger.error(f"STRIPE_PRICE_ID_TEST env var: {os.getenv('STRIPE_PRICE_ID_TEST', 'NOT SET')}")
-logger.error("==================================")
-
 # Determine if we're using test mode or live mode
 # Set STRIPE_MODE=live in production, defaults to test
 STRIPE_MODE = os.getenv("STRIPE_MODE", "test").lower()
@@ -41,26 +34,20 @@ logger.info(f"Using Stripe keys - Mode: {STRIPE_MODE}, API Key: {stripe.api_key[
 if not stripe.api_key:
     logger.error("CRITICAL: Stripe API key is not set! Stripe will not work.")
     logger.error(f"Looking for STRIPE_SECRET_KEY_TEST in test mode, got: {os.getenv('STRIPE_SECRET_KEY_TEST', 'NOT SET')}")
-    stripe.api_key = None  # Explicitly set to None to cause clear errors
-elif stripe.api_key.startswith("sk_test_...") or stripe.api_key.startswith("sk_live_..."):
+elif stripe.api_key == "sk_test_..." or stripe.api_key == "sk_live_...":
+    # Only treat exact placeholder strings as invalid, not real keys that start with sk_test_ or sk_live_
     logger.error("CRITICAL: Stripe API key is using placeholder value! Stripe will not work.")
-    stripe.api_key = None  # Explicitly set to None to cause clear errors
+    logger.error("Please set a real Stripe API key in your environment variables.")
+else:
+    # Log success if we have what looks like a real key
+    logger.info(f"Stripe API key configured successfully (starts with: {stripe.api_key[:12]}...)")
 
 def get_stripe_client():
-    """Get the configured stripe module - ensures it's properly initialized"""
+    """Get the configured stripe module"""
+    # Simply return the stripe module - it should already be configured
+    # Don't try to reinitialize as this can cause issues
     if not stripe.api_key:
-        # Try to reinitialize if needed
-        if STRIPE_MODE == "test":
-            key = os.getenv("STRIPE_SECRET_KEY_TEST")
-        else:
-            key = os.getenv("STRIPE_SECRET_KEY")
-        
-        if key and not key.startswith("sk_test_...") and not key.startswith("sk_live_..."):
-            stripe.api_key = key
-            logger.info(f"Stripe API key reinitialized in get_stripe_client()")
-        else:
-            logger.error(f"CRITICAL: Cannot initialize Stripe! Key is: {key[:20] if key else 'None'}")
-    
+        logger.error("WARNING: Stripe API key is not set when get_stripe_client() was called")
     return stripe
 
 def is_test_mode():
@@ -73,7 +60,8 @@ def validate_stripe_config():
     
     if not stripe.api_key:
         issues.append("CRITICAL: Stripe API key not configured - Stripe will not work!")
-    elif stripe.api_key and (stripe.api_key.startswith("sk_test_...") or stripe.api_key.startswith("sk_live_...")):
+    elif stripe.api_key in ["sk_test_...", "sk_live_..."]:
+        # Only exact placeholder strings are invalid
         issues.append("CRITICAL: Stripe API key using placeholder - Stripe will not work!")
     
     if not STRIPE_PRICE_ID or STRIPE_PRICE_ID.startswith("price_..."):
