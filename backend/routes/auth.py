@@ -6,6 +6,7 @@ from services.user_service import user_service
 from core.email import email_service
 from pydantic import BaseModel, EmailStr
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -68,14 +69,14 @@ async def verify_email(
         
         if not email:
             # Invalid or expired token - redirect to error page
-            frontend_url = "http://localhost:3000"  # Should come from env
+            frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
             return RedirectResponse(
                 url=f"{frontend_url}/?verification=failed",
                 status_code=302
             )
         
         # Success - redirect to success page
-        frontend_url = "http://localhost:3000"  # Should come from env
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         return RedirectResponse(
             url=f"{frontend_url}/?verification=success&email={email}",
             status_code=302
@@ -83,7 +84,7 @@ async def verify_email(
     
     except Exception as e:
         logger.error(f"Error verifying email token: {str(e)}")
-        frontend_url = "http://localhost:3000"
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         return RedirectResponse(
             url=f"{frontend_url}/?verification=error",
             status_code=302

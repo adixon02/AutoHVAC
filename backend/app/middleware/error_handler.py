@@ -7,6 +7,13 @@ import logging
 import os
 from typing import Dict, Any
 
+# Allowed origins - should match the ones in main.py
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "https://autohvac-frontend.onrender.com",
+    "https://autohvac.ai",
+]
+
 def create_error_response(error_type: str, message: str, status_code: int = 500) -> Dict[str, Any]:
     """Create structured error response"""
     return {
@@ -41,7 +48,7 @@ async def traceback_exception_handler(request: Request, exc: Exception):
     
     # Add CORS headers to error response
     origin = request.headers.get("origin")
-    if origin == "http://localhost:3000":  # Match our allowed origin
+    if origin in ALLOWED_ORIGINS:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "*"
@@ -61,7 +68,7 @@ class CORSMiddleware(BaseHTTPMiddleware):
         
         # Ensure CORS headers are present
         origin = request.headers.get("origin")
-        if origin == "http://localhost:3000":
+        if origin in ALLOWED_ORIGINS:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
             response.headers["Access-Control-Allow-Methods"] = "*"
