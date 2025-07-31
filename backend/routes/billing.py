@@ -1,10 +1,11 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
-import stripe
 import os
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.stripe_config import STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID, validate_stripe_config
+# Import stripe config first to ensure stripe is configured
+from core.stripe_config import STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID, validate_stripe_config, get_stripe_client
+import stripe
 from services.user_service import user_service
 from database import get_async_session
 from models.schemas import SubscribeRequest, SubscribeResponse
@@ -45,8 +46,11 @@ async def create_subscription(
         
         logger.info(f"Creating Stripe checkout session with URLs - Success: {success_url}, Cancel: {cancel_url}")
         
+        # Ensure stripe is properly initialized
+        stripe_module = get_stripe_client()
+        
         # Create Stripe checkout session
-        checkout_session = stripe.checkout.Session.create(
+        checkout_session = stripe_module.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
                 'price': STRIPE_PRICE_ID,

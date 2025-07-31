@@ -2,7 +2,6 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, D
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uuid
-import stripe
 import logging
 import mimetypes
 import os
@@ -19,7 +18,9 @@ from services.database_rate_limiter import database_rate_limiter as rate_limiter
 from core.email import email_service
 from models.schemas import JobResponse, PaymentRequiredResponse, UploadResponse
 from models.enums import DuctConfig, HeatingFuel
-from core.stripe_config import STRIPE_PRICE_ID
+# Import stripe config first to ensure stripe is configured
+from core.stripe_config import STRIPE_PRICE_ID, get_stripe_client
+import stripe
 from app.config import DEBUG, DEV_VERIFIED_EMAILS
 
 logger = logging.getLogger(__name__)
@@ -325,7 +326,10 @@ async def upload_blueprint(
                     stripe_mode = os.getenv("STRIPE_MODE", "test")
                     logger.info(f"Creating Stripe checkout session - Mode: {stripe_mode}, Price ID: {STRIPE_PRICE_ID[:10]}..., API Key: {stripe.api_key[:10] if stripe.api_key else 'None'}...")
                     
-                    checkout_session = stripe.checkout.Session.create(
+                    # Ensure stripe is properly initialized
+                    stripe_module = get_stripe_client()
+                    
+                    checkout_session = stripe_module.checkout.Session.create(
                         payment_method_types=['card'],
                         line_items=[{
                             'price': STRIPE_PRICE_ID,
