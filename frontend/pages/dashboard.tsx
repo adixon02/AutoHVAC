@@ -166,7 +166,7 @@ export default function Dashboard() {
                 </button>
                 <button 
                   onClick={handleLogout}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  className="btn-text text-gray-600"
                 >
                   Sign Out
                 </button>
@@ -304,10 +304,10 @@ export default function Dashboard() {
                     <button
                       key={key}
                       onClick={() => setFilter(key)}
-                      className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                      className={`btn-filter ${
                         filter === key
-                          ? 'bg-brand-100 text-brand-700'
-                          : 'text-gray-600 hover:text-gray-900'
+                          ? 'btn-filter-active'
+                          : 'btn-filter-inactive'
                       }`}
                     >
                       {label}
@@ -317,7 +317,7 @@ export default function Dashboard() {
               </div>
               <button 
                 onClick={() => mutate()}
-                className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                className="btn-icon"
                 title="Refresh"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -44,7 +44,7 @@ export default function ShareModal({ isOpen, onClose, projectId, projectName }: 
             </h3>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
+              className="btn-icon"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -73,10 +73,10 @@ export default function ShareModal({ isOpen, onClose, projectId, projectName }: 
               />
               <button
                 onClick={handleCopyLink}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                className={`btn-small font-medium transition-all ${
                   copied 
-                    ? 'bg-green-500 text-white' 
-                    : 'bg-brand-600 text-white hover:bg-brand-700'
+                    ? 'bg-green-500 text-white hover:bg-green-600' 
+                    : 'bg-brand-700 text-white hover:bg-brand-800'
                 }`}
               >
                 {copied ? (

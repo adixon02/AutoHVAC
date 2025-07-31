@@ -14,18 +14,63 @@
 }
 
 @layer components {
+  /* Primary Actions */
   .btn-primary {
-    @apply inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-xl text-white bg-brand-700 hover:bg-brand-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500 transition-all duration-200 shadow-lg hover:shadow-xl font-semibold;
+    @apply inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-xl text-white bg-brand-700 hover:bg-brand-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500 transition-all duration-200 shadow-lg hover:shadow-xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed;
   }
   
+  /* Secondary Actions */
   .btn-secondary {
-    @apply inline-flex items-center justify-center px-6 py-3 border border-gray-300 text-base font-medium rounded-xl text-brand-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500 transition-all duration-200 shadow-md hover:shadow-lg font-semibold;
+    @apply inline-flex items-center justify-center px-6 py-3 border border-gray-300 text-base font-medium rounded-xl text-brand-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500 transition-all duration-200 shadow-md hover:shadow-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed;
   }
   
+  /* Text Links */
+  .btn-text {
+    @apply inline-flex items-center text-brand-600 hover:text-brand-700 font-medium transition-colors duration-200 focus:outline-none focus:underline;
+  }
+  
+  /* Icon Buttons */
+  .btn-icon {
+    @apply inline-flex items-center justify-center p-2 text-gray-400 hover:text-gray-600 transition-colors duration-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500;
+  }
+  
+  /* Small Buttons */
+  .btn-small {
+    @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500;
+  }
+  
+  .btn-small-primary {
+    @apply btn-small text-white bg-brand-700 hover:bg-brand-800 shadow-md hover:shadow-lg;
+  }
+  
+  .btn-small-secondary {
+    @apply btn-small text-brand-700 bg-white border border-gray-300 hover:bg-gray-50 shadow-sm hover:shadow-md;
+  }
+  
+  /* Filter/Toggle Buttons */
+  .btn-filter {
+    @apply inline-flex items-center px-3 py-1 text-sm rounded-full transition-all duration-200 font-medium;
+  }
+  
+  .btn-filter-active {
+    @apply bg-brand-100 text-brand-700 shadow-sm;
+  }
+  
+  .btn-filter-inactive {
+    @apply text-gray-600 hover:text-gray-900 hover:bg-gray-100;
+  }
+  
+  /* Danger/Warning Actions */
+  .btn-danger {
+    @apply inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-xl text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-all duration-200 shadow-lg hover:shadow-xl font-semibold;
+  }
+  
+  /* Cards */
   .card {
     @apply bg-white rounded-xl shadow-md hover:shadow-lg transition-all duration-300 border border-gray-100/50;
   }
   
+  /* Gradients */
   .gradient-bg {
     background: linear-gradient(135deg, #F8FAFC 0%, #E8ECF2 100%);
   }

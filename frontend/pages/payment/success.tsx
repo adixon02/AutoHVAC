@@ -62,7 +62,7 @@ export default function PaymentSuccess() {
           </div>
           <a 
             href="/dashboard" 
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-brand-600 hover:bg-brand-700 transition-colors"
+            className="btn-primary"
           >
             Go to Dashboard Now
           </a>

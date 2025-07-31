@@ -40,7 +40,7 @@ export default function Home() {
             </div>
             <button 
               onClick={handleGetStarted}
-              className="text-sm font-medium bg-white text-brand-700 px-4 py-1 rounded-lg hover:bg-brand-50 transition-colors"
+              className="btn-small-secondary"
             >
               Start New Analysis
             </button>

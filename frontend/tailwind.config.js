@@ -14,12 +14,20 @@ module.exports = {
         brand: {
           50: '#F8FAFC',
           100: '#E8ECF2',
+          200: '#D1DAE6',
+          300: '#9FB3CF',
+          400: '#6D8BB8',
           500: '#204274',
+          600: '#1A355D',
           700: '#052047',
+          800: '#031633',
+          900: '#020D1F',
         },
         accent: {
           DEFAULT: '#FF9C5F',
           orange: '#F26419',
+          light: '#FFB584',
+          dark: '#E67A3A',
         },
       },
       animation: {

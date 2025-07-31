@@ -59,7 +59,7 @@ export default function SignIn() {
                 <div className="space-y-3">
                   <button
                     onClick={() => handleSubmit({ preventDefault: () => {} } as React.FormEvent)}
-                    className="w-full px-4 py-2 text-sm font-medium text-brand-700 bg-brand-50 rounded-md hover:bg-brand-100 transition-colors"
+                    className="btn-small-secondary w-full"
                   >
                     Resend magic link
                   </button>
@@ -69,7 +69,7 @@ export default function SignIn() {
                       document.cookie = `user_email=${email}; path=/; max-age=2592000`
                       router.push(router.query.callbackUrl as string || '/dashboard')
                     }}
-                    className="w-full px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
+                    className="btn-small-secondary w-full"
                   >
                     Continue without magic link (MVP mode)
                   </button>
@@ -78,7 +78,7 @@ export default function SignIn() {
                       setIsSuccess(false)
                       setEmail('')
                     }}
-                    className="text-sm text-gray-600 hover:text-gray-800"
+                    className="btn-text text-sm"
                   >
                     Use a different email
                   </button>
@@ -159,7 +159,7 @@ export default function SignIn() {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="btn-primary w-full"
                 >
                   {isLoading ? (
                     <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
@@ -186,7 +186,7 @@ export default function SignIn() {
               <div className="mt-6 text-center">
                 <button
                   onClick={() => router.push('/')}
-                  className="text-brand-600 hover:text-brand-700 font-medium"
+                  className="btn-text"
                 >
                   Start with a free analysis →
                 </button>

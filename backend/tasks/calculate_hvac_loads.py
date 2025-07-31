@@ -324,12 +324,13 @@ def calculate_hvac_loads(
             )
             
             # Run envelope extraction with timeout
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            import asyncio as aio  # Re-import with alias to avoid any scope issues
+            loop = aio.new_event_loop()
+            aio.set_event_loop(loop)
             
             try:
                 envelope_data = loop.run_until_complete(
-                    asyncio.wait_for(
+                    aio.wait_for(
                         extract_envelope_data(full_text, zip_code),
                         timeout=AI_TIMEOUT_SECONDS
                     )

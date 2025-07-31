@@ -472,7 +472,7 @@ export default function AnalyzingPage() {
                     )}
                     <button 
                       onClick={() => router.push('/')}
-                      className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium transition-colors"
+                      className="btn-secondary"
                     >
                       Upload Another Blueprint
                     </button>

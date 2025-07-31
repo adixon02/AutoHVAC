@@ -62,7 +62,7 @@ export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarPr
               <div className="flex items-center space-x-4">
                 <button
                   onClick={handleDashboardClick}
-                  className="text-brand-600 hover:text-brand-700 font-medium transition-colors"
+                  className="btn-text"
                 >
                   Dashboard
                 </button>
@@ -72,7 +72,7 @@ export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarPr
                   </span>
                   <button
                     onClick={handleSignOut}
-                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                    className="btn-icon"
                     title="Sign Out"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -95,7 +95,7 @@ export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarPr
           <div className="md:hidden">
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
+              className="btn-icon"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 {isMenuOpen ? (
@@ -147,7 +147,7 @@ export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarPr
                         handleDashboardClick()
                         setIsMenuOpen(false)
                       }}
-                      className="text-left text-brand-600 hover:text-brand-700 font-medium transition-colors"
+                      className="btn-text text-left"
                     >
                       Dashboard
                     </button>
