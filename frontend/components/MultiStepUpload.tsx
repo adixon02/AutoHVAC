@@ -229,12 +229,26 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
     } catch (error: any) {
       console.error('Upload error:', error)
       
+      // Check if it's a PaymentRequiredError from the fetcher
+      if (error.name === 'PaymentRequiredError' && error.checkoutUrl) {
+        // Store email for the upgrade page
+        Cookies.set('user_email', projectData.email, { expires: 30 })
+        // Redirect to the checkout URL provided by the backend
+        router.push(error.checkoutUrl)
+        return
+      }
+      
       // Check if it's a payment required error (402 or payment-related 500)
       if (error.response?.status === 402) {
         // Store email for the upgrade page
         Cookies.set('user_email', projectData.email, { expires: 30 })
-        // Redirect to full-page upgrade experience
-        router.push('/upgrade')
+        
+        // Try to extract checkout URL from error detail
+        const errorDetail = error.response?.data?.detail
+        const checkoutUrl = errorDetail?.checkout_url || 'https://autohvac.ai/upgrade'
+        
+        // Redirect to checkout URL or default upgrade page
+        router.push(checkoutUrl)
         return
       }
       
@@ -254,6 +268,13 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
           router.push('/upgrade')
           return
         }
+      }
+      
+      // Final fallback - if we somehow have a 402 that wasn't caught above, still redirect
+      if (error.response?.status === 402) {
+        Cookies.set('user_email', projectData.email, { expires: 30 })
+        router.push('https://autohvac.ai/upgrade')
+        return
       }
       
       setError(error.message || 'Upload failed. Please try again.')

@@ -45,9 +45,17 @@ api.interceptors.response.use(
       throw new EmailVerificationError(error.response.data.detail)
     }
     
-    if (error.response?.status === 402 && error.response?.headers?.['x-checkout-url']) {
-      // Payment required - redirect to Stripe
-      throw new PaymentRequiredError(error.response.data.detail, error.response.headers['x-checkout-url'])
+    if (error.response?.status === 402) {
+      // Payment required - redirect to checkout
+      const errorDetail = error.response?.data?.detail
+      const checkoutUrl = errorDetail?.checkout_url || error.response?.headers?.['x-checkout-url']
+      
+      if (checkoutUrl) {
+        throw new PaymentRequiredError(
+          errorDetail?.message || errorDetail || 'Payment required',
+          checkoutUrl
+        )
+      }
     }
     
     return Promise.reject(error)
@@ -144,8 +152,17 @@ export const apiHelpers = {
         if (error.response?.status === 403 && error.response?.headers?.['x-verification-required']) {
           throw new EmailVerificationError(error.response.data.detail)
         }
-        if (error.response?.status === 402 && error.response?.headers?.['x-checkout-url']) {
-          throw new PaymentRequiredError(error.response.data.detail, error.response.headers['x-checkout-url'])
+        if (error.response?.status === 402) {
+          // Payment required - redirect to checkout
+          const errorDetail = error.response?.data?.detail
+          const checkoutUrl = errorDetail?.checkout_url || error.response?.headers?.['x-checkout-url']
+          
+          if (checkoutUrl) {
+            throw new PaymentRequiredError(
+              errorDetail?.message || errorDetail || 'Payment required',
+              checkoutUrl
+            )
+          }
         }
         
         // Handle 500 errors that might be payment-related
@@ -163,7 +180,7 @@ export const apiHelpers = {
             (typeof errorDetail === 'object' && errorDetail.error === 'free_report_used')
           )) {
             // Convert to 402 for consistent handling
-            const checkoutUrl = errorDetail.checkout_url || '/upgrade'
+            const checkoutUrl = errorDetail.checkout_url || 'https://autohvac.ai/upgrade'
             throw new PaymentRequiredError(
               typeof errorDetail === 'object' ? errorDetail : errorDetail,
               checkoutUrl
