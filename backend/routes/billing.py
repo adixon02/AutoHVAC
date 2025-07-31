@@ -23,6 +23,14 @@ async def create_subscription(
         # Ensure user exists in our database
         await user_service.get_or_create_user(request.email, session)
         
+        # Check if Stripe is properly configured
+        if not STRIPE_PRICE_ID or STRIPE_PRICE_ID.startswith("price_..."):
+            logger.warning(f"Stripe not properly configured for subscription request from {request.email}")
+            raise HTTPException(
+                status_code=503,
+                detail="Payment system is not configured. Please contact support for assistance."
+            )
+        
         stripe_client = get_stripe_client()
         
         # Get environment URLs or use defaults
@@ -55,10 +63,19 @@ async def create_subscription(
         
     except stripe.error.StripeError as e:
         logger.error(f"Stripe error creating checkout session: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Payment system error: {str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail="Payment system temporarily unavailable. Please try again later."
+        )
+    except HTTPException:
+        # Re-raise HTTPExceptions as-is
+        raise
     except Exception as e:
         logger.error(f"Error creating checkout session: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to create checkout session: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create checkout session. Please try again later."
+        )
 
 @router.post("/webhook")
 async def stripe_webhook(request: Request):

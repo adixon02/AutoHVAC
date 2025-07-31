@@ -147,6 +147,30 @@ export const apiHelpers = {
         if (error.response?.status === 402 && error.response?.headers?.['x-checkout-url']) {
           throw new PaymentRequiredError(error.response.data.detail, error.response.headers['x-checkout-url'])
         }
+        
+        // Handle 500 errors that might be payment-related
+        if (error.response?.status === 500) {
+          const errorData = error.response?.data
+          const errorDetail = errorData?.detail
+          
+          // Check if this is a payment-related 500 error
+          if (errorDetail && (
+            (typeof errorDetail === 'string' && (
+              errorDetail.toLowerCase().includes('payment') ||
+              errorDetail.toLowerCase().includes('stripe') ||
+              errorDetail.toLowerCase().includes('checkout')
+            )) ||
+            (typeof errorDetail === 'object' && errorDetail.error === 'free_report_used')
+          )) {
+            // Convert to 402 for consistent handling
+            const checkoutUrl = errorDetail.checkout_url || '/upgrade'
+            throw new PaymentRequiredError(
+              typeof errorDetail === 'object' ? errorDetail : errorDetail,
+              checkoutUrl
+            )
+          }
+        }
+        
         console.error(`Upload failed: ${error.response?.status}`, error.response?.data)
         throw new Error(`API ${error.response?.status}: ${JSON.stringify(error.response?.data)}`)
       }

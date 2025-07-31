@@ -9,6 +9,7 @@ export default function Upgrade() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [stripeUnavailable, setStripeUnavailable] = useState(false)
 
   useEffect(() => {
     // Get email from cookie
@@ -38,7 +39,16 @@ export default function Upgrade() {
       }
     } catch (err: any) {
       console.error('Upgrade error:', err)
-      setError(err.message || 'Failed to start upgrade process')
+      
+      // Check if this is a Stripe availability issue
+      if (err.message?.toLowerCase().includes('stripe') || 
+          err.message?.toLowerCase().includes('payment system')) {
+        setStripeUnavailable(true)
+        setError('Our payment system is temporarily unavailable. Please try again later or contact support.')
+      } else {
+        setError(err.message || 'Failed to start upgrade process')
+      }
+      
       setIsLoading(false)
     }
   }
@@ -141,27 +151,60 @@ export default function Upgrade() {
                 </div>
               )}
               
-              <button
-                onClick={handleUpgrade}
-                disabled={isLoading}
-                className="btn-primary text-lg px-12 py-4 w-full md:w-auto"
-              >
-                {isLoading ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Processing...
-                  </span>
-                ) : (
-                  'Upgrade to Pro'
-                )}
-              </button>
+              {stripeUnavailable ? (
+                <>
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-6">
+                    <h3 className="font-semibold text-yellow-800 mb-2">
+                      Payment System Temporarily Unavailable
+                    </h3>
+                    <p className="text-yellow-700 mb-4">
+                      We're experiencing a temporary issue with our payment processor. 
+                      Please try again in a few minutes, or contact our support team for assistance.
+                    </p>
+                    <div className="space-y-3">
+                      <button
+                        onClick={() => {
+                          setStripeUnavailable(false)
+                          setError(null)
+                        }}
+                        className="btn-secondary w-full"
+                      >
+                        Try Again
+                      </button>
+                      <a
+                        href={`mailto:support@autohvac.com?subject=Upgrade%20Request&body=Hi,%20I'd%20like%20to%20upgrade%20to%20Pro.%20My%20email%20is:%20${userEmail || ''}`}
+                        className="btn-primary w-full inline-block"
+                      >
+                        Contact Support
+                      </a>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={handleUpgrade}
+                    disabled={isLoading}
+                    className="btn-primary text-lg px-12 py-4 w-full md:w-auto"
+                  >
+                    {isLoading ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Processing...
+                      </span>
+                    ) : (
+                      'Upgrade to Pro'
+                    )}
+                  </button>
 
-              <p className="text-sm text-gray-500 mt-4">
-                🔒 Secure payment via Stripe • 💳 All major cards accepted
-              </p>
+                  <p className="text-sm text-gray-500 mt-4">
+                    🔒 Secure payment via Stripe • 💳 All major cards accepted
+                  </p>
+                </>
+              )}
             </div>
           </div>
 

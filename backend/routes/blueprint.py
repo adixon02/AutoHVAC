@@ -294,68 +294,83 @@ async def upload_blueprint(
         
         # Enforce paywall if user cannot upload
         if not can_upload:
-            # Generate Stripe checkout session
+            # Prepare base payment response
+            payment_response = {
+                "error": "free_report_used",
+                "message": "You've used your free analysis. Upgrade to Pro for unlimited reports.",
+                "upgrade_benefits": [
+                    "Unlimited blueprint analyses",
+                    "Priority processing",
+                    "Bulk upload support",
+                    "API access",
+                    "Premium support"
+                ],
+                "cta_text": "Unlock Unlimited Reports",
+                "cta_button_text": "Upgrade to Pro"
+            }
+            
+            # Try to generate Stripe checkout session
+            checkout_url = None
+            stripe_available = False
+            
             try:
                 stripe_client = get_stripe_client()
                 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
                 
-                # TODO: Configure Stripe test/live mode based on environment
-                # For testing, use test mode keys in .env:
-                # STRIPE_SECRET_KEY=sk_test_...
-                # STRIPE_PRICE_ID=price_test_...
-                # For production, use live mode keys:
-                # STRIPE_SECRET_KEY=sk_live_...
-                # STRIPE_PRICE_ID=price_live_...
-                
-                checkout_session = stripe_client.checkout.Session.create(
-                    payment_method_types=['card'],
-                    line_items=[{
-                        'price': STRIPE_PRICE_ID,
-                        'quantity': 1,
-                    }],
-                    mode='subscription',
-                    success_url=f'{frontend_url}/payment/success?session_id={{CHECKOUT_SESSION_ID}}',
-                    cancel_url=f'{frontend_url}/payment/cancel', 
-                    customer_email=email,
-                    metadata={'user_email': email}
-                )
-                
-                # Return structured payment required response
-                payment_response = {
-                    "error": "free_report_used",
-                    "message": "You've used your free analysis. Upgrade to Pro for unlimited reports.",
-                    "checkout_url": checkout_session.url,
-                    "upgrade_benefits": [
-                        "Unlimited blueprint analyses",
-                        "Priority processing",
-                        "Bulk upload support",
-                        "API access",
-                        "Premium support"
-                    ],
-                    "cta_text": "Unlock Unlimited Reports",
-                    "cta_button_text": "Upgrade to Pro"
-                }
-                
-                logger.info(f"Created Stripe checkout session for {email}: {checkout_session.id}")
-                
-                raise HTTPException(
-                    status_code=402,
-                    detail=payment_response,
-                    headers={"X-Checkout-URL": checkout_session.url}
-                )
+                # Check if Stripe is properly configured
+                if not STRIPE_PRICE_ID or STRIPE_PRICE_ID.startswith("price_..."):
+                    logger.warning(f"Stripe not properly configured for {email} - using fallback")
+                    checkout_url = f"{frontend_url}/upgrade"
+                else:
+                    # TODO: Configure Stripe test/live mode based on environment
+                    # For testing, use test mode keys in .env:
+                    # STRIPE_SECRET_KEY=sk_test_...
+                    # STRIPE_PRICE_ID=price_test_...
+                    # For production, use live mode keys:
+                    # STRIPE_SECRET_KEY=sk_live_...
+                    # STRIPE_PRICE_ID=price_live_...
+                    
+                    checkout_session = stripe_client.checkout.Session.create(
+                        payment_method_types=['card'],
+                        line_items=[{
+                            'price': STRIPE_PRICE_ID,
+                            'quantity': 1,
+                        }],
+                        mode='subscription',
+                        success_url=f'{frontend_url}/payment/success?session_id={{CHECKOUT_SESSION_ID}}',
+                        cancel_url=f'{frontend_url}/payment/cancel', 
+                        customer_email=email,
+                        metadata={'user_email': email}
+                    )
+                    
+                    checkout_url = checkout_session.url
+                    stripe_available = True
+                    logger.info(f"Created Stripe checkout session for {email}: {checkout_session.id}")
                 
             except stripe.error.StripeError as e:
                 logger.error(f"Stripe error creating checkout session for {email}: {str(e)}")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Payment system error. Please try again later."
-                )
+                # Don't fail completely - provide fallback
+                frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+                checkout_url = f"{frontend_url}/upgrade"
+                payment_response["message"] = "You've used your free analysis. Please upgrade to continue."
+                payment_response["stripe_unavailable"] = True
+                
             except Exception as e:
                 logger.error(f"Unexpected error creating checkout session for {email}: {str(e)}")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Failed to create payment session. Please try again later."
-                )
+                # Don't fail completely - provide fallback
+                frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+                checkout_url = f"{frontend_url}/upgrade"
+                payment_response["message"] = "You've used your free analysis. Please upgrade to continue."
+                payment_response["stripe_unavailable"] = True
+            
+            # Always return 402 with payment info, even if Stripe failed
+            payment_response["checkout_url"] = checkout_url
+            
+            raise HTTPException(
+                status_code=402,
+                detail=payment_response,
+                headers={"X-Checkout-URL": checkout_url if checkout_url else ""}
+            )
                 
         logger.info("🔍 Step 6 PASSED: Subscription check successful")
         

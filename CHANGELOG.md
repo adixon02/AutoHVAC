@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Robust Paywall Error Handling**
+  - Backend now always returns 402 Payment Required (not 500) when users exceed free report limit
+  - Added Stripe availability checking before attempting to create checkout sessions
+  - Implemented fallback URL to upgrade page when Stripe is unavailable
+  - Frontend catches both 402 and payment-related 500 errors, redirecting to upgrade page
+  - Added intelligent error parsing in fetcher.ts to convert payment-related 500s to 402s
+  - Upgrade page shows friendly "payment system unavailable" UI with retry and support options
+  - Better error messages in billing.py with 503 Service Unavailable when Stripe is down
+
+- **Production URL Configuration**
+  - Added FRONTEND_URL environment variable to render.yaml (https://autohvac.ai)
+  - Fixed all email links, Stripe redirects, and fallback URLs to use production domain
+  - No more localhost:3000 references in production emails or payment flows
+
+- **Payment Success Page**
+  - Fixed redirect to actually work (was conditional on session_id, now always redirects)
+  - Changed redirect destination from homepage (/) to dashboard for better UX
+  - Implemented 5-second countdown timer with visual feedback
+  - Added "Go to Dashboard Now" button for immediate navigation
+  - Updated messaging to accurately reflect where users are being redirected
+
 ### Added
 - **World-Class MVP User Experience Improvements**
   - **Smooth Progress Animation**

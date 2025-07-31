@@ -52,6 +52,8 @@ services:
         value: autohvac-uploads
       - key: FILE_CLEANUP_GRACE_DAYS
         value: "7"
+      - key: FRONTEND_URL
+        value: https://autohvac.ai
 
   - type: worker
     name: autohvac-worker

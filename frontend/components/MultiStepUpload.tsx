@@ -229,13 +229,31 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
     } catch (error: any) {
       console.error('Upload error:', error)
       
-      // Check if it's a payment required error
+      // Check if it's a payment required error (402 or payment-related 500)
       if (error.response?.status === 402) {
         // Store email for the upgrade page
         Cookies.set('user_email', projectData.email, { expires: 30 })
         // Redirect to full-page upgrade experience
         router.push('/upgrade')
         return
+      }
+      
+      // Also check for 500 errors that are payment-related
+      if (error.response?.status === 500) {
+        const errorDetail = error.response?.data?.detail
+        if (errorDetail && (
+          typeof errorDetail === 'string' && (
+            errorDetail.includes('payment') || 
+            errorDetail.includes('Payment') ||
+            errorDetail.includes('stripe') ||
+            errorDetail.includes('Stripe')
+          )
+        )) {
+          // This is likely a payment-related error, redirect to upgrade
+          Cookies.set('user_email', projectData.email, { expires: 30 })
+          router.push('/upgrade')
+          return
+        }
       }
       
       setError(error.message || 'Upload failed. Please try again.')
