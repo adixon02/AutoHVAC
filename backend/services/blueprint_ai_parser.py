@@ -361,14 +361,25 @@ class BlueprintAIParser:
     def _create_blueprint_prompt(self) -> str:
         """Create comprehensive prompt for accurate HVAC data extraction with confidence tracking"""
         return """
-Analyze this architectural floor plan for HVAC load calculations. Be conservative and only report what you can clearly see.
+Analyze this architectural floor plan for HVAC load calculations. Your goal is to identify ALL rooms in the building.
+
+CRITICAL: You MUST identify EVERY room visible on the floor plan, including:
+- All bedrooms (Master, Bedroom 1, 2, 3, etc.)
+- All bathrooms (Full bath, half bath, powder room)
+- Kitchen and dining areas
+- Living spaces (Living room, family room, great room)
+- Utility spaces (Laundry, mudroom, pantry)
+- Storage areas (Closets, storage rooms)
+- Entry areas (Foyer, vestibule)
+- Hallways and corridors
+- Any other labeled spaces
 
 FIRST, look for these orientation indicators:
 - North arrow or compass rose
 - Directional labels (N, S, E, W)
 - Street names or site orientation markers
 
-THEN, identify all rooms with the following details:
+THEN, systematically scan the ENTIRE floor plan and identify ALL rooms with the following details:
 
 {
   "north_arrow_found": false,
@@ -397,10 +408,32 @@ THEN, identify all rooms with the following details:
 }
 
 IMPORTANT INSTRUCTIONS:
-1. Set orientation to "unknown" if no north arrow is found
-2. Only report dimensions you can see or calculate from scale
-3. Set confidence 0.9-1.0 for clearly labeled/dimensioned rooms
-4. Set confidence 0.5-0.8 for partially visible rooms
+1. ROOM DETECTION:
+   - Scan the ENTIRE floor plan systematically from top to bottom
+   - Look for ALL enclosed spaces with labels
+   - Include small rooms (closets, pantries, bathrooms)
+   - Include transitional spaces (hallways, foyers)
+   - If you see a room boundary but no label, infer the room type from context
+   - Common missed rooms: Pantry, Laundry, Mudroom, Closets, Half baths
+   
+2. EXPECTED ROOM COUNTS:
+   - Small homes (1000-1500 sqft): 5-10 rooms
+   - Medium homes (1500-2500 sqft): 8-15 rooms
+   - Large homes (2500+ sqft): 12-25 rooms
+   
+3. ORIENTATION:
+   - Set to "unknown" if no north arrow is found
+   - If found, assign orientations based on wall exposure
+   
+4. DIMENSIONS:
+   - Only report dimensions you can see or calculate from scale
+   - If no dimensions shown, estimate based on typical residential sizes
+   
+5. CONFIDENCE SCORING:
+   - 0.9-1.0: Clearly labeled room with visible dimensions
+   - 0.7-0.8: Clearly labeled room without dimensions
+   - 0.5-0.6: Unlabeled room with clear boundaries
+   - 0.3-0.4: Partially visible or uncertain room
 5. Set confidence 0.0-0.5 for guessed/unclear rooms
 6. Mark dimension_source as:
    - "measured" if dimensions are marked on the plan

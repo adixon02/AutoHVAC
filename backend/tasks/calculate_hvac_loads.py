@@ -38,6 +38,7 @@ from services.error_types import (
     CriticalError, NonCriticalError, AuditError, 
     ValidationError, categorize_exception, log_error_with_context
 )
+from services.blueprint_validation import BlueprintValidationError
 from database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
@@ -278,6 +279,29 @@ def calculate_hvac_loads(
             
             update_progress_sync("blueprint_parsed", 50, f"Successfully parsed {len(blueprint_schema.rooms)} rooms from page {getattr(parsing_metadata, 'selected_page', 1) if parsing_metadata else 1}")
             
+        except BlueprintValidationError as e:
+            # Handle validation errors with user-friendly messaging
+            error_msg = f"Blueprint validation failed: {e.message}"
+            logger.error(f"Blueprint validation error for {project_id}: {error_msg}")
+            audit_data['errors_encountered'].append({
+                'stage': 'blueprint_validation',
+                'error': error_msg,
+                'error_type': 'BlueprintValidationError',
+                'details': e.details,
+                'user_actions': e.user_actions,
+                'can_continue': e.can_continue
+            })
+            
+            # Create user-friendly error message
+            user_message = f"{e.message} Please: {e.user_actions[0] if e.user_actions else 'check your blueprint'}"
+            update_progress_sync("failed", 0, user_message[:200])
+            
+            # Re-raise as ValidationError with full context
+            raise ValidationError(error_msg, {
+                'error_type': 'BlueprintValidationError',
+                'validation_details': e.to_dict(),
+                'parsing_metadata': safe_dict(parsing_metadata) if parsing_metadata else None
+            })
         except BlueprintParsingError as e:
             error_msg = f"Blueprint parsing failed: {str(e)}"
             logger.error(f"Blueprint parsing error for {project_id}: {error_msg}")
@@ -421,7 +445,10 @@ def calculate_hvac_loads(
                 'geometry_confidence': 'high' if parsing_metadata and hasattr(parsing_metadata, 'overall_confidence') and parsing_metadata.overall_confidence > 0.8 else 'medium',
                 'selected_page': getattr(parsing_metadata, 'selected_page', 1) if parsing_metadata else 1,
                 'page_selection_score': getattr(selected_page_analysis, 'score', 0.0) if selected_page_analysis else 0.0,
-                'total_pages_analyzed': len(parsing_metadata.page_analyses) if parsing_metadata and hasattr(parsing_metadata, 'page_analyses') else 1
+                'total_pages_analyzed': len(parsing_metadata.page_analyses) if parsing_metadata and hasattr(parsing_metadata, 'page_analyses') else 1,
+                # Data quality metrics
+                'data_quality_score': getattr(parsing_metadata, 'data_quality_score', None) if parsing_metadata else None,
+                'validation_warnings': getattr(parsing_metadata, 'validation_warnings', []) if parsing_metadata else []
             },
             
             'processing_stages': audit_data['stages_completed'],

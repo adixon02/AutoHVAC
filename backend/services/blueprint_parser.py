@@ -22,6 +22,7 @@ from app.parser.ai_cleanup import cleanup, AICleanupError
 from services.pdf_thread_manager import pdf_thread_manager, PDFDocumentClosedError, PDFProcessingTimeoutError
 from services.pdf_page_analyzer import PDFPageAnalyzer
 from services.blueprint_ai_parser import blueprint_ai_parser, BlueprintAIParsingError
+from services.blueprint_validation import BlueprintValidator, BlueprintValidationError, calculate_data_quality_score
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ class BlueprintParser:
         self.text_parser = TextParser()
         self.geometry_parser = GeometryParser()
         self.page_analyzer = PDFPageAnalyzer(timeout_per_page=30, max_pages=20)
+        self.validator = BlueprintValidator()
         
     def parse_pdf_to_json(
         self, 
@@ -88,6 +90,27 @@ class BlueprintParser:
                     # Log metrics
                     if hasattr(result, 'parsing_metadata'):
                         logger.info(f"[METRICS] AI parsing: {result.parsing_metadata.processing_time_seconds:.2f}s, {len(result.rooms)} rooms found")
+                    
+                    # Validate results
+                    try:
+                        warnings = self.validator.validate_blueprint(result)
+                        quality_score = calculate_data_quality_score(result, warnings)
+                        
+                        # Add validation data to result
+                        result.parsing_metadata.validation_warnings = [w.dict() for w in warnings]
+                        result.parsing_metadata.data_quality_score = quality_score
+                        
+                        logger.info(f"[VALIDATION] Quality score: {quality_score:.0f}, Warnings: {len(warnings)}")
+                        for warning in warnings:
+                            logger.warning(f"[VALIDATION] {warning.warning_type}: {warning.message}")
+                        
+                    except BlueprintValidationError as e:
+                        logger.error(f"[VALIDATION] Critical validation failure: {e.message}")
+                        # Re-raise with parsing context
+                        e.details['parsing_method'] = 'gpt4v'
+                        e.details['filename'] = filename
+                        raise
+                    
                     return result
                 finally:
                     loop.close()
@@ -157,6 +180,26 @@ class BlueprintParser:
             
             logger.info(f"Blueprint parsing completed successfully in {parsing_metadata.processing_time_seconds:.2f}s")
             logger.info(f"Identified {len(rooms)} rooms with overall confidence {parsing_metadata.overall_confidence:.2f}")
+            
+            # Validate results
+            try:
+                warnings = self.validator.validate_blueprint(blueprint_schema)
+                quality_score = calculate_data_quality_score(blueprint_schema, warnings)
+                
+                # Add validation data to metadata
+                parsing_metadata.validation_warnings = [w.dict() for w in warnings]
+                parsing_metadata.data_quality_score = quality_score
+                
+                logger.info(f"[VALIDATION] Quality score: {quality_score:.0f}, Warnings: {len(warnings)}")
+                for warning in warnings:
+                    logger.warning(f"[VALIDATION] {warning.warning_type}: {warning.message}")
+                
+            except BlueprintValidationError as e:
+                logger.error(f"[VALIDATION] Critical validation failure: {e.message}")
+                # Re-raise with parsing context
+                e.details['parsing_method'] = 'traditional'
+                e.details['filename'] = filename
+                raise
             
             return blueprint_schema
             

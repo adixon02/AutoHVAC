@@ -86,6 +86,10 @@ class ParsingMetadata(BaseModel):
     overall_confidence: float = Field(..., description="Overall parsing confidence 0-1")
     geometry_confidence: float = Field(..., description="Geometry parsing confidence 0-1")
     text_confidence: float = Field(..., description="Text parsing confidence 0-1")
+    
+    # Data quality validation
+    validation_warnings: Optional[List[Dict[str, Any]]] = Field(default=None, description="Validation warnings")
+    data_quality_score: Optional[float] = Field(default=None, description="Overall data quality score 0-100")
 
 
 class Room(BaseModel):

@@ -219,11 +219,23 @@ Return a JSON object matching this exact schema:
 
 ANALYSIS GUIDELINES:
 
-1. ROOM IDENTIFICATION:
+1. ROOM IDENTIFICATION (CRITICAL - FIND ALL ROOMS):
    - Match text labels with geometric rectangles based on proximity
    - Common room types: Living Room, Kitchen, Master Bedroom, Bedroom, Bathroom, Dining Room, Office, Utility Room
+   - IMPORTANT: Also look for: Pantry, Laundry, Mudroom, Entry/Foyer, Hallway, Closets, Storage, Half Bath
    - If a rectangle has no nearby label, infer room type from size and position
-   - Typical room sizes: Bedrooms (100-300 sqft), Living rooms (200-500 sqft), Kitchens (100-250 sqft), Bathrooms (30-100 sqft)
+   - Small unlabeled rooms near kitchen = likely pantry
+   - Small unlabeled rooms near bedrooms = likely closets
+   - Small rooms with plumbing notation = likely bathrooms
+   - Typical room sizes: 
+     * Bedrooms: 100-300 sqft
+     * Living rooms: 200-500 sqft
+     * Kitchens: 100-250 sqft
+     * Full Bathrooms: 40-100 sqft
+     * Half Baths: 20-40 sqft
+     * Closets: 15-50 sqft
+     * Pantries: 20-60 sqft
+     * Laundry: 30-80 sqft
 
 2. DIMENSIONS & AREA:
    - Convert page coordinates to real-world feet using scale_factor if available
@@ -247,9 +259,13 @@ ANALYSIS GUIDELINES:
    - If uncertain, assume 1 story
 
 6. VALIDATION:
-   - Ensure all rooms have positive area > 20 sqft
+   - Ensure all rooms have positive area > 15 sqft (allows for small closets)
    - Total sqft should be reasonable for residential (500-5000 sqft typical)
-   - Room count should be reasonable (3-20 rooms typical)
+   - Room count expectations:
+     * 1000-1500 sqft: 5-10 rooms minimum
+     * 1500-2500 sqft: 8-15 rooms minimum
+     * 2500+ sqft: 12-25 rooms minimum
+   - If you find fewer rooms than expected, you likely missed some
 
 RESPONSE REQUIREMENTS:
 - Return ONLY valid JSON, no additional text or explanation
