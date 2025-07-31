@@ -19,7 +19,7 @@ from services.database_rate_limiter import database_rate_limiter as rate_limiter
 from core.email import email_service
 from models.schemas import JobResponse, PaymentRequiredResponse, UploadResponse
 from models.enums import DuctConfig, HeatingFuel
-from core.stripe_config import get_stripe_client, STRIPE_PRICE_ID
+from core.stripe_config import STRIPE_PRICE_ID
 from app.config import DEBUG, DEV_VERIFIED_EMAILS
 
 logger = logging.getLogger(__name__)
@@ -314,7 +314,6 @@ async def upload_blueprint(
             stripe_available = False
             
             try:
-                stripe_client = get_stripe_client()
                 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
                 
                 # Check if Stripe is properly configured
@@ -322,15 +321,11 @@ async def upload_blueprint(
                     logger.warning(f"Stripe not properly configured for {email} - using fallback")
                     checkout_url = f"{frontend_url}/upgrade"
                 else:
-                    # TODO: Configure Stripe test/live mode based on environment
-                    # For testing, use test mode keys in .env:
-                    # STRIPE_SECRET_KEY=sk_test_...
-                    # STRIPE_PRICE_ID=price_test_...
-                    # For production, use live mode keys:
-                    # STRIPE_SECRET_KEY=sk_live_...
-                    # STRIPE_PRICE_ID=price_live_...
+                    # Log Stripe configuration for debugging
+                    stripe_mode = os.getenv("STRIPE_MODE", "test")
+                    logger.info(f"Creating Stripe checkout session - Mode: {stripe_mode}, Price ID: {STRIPE_PRICE_ID[:10]}..., API Key: {stripe.api_key[:10] if stripe.api_key else 'None'}...")
                     
-                    checkout_session = stripe_client.checkout.Session.create(
+                    checkout_session = stripe.checkout.Session.create(
                         payment_method_types=['card'],
                         line_items=[{
                             'price': STRIPE_PRICE_ID,

@@ -4,7 +4,7 @@ import stripe
 import os
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.stripe_config import get_stripe_client, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID, validate_stripe_config
+from core.stripe_config import STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID, validate_stripe_config
 from services.user_service import user_service
 from database import get_async_session
 from models.schemas import SubscribeRequest, SubscribeResponse
@@ -35,9 +35,8 @@ async def create_subscription(
             )
         
         # Log Stripe configuration (masked for security)
-        logger.info(f"Stripe configuration check - Price ID: {STRIPE_PRICE_ID[:10]}..., API Key: {stripe.api_key[:10] if stripe.api_key else 'None'}...")
-        
-        stripe_client = get_stripe_client()
+        stripe_mode = os.getenv("STRIPE_MODE", "test")
+        logger.info(f"Stripe configuration check - Mode: {stripe_mode}, Price ID: {STRIPE_PRICE_ID[:10]}..., API Key: {stripe.api_key[:10] if stripe.api_key else 'None'}...")
         
         # Get environment URLs or use defaults
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
@@ -47,7 +46,7 @@ async def create_subscription(
         logger.info(f"Creating Stripe checkout session with URLs - Success: {success_url}, Cancel: {cancel_url}")
         
         # Create Stripe checkout session
-        checkout_session = stripe_client.checkout.Session.create(
+        checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
                 'price': STRIPE_PRICE_ID,
