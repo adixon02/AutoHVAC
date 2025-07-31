@@ -31,22 +31,27 @@ export default function Upgrade() {
     try {
       const response = await apiHelpers.createCheckoutSession(userEmail)
       
-      if (response.sessionUrl) {
+      if (response.checkout_url) {
         // Redirect to Stripe checkout
-        window.location.href = response.sessionUrl
+        window.location.href = response.checkout_url
       } else {
+        console.error('Response received:', response)
         throw new Error('No checkout URL received')
       }
     } catch (err: any) {
       console.error('Upgrade error:', err)
+      console.error('Error details:', err.response?.data)
       
       // Check if this is a Stripe availability issue
-      if (err.message?.toLowerCase().includes('stripe') || 
-          err.message?.toLowerCase().includes('payment system')) {
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to start upgrade process'
+      
+      if (errorMessage.toLowerCase().includes('stripe') || 
+          errorMessage.toLowerCase().includes('payment system') ||
+          errorMessage.toLowerCase().includes('authentication')) {
         setStripeUnavailable(true)
-        setError('Our payment system is temporarily unavailable. Please try again later or contact support.')
+        setError(errorMessage)
       } else {
-        setError(err.message || 'Failed to start upgrade process')
+        setError(errorMessage)
       }
       
       setIsLoading(false)

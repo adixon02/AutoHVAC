@@ -18,15 +18,19 @@ export default function PaywallModal({ isOpen, onClose, userEmail }: PaywallModa
     try {
       const response = await apiHelpers.createCheckoutSession(userEmail)
       
-      if (response.sessionUrl) {
+      if (response.checkout_url) {
         // Redirect to Stripe checkout
-        window.location.href = response.sessionUrl
+        window.location.href = response.checkout_url
       } else {
+        console.error('Response received:', response)
         throw new Error('No checkout URL received')
       }
     } catch (err: any) {
       console.error('Upgrade error:', err)
-      setError(err.message || 'Failed to start upgrade process')
+      console.error('Error details:', err.response?.data)
+      
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to start upgrade process'
+      setError(errorMessage)
       setIsLoading(false)
     }
   }

@@ -4,7 +4,7 @@ import stripe
 import os
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.stripe_config import get_stripe_client, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID
+from core.stripe_config import get_stripe_client, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_ID, validate_stripe_config
 from services.user_service import user_service
 from database import get_async_session
 from models.schemas import SubscribeRequest, SubscribeResponse
@@ -20,16 +20,22 @@ async def create_subscription(
     session: AsyncSession = Depends(get_async_session)
 ):
     try:
+        logger.info(f"Creating subscription for email: {request.email}")
+        
         # Ensure user exists in our database
         await user_service.get_or_create_user(request.email, session)
         
-        # Check if Stripe is properly configured
-        if not STRIPE_PRICE_ID or STRIPE_PRICE_ID.startswith("price_..."):
-            logger.warning(f"Stripe not properly configured for subscription request from {request.email}")
+        # Validate Stripe configuration
+        config_issues = validate_stripe_config()
+        if config_issues:
+            logger.error(f"Stripe configuration issues found: {config_issues}")
             raise HTTPException(
                 status_code=503,
-                detail="Payment system is not configured. Please contact support for assistance."
+                detail=f"Payment system configuration error: {', '.join(config_issues)}. Please contact support."
             )
+        
+        # Log Stripe configuration (masked for security)
+        logger.info(f"Stripe configuration check - Price ID: {STRIPE_PRICE_ID[:10]}..., API Key: {stripe.api_key[:10] if stripe.api_key else 'None'}...")
         
         stripe_client = get_stripe_client()
         
@@ -37,6 +43,8 @@ async def create_subscription(
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         success_url = f"{frontend_url}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
         cancel_url = f"{frontend_url}/payment/cancel"
+        
+        logger.info(f"Creating Stripe checkout session with URLs - Success: {success_url}, Cancel: {cancel_url}")
         
         # Create Stripe checkout session
         checkout_session = stripe_client.checkout.Session.create(
@@ -57,24 +65,37 @@ async def create_subscription(
             automatic_tax={'enabled': False}
         )
         
-        logger.info(f"Created Stripe checkout session for {request.email}: {checkout_session.id}")
+        logger.info(f"Successfully created Stripe checkout session for {request.email}: {checkout_session.id}")
+        logger.info(f"Checkout URL: {checkout_session.url}")
         
-        return SubscribeResponse(session_url=checkout_session.url)
+        return SubscribeResponse(checkout_url=checkout_session.url)
         
+    except stripe.error.AuthenticationError as e:
+        logger.error(f"Stripe authentication error: {str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail="Payment system authentication failed. Please contact support."
+        )
+    except stripe.error.InvalidRequestError as e:
+        logger.error(f"Stripe invalid request error: {str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Invalid payment configuration: {str(e)}. Please contact support."
+        )
     except stripe.error.StripeError as e:
         logger.error(f"Stripe error creating checkout session: {str(e)}")
         raise HTTPException(
             status_code=503,
-            detail="Payment system temporarily unavailable. Please try again later."
+            detail=f"Payment system error: {str(e)}. Please try again later."
         )
     except HTTPException:
         # Re-raise HTTPExceptions as-is
         raise
     except Exception as e:
-        logger.error(f"Error creating checkout session: {str(e)}")
+        logger.error(f"Unexpected error creating checkout session: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail="Failed to create checkout session. Please try again later."
+            detail=f"Failed to create checkout session: {str(e)}"
         )
 
 @router.post("/webhook")

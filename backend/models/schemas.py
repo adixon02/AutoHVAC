@@ -43,11 +43,11 @@ class SubscribeRequest(BaseModel):
     email: EmailStr
 
 class SubscribeResponse(BaseModel):
-    session_url: str
+    checkout_url: str
 
 class UploadRequest(BaseModel):
     email: EmailStr
 
 class PaymentRequiredResponse(BaseModel):
     message: str
-    session_url: str
+    checkout_url: str
