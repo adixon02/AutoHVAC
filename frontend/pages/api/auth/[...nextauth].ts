@@ -18,7 +18,7 @@ export const authOptions: NextAuthOptions = {
         },
       },
       from: process.env.EMAIL_FROM || 'noreply@autohvac.com',
-      async sendVerificationRequest({ identifier: email, url, provider }) {
+      async sendVerificationRequest({ identifier: email, url, provider }: any) {
         const transport = createTransport(provider.server)
         const result = await transport.sendMail({
           to: email,
@@ -54,45 +54,45 @@ export const authOptions: NextAuthOptions = {
   
   adapter: {
     // Simple in-memory adapter for MVP
-    async createUser(user) {
+    async createUser(user: any) {
       const id = crypto.randomUUID()
       users[id] = { ...user, id }
       return users[id]
     },
-    async getUser(id) {
+    async getUser(id: any) {
       return users[id] || null
     },
-    async getUserByEmail(email) {
+    async getUserByEmail(email: any) {
       return Object.values(users).find((u: any) => u.email === email) || null
     },
-    async getUserByAccount({ providerAccountId }) {
+    async getUserByAccount({ providerAccountId }: any) {
       return users[providerAccountId] || null
     },
-    async updateUser(user) {
+    async updateUser(user: any) {
       users[user.id] = user
       return user
     },
-    async linkAccount(account) {
+    async linkAccount(account: any) {
       return account
     },
-    async createSession(session) {
+    async createSession(session: any) {
       return session
     },
-    async getSessionAndUser(sessionToken) {
+    async getSessionAndUser(sessionToken: any) {
       // For magic links, we don't need complex session management
       return null
     },
-    async updateSession(session) {
+    async updateSession(session: any) {
       return session
     },
-    async deleteSession(sessionToken) {
+    async deleteSession(sessionToken: any) {
       // No-op for in-memory
     },
-    async createVerificationToken(verificationToken) {
+    async createVerificationToken(verificationToken: any) {
       verificationTokens[verificationToken.identifier] = verificationToken
       return verificationToken
     },
-    async useVerificationToken({ identifier, token }) {
+    async useVerificationToken({ identifier, token }: any) {
       const stored = verificationTokens[identifier]
       if (stored && stored.token === token && stored.expires > new Date()) {
         delete verificationTokens[identifier]
@@ -114,14 +114,14 @@ export const authOptions: NextAuthOptions = {
   },
   
   callbacks: {
-    async session({ session, token }) {
+    async session({ session, token }: any) {
       if (session?.user?.email) {
         // Add user email to session
         session.user.email = token.email as string
       }
       return session
     },
-    async jwt({ token, user }) {
+    async jwt({ token, user }: any) {
       if (user) {
         token.email = user.email
       }
