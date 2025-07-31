@@ -11,6 +11,15 @@ from .cltd_clf import (
     calculate_window_solar_load, calculate_window_conduction_load,
     calculate_internal_load_clf, get_diversity_factor
 )
+from .infiltration import (
+    convert_cfm50_to_natural, convert_ach50_to_cfm50, 
+    estimate_infiltration_by_quality, calculate_infiltration_loads,
+    ConstructionQuality, InfiltrationMethod
+)
+from .thermal_mass import (
+    classify_thermal_mass, apply_thermal_mass_to_loads,
+    MassLevel, calculate_mass_factor
+)
 from .envelope_extractor import EnvelopeExtraction
 from .audit_tracker import get_audit_tracker, create_calculation_audit
 import math
@@ -18,6 +27,40 @@ import time
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _get_humidity_ratio(temp_f: float, rh_percent: float) -> float:
+    """
+    Calculate humidity ratio (lb water/lb dry air) from temperature and RH
+    
+    Simplified psychrometric calculation for HVAC loads
+    
+    Args:
+        temp_f: Temperature in °F
+        rh_percent: Relative humidity in percent (0-100)
+        
+    Returns:
+        Humidity ratio in lb water/lb dry air
+    """
+    # Convert to Celsius for calculation
+    temp_c = (temp_f - 32) * 5/9
+    
+    # Saturation vapor pressure (kPa) - Antoine equation
+    if temp_c >= 0:
+        p_sat = 0.61078 * math.exp((17.27 * temp_c) / (temp_c + 237.3))
+    else:
+        p_sat = 0.61078 * math.exp((21.875 * temp_c) / (temp_c + 265.5))
+    
+    # Actual vapor pressure
+    p_vapor = p_sat * rh_percent / 100
+    
+    # Atmospheric pressure (assume sea level)
+    p_atm = 101.325  # kPa
+    
+    # Humidity ratio
+    w = 0.622 * p_vapor / (p_atm - p_vapor)
+    
+    return w
 
 
 # Legacy climate zone data - now replaced by climate_data service
@@ -289,7 +332,65 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     equipment_load = calculate_internal_load_clf(equipment_heat, 'equipment')
     cooling_load += equipment_load
     
-    # 6. Ventilation load (ASHRAE 62.2)
+    # 6. Infiltration cooling load (sensible + latent)
+    # Note: infiltration_cfm is calculated in the heating section below, but we need it here too
+    # This is a temporary calculation that will be overwritten with the actual value
+    
+    # Calculate infiltration CFM (will be recalculated in heating section)
+    room_volume = room.area * ceiling_height
+    if envelope_data and envelope_data.infiltration_confidence >= 0.6:
+        if envelope_data.blower_door_result:
+            blower_result = envelope_data.blower_door_result.strip().upper()
+            if "ACH50" in blower_result:
+                ach50 = float(blower_result.replace("ACH50", "").strip())
+                cfm50 = convert_ach50_to_cfm50(ach50, room_volume)
+            elif "CFM50" in blower_result:
+                cfm50 = float(blower_result.replace("CFM50", "").strip())
+            else:
+                cfm50 = None
+            
+            if cfm50:
+                temp_infiltration_cfm = convert_cfm50_to_natural(
+                    cfm50 * (room.area / room.area),
+                    climate_data['climate_zone'],
+                    stories=1,
+                    shielding="average"
+                )
+            else:
+                quality_map = {
+                    "tight": ConstructionQuality.TIGHT,
+                    "code": ConstructionQuality.AVERAGE,
+                    "loose": ConstructionQuality.LOOSE
+                }
+                quality = quality_map.get(envelope_data.infiltration_class, ConstructionQuality.AVERAGE)
+                temp_infiltration_cfm, _ = estimate_infiltration_by_quality(
+                    quality, room_volume, climate_data['climate_zone']
+                )
+        else:
+            quality_map = {
+                "tight": ConstructionQuality.TIGHT,
+                "code": ConstructionQuality.AVERAGE,
+                "loose": ConstructionQuality.LOOSE
+            }
+            quality = quality_map.get(envelope_data.infiltration_class, ConstructionQuality.AVERAGE)
+            temp_infiltration_cfm, _ = estimate_infiltration_by_quality(
+                quality, room_volume, climate_data['climate_zone']
+            )
+    else:
+        ach = construction_values.get('infiltration_ach', 0.5)
+        temp_infiltration_cfm = (room_volume * ach) / 60
+    
+    # Get humidity ratios for latent calculation
+    outdoor_humidity_ratio = _get_humidity_ratio(outdoor_cooling_temp, climate_data.get('cooling_rh_1', 50))
+    indoor_humidity_ratio = _get_humidity_ratio(indoor_temp, 50)  # Assume 50% RH indoor
+    
+    infiltration_cooling_loads = calculate_infiltration_loads(
+        temp_infiltration_cfm, outdoor_cooling_temp, indoor_temp,
+        outdoor_humidity_ratio, indoor_humidity_ratio
+    )
+    cooling_load += infiltration_cooling_loads['total']
+    
+    # 7. Ventilation load (ASHRAE 62.2)
     ventilation = _calculate_ventilation_load(
         room, 
         {'heating_db_99': outdoor_heating_temp, 'cooling_db_1': outdoor_cooling_temp, 'zone': climate_data['climate_zone']}, 
@@ -314,25 +415,84 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     if window_area > 0:
         heating_load += window_u_factor * window_area * (indoor_temp - outdoor_heating_temp)
     
-    # Infiltration heating load - use envelope data if available
-    if envelope_data and envelope_data.infiltration_confidence >= 0.6:
-        # Map infiltration class to ACH
-        infiltration_class_to_ach = {
-            "tight": 0.25,
-            "code": 0.35,
-            "loose": 0.50
-        }
-        ach = infiltration_class_to_ach.get(envelope_data.infiltration_class, 0.35)
-    else:
-        ach = construction_values['infiltration_ach']
-    
+    # Infiltration heating load - enhanced with blower door support
     room_volume = room.area * ceiling_height
-    infiltration_cfm = (room_volume * ach) / 60
-    infiltration_heating = infiltration_cfm * 1.08 * (indoor_temp - outdoor_heating_temp)
+    
+    if envelope_data and envelope_data.infiltration_confidence >= 0.6:
+        # Check if blower door results are available
+        if envelope_data.blower_door_result:
+            # Parse blower door result (e.g., "3 ACH50" or "1200 CFM50")
+            blower_result = envelope_data.blower_door_result.strip().upper()
+            if "ACH50" in blower_result:
+                ach50 = float(blower_result.replace("ACH50", "").strip())
+                cfm50 = convert_ach50_to_cfm50(ach50, room_volume)
+            elif "CFM50" in blower_result:
+                cfm50 = float(blower_result.replace("CFM50", "").strip())
+            else:
+                # Fallback to quality-based estimate
+                cfm50 = None
+            
+            if cfm50:
+                # Convert to natural infiltration using climate-specific factors
+                infiltration_cfm = convert_cfm50_to_natural(
+                    cfm50 * (room.area / room.area),  # Proportion for this room
+                    climate_data['climate_zone'],
+                    stories=1,  # Could be enhanced with building data
+                    shielding="average"
+                )
+            else:
+                # Use quality-based estimate
+                quality_map = {
+                    "tight": ConstructionQuality.TIGHT,
+                    "code": ConstructionQuality.AVERAGE,
+                    "loose": ConstructionQuality.LOOSE
+                }
+                quality = quality_map.get(envelope_data.infiltration_class, ConstructionQuality.AVERAGE)
+                infiltration_cfm, ach_natural = estimate_infiltration_by_quality(
+                    quality, room_volume, climate_data['climate_zone']
+                )
+        else:
+            # Use infiltration class
+            quality_map = {
+                "tight": ConstructionQuality.TIGHT,
+                "code": ConstructionQuality.AVERAGE,
+                "loose": ConstructionQuality.LOOSE
+            }
+            quality = quality_map.get(envelope_data.infiltration_class, ConstructionQuality.AVERAGE)
+            infiltration_cfm, ach_natural = estimate_infiltration_by_quality(
+                quality, room_volume, climate_data['climate_zone']
+            )
+    else:
+        # Use construction vintage defaults
+        ach = construction_values.get('infiltration_ach', 0.5)
+        infiltration_cfm = (room_volume * ach) / 60
+    
+    # Calculate infiltration heating load
+    infiltration_loads = calculate_infiltration_loads(
+        infiltration_cfm, outdoor_heating_temp, indoor_temp
+    )
+    infiltration_heating = infiltration_loads['sensible']
     heating_load += infiltration_heating
     
     # Add ventilation heating load
     heating_load += ventilation['heating']
+    
+    # Apply thermal mass adjustments
+    if envelope_data:
+        # Classify thermal mass level
+        mass_level = classify_thermal_mass(
+            wall_type=envelope_data.wall_construction,
+            floor_type=envelope_data.floor_construction,
+            exposed_slab=envelope_data.exposed_slab,
+            interior_mass_walls=envelope_data.thermal_mass_walls
+        )
+        
+        # Apply mass effects to loads
+        cooling_load, heating_load = apply_thermal_mass_to_loads(
+            cooling_load, heating_load, mass_level, room_type
+        )
+        
+        logger.info(f"Room {room.name}: Applied {mass_level.value} thermal mass adjustments")
     
     # Apply corner room and thermal exposure multipliers
     if hasattr(room, 'source_elements'):
@@ -367,7 +527,8 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
             'wall_conduction': wall_load if 'wall_load' in locals() and wall_area > 0 else 0,
             'roof_conduction': roof_load if 'roof_load' in locals() and roof_area > 0 else 0,
             'window_conduction': window_u_factor * window_area * (indoor_temp - outdoor_heating_temp) if window_area > 0 else 0,
-            'infiltration': infiltration_heating,
+            'infiltration_sensible': infiltration_heating,
+            'infiltration_cfm': infiltration_cfm if 'infiltration_cfm' in locals() else temp_infiltration_cfm,
             'ventilation': ventilation['heating'],
             'subtotal': heating_load / (factors.get('heating', 1.0) if 'factors' in locals() else 1.0),
             'multipliers_applied': []
@@ -380,7 +541,11 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
             'internal_people': people_load if 'people_load' in locals() else 0,
             'internal_lighting': lighting_load if 'lighting_load' in locals() else 0,
             'internal_equipment': equipment_load if 'equipment_load' in locals() else 0,
-            'ventilation': ventilation['cooling'],
+            'infiltration_sensible': infiltration_cooling_loads['sensible'] if 'infiltration_cooling_loads' in locals() else 0,
+            'infiltration_latent': infiltration_cooling_loads['latent'] if 'infiltration_cooling_loads' in locals() else 0,
+            'infiltration_cfm': infiltration_cfm if 'infiltration_cfm' in locals() else temp_infiltration_cfm,
+            'ventilation_sensible': ventilation.get('sensible_cooling', ventilation['cooling']),
+            'ventilation_latent': ventilation.get('latent_cooling', 0),
             'subtotal': cooling_load / (factors.get('cooling', 1.0) if 'factors' in locals() else 1.0),
             'multipliers_applied': []
         }
@@ -524,15 +689,29 @@ def calculate_manualj_with_audit(schema: BlueprintSchema, duct_config: str = "du
     # Enhanced result validation for ACCA compliance
     _validate_calculation_results(result, schema, climate_data)
     
-    # Add audit information to results
+    # Add comprehensive audit information to results
     calculation_time = time.time() - calculation_start
+    
+    # Calculate load breakdown summary
+    load_breakdown_summary = _calculate_load_breakdown_summary(result)
+    
     result['audit_information'] = {
         'calculation_inputs': calculation_inputs,
         'calculation_time_seconds': calculation_time,
         'acca_compliance_version': 'Manual J 8th Edition',
         'validation_passed': True,
         'data_quality_checks': _perform_data_quality_checks(schema, result),
-        'calculation_warnings': _check_calculation_warnings(result, schema)
+        'calculation_warnings': _check_calculation_warnings(result, schema),
+        'load_summary': load_breakdown_summary,
+        'assumptions_made': _get_calculation_assumptions(envelope_data, construction_vintage),
+        'climate_data_source': climate_data.get('data_source', 'ASHRAE/IECC Database'),
+        'calculation_methods': {
+            'envelope_loads': 'Enhanced CLTD/CLF' if envelope_data else 'Simplified factors',
+            'infiltration': 'Blower door conversion' if envelope_data and envelope_data.blower_door_result else 'ACH estimate',
+            'ventilation': 'ASHRAE 62.2-2019',
+            'internal_gains': 'ACCA Manual J defaults',
+            'diversity': 'ACCA Manual J Table 2A'
+        }
     }
     
     logger.info(f"ACCA Manual J calculation completed in {calculation_time:.2f}s")
@@ -1061,7 +1240,7 @@ def calculate_loads(rooms: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _validate_calculation_results(result: Dict[str, Any], schema: BlueprintSchema, climate_data: Dict) -> None:
     """
-    Validate Manual J calculation results for ACCA compliance
+    Enhanced Manual J calculation validation for ACCA compliance
     
     Args:
         result: Calculation results to validate
@@ -1082,29 +1261,67 @@ def _validate_calculation_results(result: Dict[str, Any], schema: BlueprintSchem
     cooling_total = result['cooling_total']
     total_sqft = schema.sqft_total
     
-    # ACCA Manual J typical load ranges: 15-80 BTU/hr/sqft
+    # ACCA Manual J typical load ranges by climate zone
+    climate_zone = climate_data.get('climate_zone', '4A')
+    zone_num = int(climate_zone[0]) if climate_zone[0].isdigit() else 4
+    
+    # Expected ranges by climate zone (BTU/hr/sqft)
+    heating_ranges = {
+        1: (5, 25),    # Very hot
+        2: (10, 35),   # Hot
+        3: (15, 45),   # Warm
+        4: (20, 55),   # Mixed
+        5: (25, 65),   # Cool
+        6: (30, 75),   # Cold
+        7: (35, 85),   # Very cold
+        8: (40, 100)   # Subarctic
+    }
+    
+    cooling_ranges = {
+        1: (25, 50),   # Very hot
+        2: (20, 45),   # Hot
+        3: (15, 40),   # Warm
+        4: (12, 35),   # Mixed
+        5: (10, 30),   # Cool
+        6: (8, 25),    # Cold
+        7: (5, 20),    # Very cold
+        8: (3, 15)     # Subarctic
+    }
+    
+    heating_min, heating_max = heating_ranges.get(zone_num, (15, 80))
+    cooling_min, cooling_max = cooling_ranges.get(zone_num, (10, 40))
+    
     heating_per_sqft = heating_total / total_sqft if total_sqft > 0 else 0
     cooling_per_sqft = cooling_total / total_sqft if total_sqft > 0 else 0
     
-    if not (5 <= heating_per_sqft <= 120):
-        logger.warning(f"Heating load outside typical range: {heating_per_sqft:.1f} BTU/hr/sqft")
+    # Enhanced validation with climate-specific ranges
+    if not (heating_min <= heating_per_sqft <= heating_max * 1.2):  # Allow 20% overage
+        logger.warning(f"Heating load outside climate zone {climate_zone} range: {heating_per_sqft:.1f} BTU/hr/sqft (expected {heating_min}-{heating_max})")
     
-    if not (5 <= cooling_per_sqft <= 100):
-        logger.warning(f"Cooling load outside typical range: {cooling_per_sqft:.1f} BTU/hr/sqft")
+    if not (cooling_min <= cooling_per_sqft <= cooling_max * 1.2):
+        logger.warning(f"Cooling load outside climate zone {climate_zone} range: {cooling_per_sqft:.1f} BTU/hr/sqft (expected {cooling_min}-{cooling_max})")
     
     # Validate zone-level calculations
     total_zone_heating = sum(zone['heating_btu'] for zone in result['zones'])
     total_zone_cooling = sum(zone['cooling_btu'] for zone in result['zones'])
     
-    # Allow small discrepancies due to rounding and system factors
-    heating_diff_pct = abs(total_zone_heating - heating_total) / heating_total * 100
-    cooling_diff_pct = abs(total_zone_cooling - cooling_total) / cooling_total * 100
+    # Check for system factors and diversity
+    design_params = result.get('design_parameters', {})
+    expected_heating = total_zone_heating * design_params.get('duct_loss_factor', 1.0) * design_params.get('safety_factor', 1.0)
+    expected_cooling = total_zone_cooling * design_params.get('duct_loss_factor', 1.0) * design_params.get('safety_factor', 1.0) * design_params.get('diversity_factor', 1.0)
     
-    if heating_diff_pct > 25:  # Allow up to 25% difference for system factors
+    heating_diff_pct = abs(expected_heating - heating_total) / heating_total * 100 if heating_total > 0 else 0
+    cooling_diff_pct = abs(expected_cooling - cooling_total) / cooling_total * 100 if cooling_total > 0 else 0
+    
+    if heating_diff_pct > 5:  # Tighter tolerance with proper calculation
         logger.warning(f"Zone heating totals don't match system total: {heating_diff_pct:.1f}% difference")
     
-    if cooling_diff_pct > 25:
+    if cooling_diff_pct > 5:
         logger.warning(f"Zone cooling totals don't match system total: {cooling_diff_pct:.1f}% difference")
+    
+    # Additional validation checks
+    _validate_room_loads(result['zones'], climate_zone)
+    _validate_equipment_sizing(result, total_sqft)
 
 
 def _perform_data_quality_checks(schema: BlueprintSchema, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -1184,3 +1401,206 @@ def _check_calculation_warnings(result: Dict[str, Any], schema: BlueprintSchema)
         warnings.append("No duct losses applied - verify duct configuration")
     
     return warnings
+
+
+def _validate_room_loads(zones: List[Dict], climate_zone: str) -> None:
+    """
+    Validate individual room loads for reasonableness
+    
+    Args:
+        zones: List of room/zone data
+        climate_zone: IECC climate zone
+    """
+    for zone in zones:
+        room_name = zone.get('name', 'Unknown')
+        room_type = zone.get('room_type', 'other')
+        area = zone.get('area', 0)
+        heating_load = zone.get('heating_btu', 0)
+        cooling_load = zone.get('cooling_btu', 0)
+        
+        if area <= 0:
+            logger.warning(f"Room {room_name}: Invalid area ({area} sqft)")
+            continue
+        
+        # Check load density
+        heating_density = heating_load / area
+        cooling_density = cooling_load / area
+        
+        # Room-type specific validation
+        expected_ranges = {
+            'kitchen': {'heating': (30, 100), 'cooling': (40, 120)},  # Higher due to equipment
+            'bathroom': {'heating': (40, 120), 'cooling': (30, 80)},  # Higher heating, exhaust
+            'bedroom': {'heating': (15, 60), 'cooling': (15, 60)},    # Standard
+            'living': {'heating': (20, 70), 'cooling': (20, 80)},     # More windows typically
+            'dining': {'heating': (20, 70), 'cooling': (20, 70)},     # Standard
+            'office': {'heating': (20, 60), 'cooling': (25, 90)},     # Equipment loads
+            'utility': {'heating': (10, 50), 'cooling': (20, 100)},   # Equipment varies
+            'other': {'heating': (15, 80), 'cooling': (15, 80)}       # Generic
+        }
+        
+        h_min, h_max = expected_ranges.get(room_type, expected_ranges['other'])['heating']
+        c_min, c_max = expected_ranges.get(room_type, expected_ranges['other'])['cooling']
+        
+        if not (h_min <= heating_density <= h_max * 1.5):  # Allow 50% overage
+            logger.warning(f"Room {room_name} ({room_type}): Unusual heating load density {heating_density:.1f} BTU/hr/sqft")
+        
+        if not (c_min <= cooling_density <= c_max * 1.5):
+            logger.warning(f"Room {room_name} ({room_type}): Unusual cooling load density {cooling_density:.1f} BTU/hr/sqft")
+        
+        # Check if breakdown is available for detailed validation
+        if 'load_breakdown' in zone:
+            _validate_load_components(zone, room_name)
+
+
+def _validate_load_components(zone: Dict, room_name: str) -> None:
+    """
+    Validate individual load components for a room
+    
+    Args:
+        zone: Room data with load breakdown
+        room_name: Room name for logging
+    """
+    breakdown = zone.get('load_breakdown', {})
+    heating_components = breakdown.get('heating', {})
+    cooling_components = breakdown.get('cooling', {})
+    
+    # Check for negative loads
+    for component, value in heating_components.items():
+        if isinstance(value, (int, float)) and value < 0:
+            logger.warning(f"Room {room_name}: Negative heating component {component}: {value}")
+    
+    for component, value in cooling_components.items():
+        if isinstance(value, (int, float)) and value < 0:
+            logger.warning(f"Room {room_name}: Negative cooling component {component}: {value}")
+    
+    # Validate infiltration CFM if present
+    infiltration_cfm = cooling_components.get('infiltration_cfm', 0)
+    if infiltration_cfm > 0:
+        room_volume = zone.get('area', 100) * 9  # Assume 9ft ceiling
+        ach = (infiltration_cfm * 60) / room_volume
+        if ach > 2.0:
+            logger.warning(f"Room {room_name}: High infiltration rate {ach:.1f} ACH")
+
+
+def _validate_equipment_sizing(result: Dict, total_sqft: float) -> None:
+    """
+    Validate equipment sizing recommendations
+    
+    Args:
+        result: Calculation results
+        total_sqft: Total building area
+    """
+    equipment = result.get('equipment_recommendations', {})
+    cooling_tons = result.get('cooling_total', 0) / 12000
+    
+    # Check tons per square foot
+    tons_per_sqft = cooling_tons / total_sqft if total_sqft > 0 else 0
+    sqft_per_ton = total_sqft / cooling_tons if cooling_tons > 0 else 0
+    
+    # Typical ranges
+    if sqft_per_ton < 400:
+        logger.warning(f"Equipment may be oversized: {sqft_per_ton:.0f} sqft/ton (typical: 500-800)")
+    elif sqft_per_ton > 1200:
+        logger.warning(f"Equipment may be undersized: {sqft_per_ton:.0f} sqft/ton (typical: 500-800)")
+    
+    # Validate size options
+    size_options = equipment.get('size_options', [])
+    for option in size_options:
+        manual_s_rating = option.get('manual_s_rating', 'Unknown')
+        if manual_s_rating == 'Poor':
+            capacity = option.get('capacity_tons', 0)
+            logger.warning(f"Equipment option {capacity} tons has poor Manual S rating")
+
+
+def _calculate_load_breakdown_summary(result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Calculate summary of load components across all zones
+    
+    Args:
+        result: Calculation results with zones
+        
+    Returns:
+        Dict with load component percentages
+    """
+    # Initialize totals
+    heating_components = {}
+    cooling_components = {}
+    
+    # Sum up all components across zones
+    for zone in result.get('zones', []):
+        breakdown = zone.get('load_breakdown', {})
+        
+        # Heating components
+        for component, value in breakdown.get('heating', {}).items():
+            if isinstance(value, (int, float)) and component != 'subtotal' and component != 'infiltration_cfm':
+                heating_components[component] = heating_components.get(component, 0) + value
+        
+        # Cooling components  
+        for component, value in breakdown.get('cooling', {}).items():
+            if isinstance(value, (int, float)) and component != 'subtotal' and component != 'infiltration_cfm':
+                cooling_components[component] = cooling_components.get(component, 0) + value
+    
+    # Calculate percentages
+    total_heating = sum(heating_components.values())
+    total_cooling = sum(cooling_components.values())
+    
+    heating_percentages = {}
+    cooling_percentages = {}
+    
+    if total_heating > 0:
+        for component, value in heating_components.items():
+            heating_percentages[component] = round(value / total_heating * 100, 1)
+    
+    if total_cooling > 0:
+        for component, value in cooling_components.items():
+            cooling_percentages[component] = round(value / total_cooling * 100, 1)
+    
+    return {
+        'heating_component_breakdown': heating_percentages,
+        'cooling_component_breakdown': cooling_percentages,
+        'dominant_heating_load': max(heating_percentages, key=heating_percentages.get) if heating_percentages else None,
+        'dominant_cooling_load': max(cooling_percentages, key=cooling_percentages.get) if cooling_percentages else None
+    }
+
+
+def _get_calculation_assumptions(envelope_data: Optional[EnvelopeExtraction], 
+                                construction_vintage: Optional[str]) -> List[str]:
+    """
+    List all assumptions made during calculation
+    
+    Args:
+        envelope_data: Envelope extraction data if available
+        construction_vintage: Construction vintage used
+        
+    Returns:
+        List of assumption descriptions
+    """
+    assumptions = []
+    
+    if not envelope_data:
+        assumptions.append("Used construction vintage defaults for all envelope properties")
+        assumptions.append(f"Assumed {construction_vintage or '1980-2000'} construction standards")
+    else:
+        # Check envelope data confidence
+        if envelope_data.wall_confidence < 0.6:
+            assumptions.append(f"Wall R-value estimated as R-{envelope_data.wall_r_value}")
+        if envelope_data.roof_confidence < 0.6:
+            assumptions.append(f"Roof R-value estimated as R-{envelope_data.roof_r_value}")
+        if envelope_data.window_confidence < 0.6:
+            assumptions.append(f"Window U-factor estimated as {envelope_data.window_u_factor}")
+        if envelope_data.infiltration_confidence < 0.6:
+            assumptions.append(f"Infiltration class estimated as '{envelope_data.infiltration_class}'")
+        if not envelope_data.blower_door_result:
+            assumptions.append("No blower door test data - used construction quality estimate")
+    
+    # Standard assumptions
+    assumptions.extend([
+        "Indoor design temperature: 75°F cooling, 70°F heating",
+        "Indoor relative humidity: 50%",
+        "Occupancy: 1 person per 200 sqft",
+        "Internal gains: ACCA Manual J defaults",
+        "Peak cooling hour: 2-3 PM",
+        "No shading from trees or adjacent buildings unless noted"
+    ])
+    
+    return assumptions

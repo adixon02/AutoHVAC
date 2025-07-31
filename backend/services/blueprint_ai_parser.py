@@ -410,6 +410,15 @@ IMPORTANT INSTRUCTIONS:
 For exterior_walls, count how many walls face outside (0-4).
 For corner_room, set true only if room has 2+ exterior walls meeting at a corner.
 
+ALSO LOOK FOR CONSTRUCTION DETAILS:
+- Wall construction notes (e.g., "2x6 frame", "R-21 insulation")
+- Window specifications (e.g., "Low-E", "U-0.30")
+- Insulation callouts (e.g., "R-38 attic", "R-19 walls")
+- Foundation type (slab, crawl space, basement)
+- Any energy efficiency notes
+
+Include any found construction details in the "notes" field.
+
 Return only valid JSON. Be conservative - it's better to mark things as "unknown" or low confidence than to guess.
 """
     

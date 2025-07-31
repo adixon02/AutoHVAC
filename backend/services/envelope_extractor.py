@@ -23,44 +23,79 @@ class ConfidenceLevel(Enum):
 @dataclass
 class EnvelopeExtraction:
     """Data structure for envelope extraction results"""
-    # Wall properties
+    # Wall properties (required)
     wall_construction: str
     wall_r_value: float
     wall_u_factor: float
     wall_confidence: float
     
-    # Roof properties  
+    # Roof properties (required)
     roof_construction: str
     roof_r_value: float
     roof_u_factor: float
     roof_confidence: float
     
-    # Floor properties
+    # Floor properties (required)
     floor_construction: str
     floor_r_value: float
     floor_u_factor: float
     floor_confidence: float
     
-    # Window properties
+    # Window properties (required)
     window_type: str
     window_u_factor: float
     window_shgc: float
     window_confidence: float
     
-    # Building details
+    # Building details (required)
     ceiling_height: float
     ceiling_height_confidence: float
     
     infiltration_class: str  # "tight", "code", "loose"
     infiltration_confidence: float
     
-    # Construction vintage estimation
+    # Construction vintage (required)
     estimated_vintage: str
     vintage_confidence: float
     
-    # Overall extraction quality
+    # Overall extraction quality (required)
     overall_confidence: float
     needs_confirmation: List[str]  # Fields that need user confirmation
+    
+    # Optional wall details
+    wall_cavity_insulation: Optional[str] = None
+    wall_continuous_insulation: Optional[str] = None
+    wall_air_barrier: Optional[str] = None
+    
+    # Optional roof details
+    roof_ventilation: Optional[str] = None
+    roof_radiant_barrier: bool = False
+    
+    # Optional floor details
+    floor_perimeter_insulation: Optional[str] = None
+    floor_vapor_barrier: bool = False
+    
+    # Optional window details
+    window_frame_type: Optional[str] = None
+    
+    # Door properties (with defaults)
+    door_type: Optional[str] = None
+    door_u_factor: float = 0.40
+    door_count: int = 1
+    door_confidence: float = 0.4
+    
+    # Optional building details
+    ceiling_height_variations: Optional[str] = None
+    blower_door_result: Optional[str] = None
+    
+    # Mechanical systems (optional)
+    mechanical_ventilation: Optional[str] = None
+    duct_location: Optional[str] = None
+    
+    # Thermal mass (optional with defaults)
+    thermal_mass_walls: Optional[str] = None
+    exposed_slab: bool = False
+    thermal_mass_confidence: float = 0.4
     
     def get_confidence_level(self, field: str) -> ConfidenceLevel:
         """Get confidence level enum for a field"""
@@ -246,33 +281,56 @@ Your task is to analyze blueprint text and extract specific building envelope pr
 EXTRACTION REQUIREMENTS:
 
 1. WALL PROPERTIES:
-   - Construction type (e.g., "2x4 frame", "2x6 frame", "masonry", "concrete")
+   - Construction type (e.g., "2x4 frame", "2x6 frame", "masonry", "concrete", "ICF", "SIP")
    - R-value (if specified, otherwise estimate based on construction type)
    - U-factor (calculate as 1/R-value)
+   - Cavity insulation type (e.g., "fiberglass batt", "spray foam", "cellulose")
+   - Continuous insulation (e.g., "1 inch foam board R-5")
+   - Air barrier details (e.g., "house wrap", "sealed sheathing")
    - Confidence score based on how explicitly stated
 
 2. ROOF PROPERTIES:
-   - Construction type (e.g., "attic insulation", "cathedral ceiling", "flat roof")
-   - R-value (common values: R-19, R-30, R-38, R-49)
+   - Construction type (e.g., "attic insulation", "cathedral ceiling", "flat roof", "SIP roof")
+   - R-value (common values: R-19, R-30, R-38, R-49, R-60)
    - U-factor (calculate as 1/R-value)
+   - Ventilation type (e.g., "vented attic", "hot roof", "conditioned attic")
+   - Radiant barrier (yes/no)
    - Confidence score
 
 3. FLOOR PROPERTIES:
-   - Construction type (e.g., "slab on grade", "crawl space", "basement")
+   - Construction type (e.g., "slab on grade", "crawl space", "basement", "raised floor")
    - R-value (common values: R-11, R-19, R-25, R-30)
    - U-factor (calculate as 1/R-value)
+   - Perimeter insulation for slabs (e.g., "R-10 2ft deep")
+   - Vapor barrier details
    - Confidence score
 
 4. WINDOW PROPERTIES:
-   - Type (e.g., "single pane", "double pane", "low-e", "triple pane")
+   - Type (e.g., "single pane", "double pane", "low-e", "triple pane", "argon filled")
    - U-factor (typical range: 0.20-0.80)
    - SHGC - Solar Heat Gain Coefficient (typical range: 0.20-0.70)
+   - Frame type (e.g., "aluminum", "vinyl", "wood", "fiberglass")
+   - Glazing area by orientation if available
    - Confidence score
 
-5. BUILDING DETAILS:
-   - Ceiling height in feet (typical: 8-12 ft)
+5. DOOR PROPERTIES:
+   - Type (e.g., "solid wood", "steel insulated", "fiberglass", "glass sliding")
+   - U-factor (typical range: 0.20-0.70)
+   - Count and locations
+   - Confidence score
+
+6. BUILDING DETAILS:
+   - Ceiling height in feet (typical: 8-12 ft, note variations)
    - Infiltration class ("tight", "code", "loose") based on construction notes
+   - Blower door results if available (e.g., "3 ACH50", "1200 CFM50")
+   - Mechanical ventilation type (e.g., "HRV", "ERV", "exhaust only")
+   - Duct location (e.g., "conditioned space", "attic", "crawl space")
    - Estimated construction vintage ("pre-1980", "1980-2000", "2000-2020", "current-code")
+
+7. THERMAL MASS:
+   - Interior mass walls (e.g., "concrete", "brick", "none")
+   - Exposed slab (yes/no and area)
+   - Mass wall thickness if applicable
 
 CONFIDENCE SCORING:
 - 1.0: Explicitly stated with specific values
@@ -287,28 +345,50 @@ OUTPUT FORMAT - Return valid JSON only:
   "wall_construction": "string",
   "wall_r_value": number,
   "wall_u_factor": number,
+  "wall_cavity_insulation": "string",
+  "wall_continuous_insulation": "string",
+  "wall_air_barrier": "string",
   "wall_confidence": number,
   
   "roof_construction": "string", 
   "roof_r_value": number,
   "roof_u_factor": number,
+  "roof_ventilation": "string",
+  "roof_radiant_barrier": boolean,
   "roof_confidence": number,
   
   "floor_construction": "string",
   "floor_r_value": number,
   "floor_u_factor": number,
+  "floor_perimeter_insulation": "string",
+  "floor_vapor_barrier": boolean,
   "floor_confidence": number,
   
   "window_type": "string",
   "window_u_factor": number,
   "window_shgc": number,
+  "window_frame_type": "string",
   "window_confidence": number,
   
+  "door_type": "string",
+  "door_u_factor": number,
+  "door_count": number,
+  "door_confidence": number,
+  
   "ceiling_height": number,
+  "ceiling_height_variations": "string",
   "ceiling_height_confidence": number,
   
   "infiltration_class": "string",
+  "blower_door_result": "string",
   "infiltration_confidence": number,
+  
+  "mechanical_ventilation": "string",
+  "duct_location": "string",
+  
+  "thermal_mass_walls": "string",
+  "exposed_slab": boolean,
+  "thermal_mass_confidence": number,
   
   "estimated_vintage": "string",
   "vintage_confidence": number,
@@ -322,14 +402,23 @@ Wall R-values by type:
 - 2x4 frame basic: R-11 to R-13
 - 2x4 frame high-perf: R-15 to R-20  
 - 2x6 frame: R-19 to R-25
+- ICF: R-22 to R-30
+- SIP: R-15 to R-30
 - Masonry: R-5 to R-15
-- Current code: R-20+
+- Current code: R-20+ (climate dependent)
 
 Window U-factors by type:
 - Single pane: 0.80-1.00
-- Double pane: 0.40-0.60
-- Low-E double: 0.25-0.40
+- Double pane clear: 0.45-0.60
+- Double pane Low-E: 0.25-0.40
 - Triple pane: 0.15-0.30
+- Low-E argon filled: 0.22-0.35
+
+Door U-factors by type:
+- Solid wood: 0.40-0.60
+- Steel insulated: 0.20-0.40
+- Fiberglass: 0.15-0.30
+- Glass sliding: 0.30-0.70
 
 Focus on practical HVAC design accuracy. If specific values aren't found, use reasonable estimates based on construction type and vintage with appropriate confidence scores."""
 
@@ -339,32 +428,64 @@ def _parse_extraction_result(result_json: Dict[str, Any]) -> EnvelopeExtraction:
     
     try:
         return EnvelopeExtraction(
+            # Wall properties
             wall_construction=result_json.get("wall_construction", "Unknown"),
             wall_r_value=float(result_json.get("wall_r_value", 11.0)),
             wall_u_factor=float(result_json.get("wall_u_factor", 0.09)),
             wall_confidence=float(result_json.get("wall_confidence", 0.4)),
+            wall_cavity_insulation=result_json.get("wall_cavity_insulation"),
+            wall_continuous_insulation=result_json.get("wall_continuous_insulation"),
+            wall_air_barrier=result_json.get("wall_air_barrier"),
             
+            # Roof properties
             roof_construction=result_json.get("roof_construction", "Unknown"),
             roof_r_value=float(result_json.get("roof_r_value", 30.0)),
             roof_u_factor=float(result_json.get("roof_u_factor", 0.033)),
             roof_confidence=float(result_json.get("roof_confidence", 0.4)),
+            roof_ventilation=result_json.get("roof_ventilation"),
+            roof_radiant_barrier=bool(result_json.get("roof_radiant_barrier", False)),
             
+            # Floor properties
             floor_construction=result_json.get("floor_construction", "Unknown"),
             floor_r_value=float(result_json.get("floor_r_value", 19.0)),
             floor_u_factor=float(result_json.get("floor_u_factor", 0.053)),
             floor_confidence=float(result_json.get("floor_confidence", 0.4)),
+            floor_perimeter_insulation=result_json.get("floor_perimeter_insulation"),
+            floor_vapor_barrier=bool(result_json.get("floor_vapor_barrier", False)),
             
+            # Window properties
             window_type=result_json.get("window_type", "Double pane"),
             window_u_factor=float(result_json.get("window_u_factor", 0.50)),
             window_shgc=float(result_json.get("window_shgc", 0.60)),
             window_confidence=float(result_json.get("window_confidence", 0.4)),
+            window_frame_type=result_json.get("window_frame_type"),
             
+            # Door properties
+            door_type=result_json.get("door_type", "Steel insulated"),
+            door_u_factor=float(result_json.get("door_u_factor", 0.40)),
+            door_count=int(result_json.get("door_count", 1)),
+            door_confidence=float(result_json.get("door_confidence", 0.4)),
+            
+            # Building details
             ceiling_height=float(result_json.get("ceiling_height", 9.0)),
             ceiling_height_confidence=float(result_json.get("ceiling_height_confidence", 0.4)),
+            ceiling_height_variations=result_json.get("ceiling_height_variations"),
             
+            # Infiltration
             infiltration_class=result_json.get("infiltration_class", "code"),
             infiltration_confidence=float(result_json.get("infiltration_confidence", 0.4)),
+            blower_door_result=result_json.get("blower_door_result"),
             
+            # Mechanical systems
+            mechanical_ventilation=result_json.get("mechanical_ventilation"),
+            duct_location=result_json.get("duct_location"),
+            
+            # Thermal mass
+            thermal_mass_walls=result_json.get("thermal_mass_walls"),
+            exposed_slab=bool(result_json.get("exposed_slab", False)),
+            thermal_mass_confidence=float(result_json.get("thermal_mass_confidence", 0.4)),
+            
+            # Vintage
             estimated_vintage=result_json.get("estimated_vintage", "1980-2000"),
             vintage_confidence=float(result_json.get("vintage_confidence", 0.4)),
             

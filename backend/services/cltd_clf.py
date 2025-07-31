@@ -236,18 +236,24 @@ def calculate_roof_load_cltd(area: float, u_factor: float, roof_type: str,
 
 
 def calculate_window_solar_load(area: float, shading_coefficient: float, orientation: str,
-                               month: str = 'jul', hour: int = 14) -> float:
+                               month: str = 'jul', hour: int = 14, latitude: float = 40.0,
+                               overhang_depth: float = 0.0, window_height: float = 4.0,
+                               sill_height: float = 3.0) -> float:
     """
-    Calculate solar heat gain through windows using CLF method
+    Calculate solar heat gain through windows using enhanced CLF method with shading
     
-    Q = A × SC × SHGF × CLF
+    Q = A × SC × SHGF × CLF × Shading_Factor
     
     Args:
         area: Window area in sq ft
-        shading_coefficient: Shading coefficient (0.0-1.0)
+        shading_coefficient: Shading coefficient or SHGC (0.0-1.0)
         orientation: Window orientation
         month: Month for calculation (default July for peak)
         hour: Hour of day
+        latitude: Building latitude for sun angle calculations
+        overhang_depth: Depth of overhang in feet (0 if none)
+        window_height: Height of window in feet
+        sill_height: Height from floor to window sill in feet
         
     Returns:
         Solar cooling load in BTU/hr
@@ -259,7 +265,81 @@ def calculate_window_solar_load(area: float, shading_coefficient: float, orienta
     # Get cooling load factor
     clf = get_glass_clf(orientation, hour)
     
-    return area * shading_coefficient * shgf * clf
+    # Calculate shading factor if overhang present
+    shading_factor = 1.0
+    if overhang_depth > 0:
+        shading_factor = calculate_overhang_shading(
+            orientation, latitude, month, hour, 
+            overhang_depth, window_height, sill_height
+        )
+    
+    return area * shading_coefficient * shgf * clf * shading_factor
+
+
+def calculate_overhang_shading(orientation: str, latitude: float, month: str, hour: int,
+                               overhang_depth: float, window_height: float, 
+                               sill_height: float) -> float:
+    """
+    Calculate shading factor from overhang using simplified sun angle method
+    
+    Args:
+        orientation: Window orientation
+        latitude: Building latitude
+        month: Month for calculation
+        hour: Hour of day (0-23)
+        overhang_depth: Horizontal projection of overhang (ft)
+        window_height: Height of window (ft)
+        sill_height: Height from floor to window sill (ft)
+        
+    Returns:
+        Shading factor (0.0 = fully shaded, 1.0 = no shading)
+    """
+    # Simplified solar altitude angles by month and latitude
+    # These are approximate noon values for mid-latitudes (30-45°N)
+    solar_altitude = {
+        'jan': 30, 'feb': 40, 'mar': 50, 'apr': 60, 'may': 70, 'jun': 75,
+        'jul': 73, 'aug': 65, 'sep': 55, 'oct': 45, 'nov': 35, 'dec': 28
+    }
+    
+    # Adjust for latitude (rough approximation)
+    lat_adjustment = (latitude - 40) * 0.5
+    altitude = solar_altitude.get(month, 60) - lat_adjustment
+    
+    # Time adjustment (peak shading typically 2-3 hours after solar noon)
+    if 10 <= hour <= 16:
+        time_factor = 1.0 - abs(hour - 13) * 0.1
+    else:
+        time_factor = 0.1  # Minimal solar gain outside peak hours
+    
+    # For east/west faces, adjust for azimuth angle
+    if orientation in ['E', 'W']:
+        if (orientation == 'E' and hour < 12) or (orientation == 'W' and hour > 12):
+            azimuth_factor = 0.8
+        else:
+            azimuth_factor = 0.2
+        time_factor *= azimuth_factor
+    
+    # Calculate shadow depth
+    if altitude > 0:
+        shadow_depth = overhang_depth / math.tan(math.radians(altitude))
+    else:
+        shadow_depth = 999  # Full shading at night
+    
+    # Calculate shaded fraction of window
+    window_top = sill_height + window_height
+    overhang_height = window_top  # Assume overhang at top of window
+    
+    if shadow_depth >= window_height:
+        shaded_fraction = 1.0  # Fully shaded
+    elif shadow_depth <= 0:
+        shaded_fraction = 0.0  # No shading
+    else:
+        shaded_fraction = shadow_depth / window_height
+    
+    # Convert to shading factor (1 - shaded portion) with time adjustment
+    shading_factor = (1.0 - shaded_fraction * time_factor)
+    
+    return max(0.1, min(1.0, shading_factor))  # Clamp between 0.1 and 1.0
 
 
 def calculate_window_conduction_load(area: float, u_factor: float, outdoor_temp: float, 
