@@ -17,6 +17,14 @@ import redis
 
 # Import stripe_config early to ensure Stripe is initialized at startup
 import core.stripe_config
+from core.stripe_config import initialize_stripe
+
+# Initialize Stripe module explicitly at startup
+try:
+    initialize_stripe()
+    print("✓ Stripe module initialized successfully")
+except Exception as e:
+    print(f"✗ Failed to initialize Stripe module: {e}")
 
 # Debug startup logging
 print("▶ DEBUG =", DEBUG, "  DEV_VERIFIED_EMAILS =", DEV_VERIFIED_EMAILS)

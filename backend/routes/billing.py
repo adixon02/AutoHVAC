@@ -46,6 +46,17 @@ async def create_subscription(
         
         logger.info(f"Creating Stripe checkout session with URLs - Success: {success_url}, Cancel: {cancel_url}")
         
+        # Verify stripe.checkout is available
+        if not hasattr(stripe, 'checkout') or not hasattr(stripe.checkout, 'Session'):
+            logger.error("CRITICAL: stripe.checkout.Session not available!")
+            logger.error(f"stripe module: {type(stripe)}, has checkout: {hasattr(stripe, 'checkout')}")
+            if hasattr(stripe, 'checkout'):
+                logger.error(f"stripe.checkout: {type(stripe.checkout)}, has Session: {hasattr(stripe.checkout, 'Session')}")
+            raise HTTPException(
+                status_code=503,
+                detail="Payment system initialization error. Please try again later."
+            )
+        
         # Create Stripe checkout session
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],

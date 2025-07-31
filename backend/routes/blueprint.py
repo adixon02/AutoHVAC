@@ -326,6 +326,12 @@ async def upload_blueprint(
                     stripe_mode = os.getenv("STRIPE_MODE", "test")
                     logger.info(f"Creating Stripe checkout session - Mode: {stripe_mode}, Price ID: {STRIPE_PRICE_ID[:10]}..., API Key: {stripe.api_key[:10] if stripe.api_key else 'None'}...")
                     
+                    # Verify stripe.checkout is available
+                    if not hasattr(stripe, 'checkout') or not hasattr(stripe.checkout, 'Session'):
+                        logger.error("CRITICAL: stripe.checkout.Session not available!")
+                        logger.error(f"stripe module: {type(stripe)}, has checkout: {hasattr(stripe, 'checkout')}")
+                        raise Exception("Stripe module not properly initialized")
+                    
                     checkout_session = stripe.checkout.Session.create(
                         payment_method_types=['card'],
                         line_items=[{

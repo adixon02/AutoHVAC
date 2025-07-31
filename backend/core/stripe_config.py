@@ -42,12 +42,51 @@ else:
     # Log success if we have what looks like a real key
     logger.info(f"Stripe API key configured successfully (starts with: {stripe.api_key[:12]}...)")
 
+# Force load stripe submodules by accessing them
+def initialize_stripe():
+    """Initialize and verify Stripe module is fully loaded"""
+    logger.info("Initializing Stripe module...")
+    
+    # Log current state
+    logger.info(f"Stripe module location: {stripe.__file__ if hasattr(stripe, '__file__') else 'Unknown'}")
+    logger.info(f"Stripe version: {stripe.__version__ if hasattr(stripe, '__version__') else 'Unknown'}")
+    
+    # Check if checkout module exists
+    if not hasattr(stripe, 'checkout'):
+        logger.error("CRITICAL: stripe.checkout module not found!")
+        # Try to force load it
+        try:
+            import stripe.checkout
+            logger.info("Successfully imported stripe.checkout module")
+        except ImportError as e:
+            logger.error(f"Failed to import stripe.checkout: {e}")
+    else:
+        logger.info("stripe.checkout module is available")
+    
+    # Verify Session exists
+    if hasattr(stripe, 'checkout') and hasattr(stripe.checkout, 'Session'):
+        logger.info("stripe.checkout.Session is available")
+    else:
+        logger.error("CRITICAL: stripe.checkout.Session not available!")
+    
+    # Log all available attributes for debugging
+    stripe_attrs = [attr for attr in dir(stripe) if not attr.startswith('_')]
+    logger.info(f"Available stripe attributes: {', '.join(stripe_attrs[:10])}...")
+    
+    return stripe
+
 def get_stripe_client():
     """Get the configured stripe module"""
     # Simply return the stripe module - it should already be configured
     # Don't try to reinitialize as this can cause issues
     if not stripe.api_key:
         logger.error("WARNING: Stripe API key is not set when get_stripe_client() was called")
+    
+    # Verify checkout module is available
+    if not hasattr(stripe, 'checkout'):
+        logger.error("CRITICAL: stripe.checkout not available in get_stripe_client()")
+        initialize_stripe()  # Try to fix it
+    
     return stripe
 
 def is_test_mode():
@@ -77,3 +116,9 @@ def validate_stripe_config():
         logger.info(f"Stripe configuration valid - Mode: {STRIPE_MODE}")
     
     return issues
+
+# Initialize stripe module when this module is imported
+try:
+    initialize_stripe()
+except Exception as e:
+    logger.error(f"Failed to initialize Stripe module: {e}")
