@@ -15,6 +15,9 @@ import asyncio
 import os
 import redis
 
+# Import stripe_config early to ensure Stripe is initialized at startup
+import core.stripe_config
+
 # Debug startup logging
 print("▶ DEBUG =", DEBUG, "  DEV_VERIFIED_EMAILS =", DEV_VERIFIED_EMAILS)
 

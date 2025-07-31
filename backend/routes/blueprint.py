@@ -326,10 +326,7 @@ async def upload_blueprint(
                     stripe_mode = os.getenv("STRIPE_MODE", "test")
                     logger.info(f"Creating Stripe checkout session - Mode: {stripe_mode}, Price ID: {STRIPE_PRICE_ID[:10]}..., API Key: {stripe.api_key[:10] if stripe.api_key else 'None'}...")
                     
-                    # Ensure stripe is properly initialized
-                    stripe_module = get_stripe_client()
-                    
-                    checkout_session = stripe_module.checkout.Session.create(
+                    checkout_session = stripe.checkout.Session.create(
                         payment_method_types=['card'],
                         line_items=[{
                             'price': STRIPE_PRICE_ID,

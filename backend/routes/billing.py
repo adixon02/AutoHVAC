@@ -46,11 +46,11 @@ async def create_subscription(
         
         logger.info(f"Creating Stripe checkout session with URLs - Success: {success_url}, Cancel: {cancel_url}")
         
-        # Ensure stripe is properly initialized
-        stripe_module = get_stripe_client()
+        # Log stripe module state for debugging
+        logger.info(f"Stripe module type: {type(stripe)}, has checkout attr: {hasattr(stripe, 'checkout')}")
         
         # Create Stripe checkout session
-        checkout_session = stripe_module.checkout.Session.create(
+        checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
                 'price': STRIPE_PRICE_ID,
