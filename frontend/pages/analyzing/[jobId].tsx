@@ -6,6 +6,7 @@ import Head from 'next/head'
 import ShareModal from '../../components/ShareModal'
 import { useSession } from 'next-auth/react'
 import Cookies from 'js-cookie'
+import ResultsPreview from '../../components/ResultsPreview'
 
 interface JobStatus {
   job_id: string
@@ -432,50 +433,46 @@ export default function AnalyzingPage() {
                   </button>
                 </div>
               ) : jobStatus.status === 'completed' ? (
-                <div className="text-center">
-                  <div className="p-6 bg-green-50 rounded-lg mb-6">
-                    <h3 className="text-lg font-semibold text-green-800 mb-4">🎉 Analysis Complete!</h3>
-                    {jobStatus.result && (
-                      <div className="text-left space-y-2 text-sm text-green-700">
-                        <div><strong>Rooms Detected:</strong> {jobStatus.result.zones?.length || 0}</div>
-                        <div><strong>Total Heating Load:</strong> {jobStatus.result.heating_total || 0} BTU/hr</div>
-                        <div><strong>Total Cooling Load:</strong> {jobStatus.result.cooling_total || 0} BTU/hr</div>
-                      </div>
-                    )}
-                  </div>
-                  {!session && userEmail && (
-                    <div className="mb-6 p-4 bg-brand-50 border border-brand-200 rounded-lg">
-                      <p className="text-brand-800 text-sm">
-                        <strong>Create an account</strong> to save your report and access it anytime.
-                        We'll send a magic link to <strong>{userEmail}</strong>.
-                      </p>
-                    </div>
-                  )}
-                  <p className="text-gray-600 mb-6">
-                    Your detailed HVAC analysis report is ready to view!
-                  </p>
-                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <div>
+                  {/* Show results immediately */}
+                  <ResultsPreview 
+                    result={jobStatus.result}
+                    userEmail={userEmail}
+                  />
+                  
+                  {/* Action buttons */}
+                  <div className="flex flex-col sm:flex-row gap-3 justify-center mt-8">
                     {session ? (
-                      <button 
-                        onClick={() => router.push('/dashboard')}
-                        className="btn-primary"
-                      >
-                        View Dashboard
-                      </button>
+                      <>
+                        <button 
+                          onClick={() => router.push('/dashboard')}
+                          className="btn-primary"
+                        >
+                          View Full Dashboard
+                        </button>
+                        <button 
+                          onClick={() => setShowShareModal(true)}
+                          className="btn-secondary"
+                        >
+                          Share Results
+                        </button>
+                      </>
                     ) : (
-                      <button 
-                        onClick={() => router.push('/auth/signin?callbackUrl=/dashboard')}
-                        className="btn-primary"
-                      >
-                        Create Account & View Report
-                      </button>
+                      <>
+                        <button 
+                          onClick={() => setShowShareModal(true)}
+                          className="btn-primary"
+                        >
+                          Share Results
+                        </button>
+                        <button 
+                          onClick={() => router.push('/')}
+                          className="btn-secondary"
+                        >
+                          Analyze Another Blueprint
+                        </button>
+                      </>
                     )}
-                    <button 
-                      onClick={() => router.push('/')}
-                      className="btn-secondary"
-                    >
-                      Upload Another Blueprint
-                    </button>
                   </div>
                 </div>
               ) : (

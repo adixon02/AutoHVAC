@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/router'
 import Head from 'next/head'
@@ -9,6 +9,13 @@ export default function SignIn() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isSuccess, setIsSuccess] = useState(false)
+
+  // Pre-fill email from query parameter if provided
+  useEffect(() => {
+    if (router.query.email && typeof router.query.email === 'string') {
+      setEmail(router.query.email)
+    }
+  }, [router.query.email])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
