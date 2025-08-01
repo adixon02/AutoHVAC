@@ -10,7 +10,8 @@ export async function middleware(request: NextRequest) {
                        request.nextUrl.pathname.startsWith('/api/') ||
                        request.nextUrl.pathname.startsWith('/_next/') ||
                        request.nextUrl.pathname.startsWith('/favicon') ||
-                       request.nextUrl.pathname === '/upgrade'
+                       request.nextUrl.pathname === '/upgrade' ||
+                       request.nextUrl.pathname.startsWith('/analyzing/')
 
   // Allow API auth routes to pass through
   if (isApiAuthRoute) {
