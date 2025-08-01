@@ -22,6 +22,7 @@ from .thermal_mass import (
 )
 from .envelope_extractor import EnvelopeExtraction
 from .audit_tracker import get_audit_tracker, create_calculation_audit
+from .blueprint_validator import BlueprintValidator, ValidationSeverity
 import math
 import time
 import logging
@@ -730,6 +731,30 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     Returns:
         Dict with heating/cooling loads and zone details
     """
+    # Validate blueprint data first
+    validator = BlueprintValidator()
+    validation_result = validator.validate_blueprint(schema)
+    
+    # Log validation issues
+    if not validation_result.is_valid:
+        logger.error(f"Blueprint validation failed with {len(validation_result.issues)} issues")
+        for issue in validation_result.issues:
+            if issue.severity == ValidationSeverity.ERROR:
+                logger.error(f"Validation Error: {issue.message} - {issue.suggested_fix}")
+            elif issue.severity == ValidationSeverity.WARNING:
+                logger.warning(f"Validation Warning: {issue.message} - {issue.suggested_fix}")
+    
+    # Add validation warnings to result
+    validation_warnings = []
+    for issue in validation_result.issues:
+        if issue.severity in [ValidationSeverity.ERROR, ValidationSeverity.WARNING]:
+            validation_warnings.append({
+                "severity": issue.severity.value,
+                "message": issue.message,
+                "fix": issue.suggested_fix,
+                "details": issue.details
+            })
+    
     # Get climate data from comprehensive database
     climate_data = get_climate_data(schema.zip_code)
     
@@ -864,8 +889,35 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
             "include_ventilation": include_ventilation,
             "construction_values": construction_values
         },
-        "confidence_metrics": confidence_metrics
+        "confidence_metrics": confidence_metrics,
+        "validation": {
+            "is_valid": validation_result.is_valid,
+            "confidence_score": validation_result.confidence_score,
+            "warnings": validation_warnings,
+            "scale_found": validation_result.scale_found,
+            "total_area_calculated": validation_result.total_area_calculated,
+            "total_area_declared": validation_result.total_area_declared
+        }
     }
+    
+    # Validate HVAC calculations after they're done
+    hvac_issues = validator.validate_hvac_calculations(
+        schema.sqft_total,
+        total_heating,
+        total_cooling
+    )
+    
+    # Add HVAC validation issues to warnings
+    for issue in hvac_issues:
+        validation_warnings.append({
+            "severity": issue.severity.value,
+            "message": issue.message,
+            "fix": issue.suggested_fix,
+            "details": issue.details
+        })
+    
+    # Update validation warnings in result
+    result["validation"]["warnings"] = validation_warnings
     
     # Create audit snapshot if requested
     if create_audit:

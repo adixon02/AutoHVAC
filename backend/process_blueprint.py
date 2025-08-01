@@ -96,6 +96,24 @@ async def process_blueprint(pdf_path: str, zip_code: str = "99206", demo_mode: b
                 if hvac_data.get('notes'):
                     print(f"  - Notes: {hvac_data.get('notes')}")
         
+        # Validate the results
+        print("\n--- VALIDATION ---")
+        from services.blueprint_validator import BlueprintValidator
+        validator = BlueprintValidator()
+        validation_result = validator.validate_blueprint(result)
+        
+        print(f"Validation Valid: {validation_result.is_valid}")
+        print(f"Overall Confidence: {validation_result.confidence_score:.2f}")
+        print(f"Scale Found: {validation_result.scale_found}")
+        
+        if validation_result.issues:
+            print(f"\nValidation Issues ({len(validation_result.issues)}):")
+            for issue in validation_result.issues:
+                print(f"  [{issue.severity.value.upper()}] {issue.message}")
+                print(f"    -> Fix: {issue.suggested_fix}")
+                if issue.affected_room:
+                    print(f"    -> Room: {issue.affected_room}")
+        
         # Print parsing metadata
         if result.parsing_metadata:
             metadata = result.parsing_metadata

@@ -363,7 +363,19 @@ class BlueprintAIParser:
         return """
 Analyze this architectural floor plan for HVAC load calculations. Your goal is to identify ALL rooms in the building.
 
-CRITICAL: You MUST identify EVERY room visible on the floor plan, including:
+CRITICAL STEP 1 - FIND THE SCALE:
+Look for scale notation in:
+- Title block (usually bottom right)
+- Near the drawing title
+- Common formats: "1/4" = 1'-0"", "1/8" = 1'-0"", "3/16" = 1'-0"", "1:48", "SCALE: 1/4" = 1'-0""
+
+CRITICAL STEP 2 - EXTRACT DIMENSIONS CORRECTLY:
+- Read dimensions EXACTLY as shown (e.g., "12'-6"", "15'0"", "29 x 12")
+- DO NOT convert or calculate - report raw dimensions
+- Note whether dimensions are shown for each room
+
+CRITICAL STEP 3 - IDENTIFY ALL ROOMS:
+You MUST identify EVERY room visible on the floor plan, including:
 - All bedrooms (Master, Bedroom 1, 2, 3, etc.)
 - All bathrooms (Full bath, half bath, powder room)
 - Kitchen and dining areas
@@ -374,24 +386,26 @@ CRITICAL: You MUST identify EVERY room visible on the floor plan, including:
 - Hallways and corridors
 - Any other labeled spaces
 
-FIRST, look for these orientation indicators:
-- North arrow or compass rose
-- Directional labels (N, S, E, W)
-- Street names or site orientation markers
-
-THEN, systematically scan the ENTIRE floor plan and identify ALL rooms with the following details:
+Return the following JSON structure:
 
 {
+  "scale_found": true,
+  "scale_notation": "1/4\" = 1'-0\"",
+  "scale_factor": 48,
+  "scale_confidence": 0.9,
   "north_arrow_found": false,
   "north_direction": "unknown",
   "orientation_confidence": 0.0,
   "total_area": 1500.0,
+  "total_area_source": "labeled|calculated|estimated",
   "stories": 1,
   "rooms": [
     {
       "name": "Living Room",
-      "dimensions_ft": [20.0, 15.0],
-      "area": 300.0,
+      "raw_dimensions": "29' x 12'",
+      "dimensions_ft": [29.0, 12.0],
+      "area": 348.0,
+      "area_matches_dimensions": true,
       "floor": 1,
       "windows": 2,
       "exterior_doors": 0,
@@ -408,51 +422,57 @@ THEN, systematically scan the ENTIRE floor plan and identify ALL rooms with the 
 }
 
 IMPORTANT INSTRUCTIONS:
-1. ROOM DETECTION:
-   - Scan the ENTIRE floor plan systematically from top to bottom
-   - Look for ALL enclosed spaces with labels
-   - Include small rooms (closets, pantries, bathrooms)
-   - Include transitional spaces (hallways, foyers)
-   - If you see a room boundary but no label, infer the room type from context
-   - Common missed rooms: Pantry, Laundry, Mudroom, Closets, Half baths
-   
-2. EXPECTED ROOM COUNTS:
-   - Small homes (1000-1500 sqft): 5-10 rooms
-   - Medium homes (1500-2500 sqft): 8-15 rooms
-   - Large homes (2500+ sqft): 12-25 rooms
-   
-3. ORIENTATION:
-   - Set to "unknown" if no north arrow is found
-   - If found, assign orientations based on wall exposure
-   
-4. DIMENSIONS:
-   - Only report dimensions you can see or calculate from scale
-   - If no dimensions shown, estimate based on typical residential sizes
-   
+1. SCALE VALIDATION:
+   - If scale_found is false, set all dimensions as "estimated" with confidence < 0.5
+   - Common scale factors: 1/4"=1' is 48, 1/8"=1' is 96, 3/16"=1' is 64
+   - CRITICAL: Report dimensions in FEET, not inches!
+
+2. DIMENSION SANITY CHECKS:
+   - Typical residential room sizes:
+     * Bedroom: 100-200 sq ft (10x10 to 14x14)
+     * Master bedroom: 150-400 sq ft
+     * Bathroom: 20-100 sq ft
+     * Kitchen: 100-300 sq ft
+     * Living room: 200-400 sq ft
+     * Great room: 300-800 sq ft
+     * Closet: 10-50 sq ft
+     * Hallway: 30-100 sq ft
+   - If any room > 800 sq ft (except great rooms), double-check your dimensions
+   - If total area > 10,000 sq ft for residential, flag as suspicious
+
+3. ROOM DETECTION:
+   - Scan the ENTIRE floor plan systematically
+   - Expected room counts:
+     * Small homes (1000-1500 sqft): 6-12 rooms
+     * Medium homes (1500-2500 sqft): 10-18 rooms
+     * Large homes (2500+ sqft): 15-30 rooms
+   - Common missed rooms: Pantry, Laundry, Mudroom, Walk-in Closets, Powder rooms
+
+4. AREA VALIDATION:
+   - ALWAYS verify: width × length = area
+   - Set area_matches_dimensions to false if calculation differs by > 5%
+   - If dimensions produce unrealistic area (e.g., 29,000 sq ft for a room), flag it
+
 5. CONFIDENCE SCORING:
-   - 0.9-1.0: Clearly labeled room with visible dimensions
+   - 0.9-1.0: Clearly labeled room with visible dimensions that pass sanity checks
    - 0.7-0.8: Clearly labeled room without dimensions
    - 0.5-0.6: Unlabeled room with clear boundaries
    - 0.3-0.4: Partially visible or uncertain room
-5. Set confidence 0.0-0.5 for guessed/unclear rooms
+   - 0.0-0.2: Dimensions or area failed sanity checks
+
 6. Mark dimension_source as:
-   - "measured" if dimensions are marked on the plan
-   - "estimated" if you calculated from scale/grid
-   - "unclear" if you're guessing
+   - "measured" if dimensions are clearly marked on the plan
+   - "scaled" if you calculated from scale bar/grid
+   - "estimated" if you're estimating from typical sizes
+   - "error" if dimensions produce impossible areas
 
-For exterior_walls, count how many walls face outside (0-4).
-For corner_room, set true only if room has 2+ exterior walls meeting at a corner.
+CONSTRUCTION DETAILS TO FIND:
+- Wall construction (e.g., "2x6 frame", "R-21 insulation")
+- Window specs (e.g., "Low-E", "U-0.30")
+- Insulation values (e.g., "R-38 attic", "R-19 walls")
+- Any scale or dimension notes
 
-ALSO LOOK FOR CONSTRUCTION DETAILS:
-- Wall construction notes (e.g., "2x6 frame", "R-21 insulation")
-- Window specifications (e.g., "Low-E", "U-0.30")
-- Insulation callouts (e.g., "R-38 attic", "R-19 walls")
-- Foundation type (slab, crawl space, basement)
-- Any energy efficiency notes
-
-Include any found construction details in the "notes" field.
-
-Return only valid JSON. Be conservative - it's better to mark things as "unknown" or low confidence than to guess.
+Return only valid JSON. Flag suspicious dimensions rather than reporting incorrect values.
 """
     
     def _extract_json_from_response(self, response_text: str) -> str:
@@ -479,14 +499,39 @@ Return only valid JSON. Be conservative - it's better to mark things as "unknown
     ) -> BlueprintSchema:
         """Create BlueprintSchema from enhanced GPT-4V extracted data"""
         try:
+            # Log scale information for debugging
+            scale_found = blueprint_data.get('scale_found', False)
+            scale_notation = blueprint_data.get('scale_notation', 'unknown')
+            scale_factor = blueprint_data.get('scale_factor', 48)  # Default to 1/4" scale
+            
+            logger.info(f"Scale detection: found={scale_found}, notation={scale_notation}, factor={scale_factor}")
+            
             # Extract rooms with enhanced data
             rooms = []
+            suspicious_rooms = []
+            
             for room_data in blueprint_data.get('rooms', []):
-                # Extract enhanced room properties
+                # Extract and validate dimensions
+                raw_dims = room_data.get('raw_dimensions', '')
+                dims_ft = room_data.get('dimensions_ft', [12.0, 12.0])
+                area = room_data.get('area', 144.0)
+                area_matches = room_data.get('area_matches_dimensions', True)
+                
+                # Validate room area against typical sizes
+                room_name = room_data.get('name', 'Unknown Room')
+                room_type = room_data.get('room_type', self._classify_room_type(room_name))
+                
+                # Check for suspicious areas
+                if area > 800 and room_type not in ['great_room', 'warehouse', 'garage']:
+                    logger.warning(f"Suspicious room area: {room_name} = {area} sq ft (type: {room_type})")
+                    suspicious_rooms.append(f"{room_name}: {area} sq ft")
+                    # Reduce confidence for suspicious dimensions
+                    room_data['confidence'] = min(room_data.get('confidence', 0.5), 0.3)
+                
                 # Extract confidence and validate
                 confidence = room_data.get('confidence', 0.5)
                 if confidence < 0.3:
-                    logger.warning(f"Low confidence ({confidence}) for room: {room_data.get('name', 'Unknown')}")
+                    logger.warning(f"Low confidence ({confidence}) for room: {room_name}")
                 
                 # Handle orientation with confidence tracking
                 orientation = room_data.get('orientation', 'unknown')
@@ -497,24 +542,29 @@ Return only valid JSON. Be conservative - it's better to mark things as "unknown
                     orientation_confidence = blueprint_data.get('orientation_confidence', 0.5)
                 
                 room = Room(
-                    name=room_data.get('name', 'Unknown Room'),
-                    dimensions_ft=tuple(room_data.get('dimensions_ft', [12.0, 12.0])),
+                    name=room_name,
+                    dimensions_ft=tuple(dims_ft),
                     floor=room_data.get('floor', 1),
                     windows=room_data.get('windows', 1),
                     orientation=orientation,
-                    area=room_data.get('area', 144.0),
-                    room_type=room_data.get('room_type', self._classify_room_type(room_data.get('name', ''))),
+                    area=area,
+                    room_type=room_type,
                     confidence=confidence,
                     center_position=(0.0, 0.0),  # Not available from vision
                     label_found=True,  # GPT-4V identified the room
                     dimensions_source=room_data.get('dimension_source', 'estimated'),
                     # Store enhanced HVAC data in source_elements for load calculations
                     source_elements={
+                        "raw_dimensions": raw_dims,
+                        "area_matches_dimensions": area_matches,
                         "exterior_doors": room_data.get('exterior_doors', 0),
                         "exterior_walls": room_data.get('exterior_walls', 1),
                         "corner_room": room_data.get('corner_room', False),
                         "ceiling_height": room_data.get('ceiling_height', 9.0),
                         "notes": room_data.get('notes', ''),
+                        "scale_found": scale_found,
+                        "scale_notation": scale_notation,
+                        "scale_factor": scale_factor,
                         "north_arrow_found": blueprint_data.get('north_arrow_found', False),
                         "north_direction": blueprint_data.get('north_direction', 'unknown'),
                         "orientation_confidence": orientation_confidence,
@@ -524,16 +574,35 @@ Return only valid JSON. Be conservative - it's better to mark things as "unknown
                 )
                 rooms.append(room)
             
-            # Calculate totals
-            total_area = blueprint_data.get('total_area', sum(room.area for room in rooms))
+            # Calculate totals and validate
+            total_area_calculated = sum(room.area for room in rooms)
+            total_area_declared = blueprint_data.get('total_area', total_area_calculated)
+            total_area_source = blueprint_data.get('total_area_source', 'calculated')
             stories = blueprint_data.get('stories', 1)
+            
+            # Validate total area
+            if total_area_declared > 10000:
+                logger.warning(f"Suspicious total area: {total_area_declared} sq ft for residential building")
+                if suspicious_rooms:
+                    logger.warning(f"Suspicious rooms found: {', '.join(suspicious_rooms)}")
+            
+            # Check if calculated matches declared
+            if abs(total_area_calculated - total_area_declared) / total_area_declared > 0.2:
+                logger.warning(f"Total area mismatch: calculated={total_area_calculated}, declared={total_area_declared}")
             
             # Store building-level data in raw_geometry for Manual J calculations
             building_data = {
                 "building_orientation": blueprint_data.get('building_orientation', ''),
-                "total_conditioned_area": total_area,
+                "total_conditioned_area": total_area_declared,
+                "total_area_calculated": total_area_calculated,
+                "total_area_source": total_area_source,
                 "stories": stories,
                 "parsing_method": "gpt4v_enhanced",
+                "scale_found": scale_found,
+                "scale_notation": scale_notation,
+                "scale_factor": scale_factor,
+                "suspicious_rooms": suspicious_rooms,
+                "room_count": len(rooms),
                 "hvac_load_factors": {
                     "total_exterior_windows": sum(room.windows for room in rooms),
                     "total_exterior_doors": sum(room.source_elements.get("exterior_doors", 0) for room in rooms),
@@ -542,10 +611,16 @@ Return only valid JSON. Be conservative - it's better to mark things as "unknown
                 }
             }
             
+            # Add warnings to parsing metadata
+            if suspicious_rooms:
+                parsing_metadata.warnings.append(f"Suspicious room areas detected: {', '.join(suspicious_rooms)}")
+            if not scale_found:
+                parsing_metadata.warnings.append("No scale found on blueprint - dimensions are estimated")
+            
             return BlueprintSchema(
                 project_id=UUID(project_id) if isinstance(project_id, str) else project_id,
                 zip_code=zip_code,
-                sqft_total=total_area,
+                sqft_total=total_area_declared,
                 stories=stories,
                 rooms=rooms,
                 raw_geometry=building_data,  # Enhanced building data for HVAC calculations

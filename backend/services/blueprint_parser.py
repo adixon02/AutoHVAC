@@ -439,19 +439,39 @@ class BlueprintParser:
         if raw_geometry and 'rectangles' in raw_geometry:
             rectangles = raw_geometry['rectangles']
             for i, rect in enumerate(rectangles[:10]):  # Limit to 10 rooms
-                if rect.get('area', 0) > 50:  # Minimum room size
+                if rect.get('area', 0) > 50:  # Minimum room size (in page units)
+                    # CRITICAL FIX: rect dimensions are in page units (pixels), NOT inches!
+                    # Without proper scale information, we cannot convert accurately
+                    # Use reasonable default room dimensions instead
+                    
+                    # Default to typical room sizes
+                    width_ft = 12.0  # Default 12 feet width
+                    height_ft = 10.0  # Default 10 feet height
+                    area_sqft = width_ft * height_ft  # 120 sq ft
+                    
+                    logger.warning(f"Fallback room creation - no scale available for proper conversion. "
+                                 f"Using default dimensions: {width_ft}x{height_ft} ft")
+                    
                     room = Room(
                         name=f"Room {i+1}",
-                        dimensions_ft=(rect.get('width', 100) / 12, rect.get('height', 100) / 12),  # Convert to feet
+                        dimensions_ft=(width_ft, height_ft),
                         floor=1,
                         windows=1,
                         orientation="",
-                        area=rect.get('area', 100),
+                        area=area_sqft,
                         room_type="unknown",
                         confidence=0.3,  # Low confidence for fallback
                         center_position=(rect.get('center_x', 0), rect.get('center_y', 0)),
                         label_found=False,
-                        dimensions_source="geometry_fallback"
+                        dimensions_source="geometry_fallback",
+                        source_elements={
+                            "warning": "Dimensions are estimates - no scale found",
+                            "raw_page_units": {
+                                "width": rect.get('width', 0),
+                                "height": rect.get('height', 0),
+                                "area": rect.get('area', 0)
+                            }
+                        }
                     )
                     rooms.append(room)
         
