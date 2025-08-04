@@ -1,0 +1,58 @@
+{
+  "project_id": "e3a1d93d-fbb4-4ec7-b966-91603150a51d",
+  "zip_code": "99206",
+  "sqft_total": 300.0,
+  "stories": 1,
+  "rooms": [
+    {
+      "name": "GPT-4V Parsing Failed - Unknown Room",
+      "dimensions_ft": [
+        20.0,
+        15.0
+      ],
+      "floor": 1,
+      "windows": 2,
+      "orientation": "",
+      "area": 300.0,
+      "room_type": "unknown",
+      "confidence": 0.0,
+      "source_elements": {},
+      "center_position": [
+        0.0,
+        0.0
+      ],
+      "label_found": false,
+      "dimensions_source": "error_fallback"
+    }
+  ],
+  "raw_geometry": {},
+  "raw_text": {},
+  "dimensions": [],
+  "labels": [],
+  "geometric_elements": [],
+  "parsing_metadata": {
+    "parsing_timestamp": "2025-08-01 06:52:28.357663",
+    "processing_time_seconds": 6.192344903945923,
+    "pdf_filename": "blueprint-example-99206.pdf",
+    "pdf_page_count": 4,
+    "selected_page": 1,
+    "geometry_status": "failed",
+    "text_status": "failed",
+    "ai_status": "failed",
+    "page_analyses": [],
+    "errors_encountered": [
+      {
+        "stage": "gpt4v_parsing",
+        "error": "Failed to extract data from any page",
+        "error_type": "BlueprintAIParsingError",
+        "timestamp": 1754031154.5500538
+      }
+    ],
+    "warnings": [],
+    "overall_confidence": 0.0,
+    "geometry_confidence": 0.0,
+    "text_confidence": 0.0,
+    "validation_warnings": null,
+    "data_quality_score": null
+  }
+}

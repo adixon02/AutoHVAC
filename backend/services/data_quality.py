@@ -6,7 +6,7 @@ Provides comprehensive quality metrics for blueprint parsing and calculations
 from typing import List, Dict, Any, Tuple, Optional, Literal
 from pydantic import BaseModel, Field
 from app.parser.schema import BlueprintSchema, ParsingMetadata
-from services.blueprint_validation import ValidationWarning
+from services.blueprint_validator import ValidationIssue as ValidationWarning
 import logging
 
 logger = logging.getLogger(__name__)

@@ -38,7 +38,7 @@ from services.error_types import (
     CriticalError, NonCriticalError, AuditError, 
     ValidationError, categorize_exception, log_error_with_context
 )
-from services.blueprint_validation import BlueprintValidationError
+from services.blueprint_validator import BlueprintValidationError
 from database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
