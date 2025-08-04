@@ -45,9 +45,17 @@ class BlueprintAIParser:
     """
     
     def __init__(self):
-        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        if not self.client.api_key:
-            raise BlueprintAIParsingError("OPENAI_API_KEY environment variable not set")
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key or api_key == "your-openai-api-key-here":
+            logger.error("OPENAI_API_KEY not configured! AI blueprint parsing will fail.")
+            logger.error("Please set OPENAI_API_KEY in your .env file")
+            logger.error("Get your API key from: https://platform.openai.com/api-keys")
+            raise BlueprintAIParsingError(
+                "OPENAI_API_KEY environment variable not set. "
+                "AI parsing is disabled. Please configure your OpenAI API key in the .env file."
+            )
+        
+        self.client = AsyncOpenAI(api_key=api_key)
         
         # Configuration
         self.max_image_size = 20 * 1024 * 1024  # 20MB max for OpenAI
@@ -676,26 +684,63 @@ Return only valid JSON. Flag suspicious dimensions rather than reporting incorre
         error: str
     ) -> BlueprintSchema:
         """Create fallback blueprint when GPT-4V parsing fails"""
-        fallback_room = Room(
-            name="GPT-4V Parsing Failed - Unknown Room",
-            dimensions_ft=(20.0, 15.0),
-            floor=1,
-            windows=2,
-            orientation="",
-            area=300.0,
-            room_type="unknown",
-            confidence=0.0,
-            center_position=(0.0, 0.0),
-            label_found=False,
-            dimensions_source="error_fallback"
-        )
+        logger.error("=" * 60)
+        logger.error("GPT-4V PARSING FAILED - Creating fallback room structure")
+        logger.error(f"Error: {error}")
+        logger.error("This will result in estimated HVAC calculations only!")
+        logger.error("=" * 60)
+        
+        # Create a typical residential layout as fallback
+        typical_rooms = [
+            ("Living Room", (20.0, 15.0), "living", 300, 3),
+            ("Kitchen", (12.0, 14.0), "kitchen", 168, 2),
+            ("Master Bedroom", (14.0, 12.0), "master_bedroom", 168, 2),
+            ("Bedroom 2", (11.0, 11.0), "bedroom", 121, 2),
+            ("Bedroom 3", (10.0, 11.0), "bedroom", 110, 2),
+            ("Bathroom 1", (8.0, 6.0), "bathroom", 48, 1),
+            ("Bathroom 2", (7.0, 5.0), "bathroom", 35, 0),
+            ("Hallway", (15.0, 4.0), "hallway", 60, 0),
+        ]
+        
+        rooms = []
+        for name, (width, height), room_type, area, window_count in typical_rooms:
+            room = Room(
+                name=f"{name} (AI Parsing Failed - Estimated)",
+                dimensions_ft=(width, height),
+                floor=1,
+                windows=window_count,
+                orientation="unknown",
+                area=area,
+                room_type=room_type,
+                confidence=0.0,  # Zero confidence - complete fallback
+                center_position=(0.0, 0.0),
+                label_found=False,
+                dimensions_source="gpt4v_fallback",
+                source_elements={
+                    "error": "GPT-4V parsing failed",
+                    "reason": str(error),
+                    "warning": "Using typical residential layout - results are estimates only"
+                }
+            )
+            rooms.append(room)
+        
+        total_area = sum(room.area for room in rooms)
+        
+        # Update metadata
+        metadata.warnings.append(f"GPT-4V parsing failed: {error}")
+        metadata.errors_encountered.append({
+            'stage': 'gpt4v_fallback',
+            'error': str(error),
+            'error_type': 'GPT4VParsingFailure',
+            'impact': 'Using estimated typical layout - HVAC calculations approximate'
+        })
         
         return BlueprintSchema(
             project_id=UUID(project_id) if project_id and isinstance(project_id, str) else project_id or uuid4(),
             zip_code=zip_code,
-            sqft_total=300.0,
+            sqft_total=total_area,
             stories=1,
-            rooms=[fallback_room],
+            rooms=rooms,
             raw_geometry={},
             raw_text={},
             dimensions=[],

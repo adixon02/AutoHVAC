@@ -119,6 +119,12 @@ class BlueprintParser:
                     loop.close()
             except BlueprintAIParsingError as e:
                 logger.error(f"AI parsing failed for {filename}: {str(e)}")
+                if "OPENAI_API_KEY" in str(e):
+                    logger.error("=" * 60)
+                    logger.error("CRITICAL: OpenAI API key not configured!")
+                    logger.error("AI blueprint parsing requires a valid OpenAI API key.")
+                    logger.error("Please set OPENAI_API_KEY in your .env file")
+                    logger.error("=" * 60)
                 logger.warning(f"Falling back to traditional parsing. Results may be less accurate for complex blueprints.")
                 # Fall through to traditional parsing
             except Exception as e:
@@ -435,40 +441,62 @@ class BlueprintParser:
             return self._create_fallback_rooms(raw_geometry, raw_text)
     
     def _create_fallback_rooms(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any]) -> List[Room]:
-        """Create fallback rooms when AI analysis fails"""
+        """Create fallback rooms when AI analysis fails - following Manual J best practices"""
         rooms = []
         
-        # Try to create rooms from geometry rectangles
+        # Log the parsing failure prominently
+        logger.error("=" * 60)
+        logger.error("BLUEPRINT PARSING FAILED - Creating fallback room structure")
+        logger.error("This will result in inaccurate HVAC calculations!")
+        logger.error("Please ensure:")
+        logger.error("1. OpenAI API key is configured in .env file")
+        logger.error("2. Blueprint PDF is readable and contains floor plans")
+        logger.error("3. Blueprint has clear room labels and dimensions")
+        logger.error("=" * 60)
+        
+        # Try to create rooms from geometry rectangles if available
         if raw_geometry and 'rectangles' in raw_geometry:
             rectangles = raw_geometry['rectangles']
-            for i, rect in enumerate(rectangles[:10]):  # Limit to 10 rooms
-                if rect.get('area', 0) > 50:  # Minimum room size (in page units)
-                    # CRITICAL FIX: rect dimensions are in page units (pixels), NOT inches!
-                    # Without proper scale information, we cannot convert accurately
-                    # Use reasonable default room dimensions instead
+            significant_rects = [r for r in rectangles if r.get('area', 0) > 50][:15]  # Up to 15 rooms
+            
+            if significant_rects:
+                # Attempt to estimate total area from all rectangles
+                total_rect_area = sum(r.get('area', 0) for r in significant_rects)
+                
+                # Create rooms with proportional sizing
+                for i, rect in enumerate(significant_rects):
+                    rect_proportion = rect.get('area', 0) / total_rect_area if total_rect_area > 0 else 0.1
                     
-                    # Default to typical room sizes
-                    width_ft = 12.0  # Default 12 feet width
-                    height_ft = 10.0  # Default 10 feet height
-                    area_sqft = width_ft * height_ft  # 120 sq ft
+                    # Estimate room size based on typical residential sizes
+                    # Assume total house is 2000 sqft if we can't determine
+                    estimated_house_size = 2000
+                    room_area = max(80, min(400, estimated_house_size * rect_proportion))
                     
-                    logger.warning(f"Fallback room creation - no scale available for proper conversion. "
-                                 f"Using default dimensions: {width_ft}x{height_ft} ft")
+                    # Calculate dimensions maintaining aspect ratio if possible
+                    aspect_ratio = rect.get('width', 1) / rect.get('height', 1) if rect.get('height', 1) > 0 else 1.0
+                    width_ft = (room_area * aspect_ratio) ** 0.5
+                    height_ft = room_area / width_ft if width_ft > 0 else 10
+                    
+                    # Round to reasonable dimensions
+                    width_ft = round(width_ft * 2) / 2  # Round to nearest 0.5 ft
+                    height_ft = round(height_ft * 2) / 2
+                    area_sqft = width_ft * height_ft
                     
                     room = Room(
-                        name=f"Room {i+1}",
+                        name=f"Unidentified Room {i+1}",
                         dimensions_ft=(width_ft, height_ft),
                         floor=1,
-                        windows=1,
-                        orientation="",
+                        windows=2,  # Assume 2 windows per room as typical
+                        orientation="unknown",
                         area=area_sqft,
                         room_type="unknown",
-                        confidence=0.3,  # Low confidence for fallback
+                        confidence=0.2,  # Very low confidence
                         center_position=(rect.get('center_x', 0), rect.get('center_y', 0)),
                         label_found=False,
-                        dimensions_source="geometry_fallback",
+                        dimensions_source="geometry_estimate",
                         source_elements={
-                            "warning": "Dimensions are estimates - no scale found",
+                            "error": "Parse failure - dimensions estimated",
+                            "proportion": rect_proportion,
                             "raw_page_units": {
                                 "width": rect.get('width', 0),
                                 "height": rect.get('height', 0),
@@ -477,24 +505,49 @@ class BlueprintParser:
                         }
                     )
                     rooms.append(room)
+                
+                logger.warning(f"Created {len(rooms)} estimated rooms from geometry. Total estimated area: {sum(r.area for r in rooms):.0f} sqft")
         
-        # If no geometry rooms, create minimal room
+        # If no geometry rooms, create typical residential layout as last resort
         if not rooms:
-            rooms.append(Room(
-                name="Unknown Room",
-                dimensions_ft=(20.0, 15.0),
-                floor=1,
-                windows=2,
-                orientation="",
-                area=300.0,
-                room_type="unknown",
-                confidence=0.1,
-                center_position=(0.0, 0.0),
-                label_found=False,
-                dimensions_source="estimated"
-            ))
+            logger.error("No geometry found - creating typical residential room layout as fallback")
+            
+            # Create a typical 3-bedroom house layout following Manual J room categories
+            typical_rooms = [
+                ("Living Room", (20.0, 15.0), "living", 300),
+                ("Kitchen", (12.0, 14.0), "kitchen", 168),
+                ("Master Bedroom", (14.0, 12.0), "master_bedroom", 168),
+                ("Bedroom 2", (11.0, 11.0), "bedroom", 121),
+                ("Bedroom 3", (10.0, 11.0), "bedroom", 110),
+                ("Bathroom 1", (8.0, 6.0), "bathroom", 48),
+                ("Bathroom 2", (7.0, 5.0), "bathroom", 35),
+                ("Hallway", (15.0, 4.0), "hallway", 60),
+            ]
+            
+            for name, (width, height), room_type, area in typical_rooms:
+                room = Room(
+                    name=f"{name} (Estimated)",
+                    dimensions_ft=(width, height),
+                    floor=1,
+                    windows=2 if "bedroom" in room_type.lower() or "living" in room_type.lower() else 1,
+                    orientation="unknown",
+                    area=area,
+                    room_type=room_type,
+                    confidence=0.0,  # Zero confidence - complete fallback
+                    center_position=(0.0, 0.0),
+                    label_found=False,
+                    dimensions_source="complete_fallback",
+                    source_elements={
+                        "critical_error": "Complete parsing failure - using typical house layout",
+                        "warning": "HVAC calculations will be estimates only"
+                    }
+                )
+                rooms.append(room)
+            
+            total_area = sum(r.area for r in rooms)
+            logger.error(f"Created typical {len(rooms)}-room layout with {total_area:.0f} sqft total area")
+            logger.error("This is a complete fallback - results will not match actual blueprint!")
         
-        logger.info(f"Created {len(rooms)} fallback rooms")
         return rooms
     
     def _convert_raw_geometry_to_elements(self, raw_geometry) -> List[GeometricElement]:
@@ -657,27 +710,26 @@ class BlueprintParser:
         )
     
     def _create_partial_blueprint(self, zip_code: str, project_id: Optional[str], metadata: ParsingMetadata, error: str) -> BlueprintSchema:
-        """Create partial blueprint when parsing fails"""
-        fallback_room = Room(
-            name="Parsing Failed - Unknown Room",
-            dimensions_ft=(20.0, 15.0),
-            floor=1,
-            windows=2,
-            orientation="",
-            area=300.0,
-            room_type="unknown",
-            confidence=0.0,
-            center_position=(0.0, 0.0),
-            label_found=False,
-            dimensions_source="error_fallback"
-        )
+        """Create partial blueprint when parsing fails - use intelligent fallback"""
+        # Create a more realistic fallback room structure
+        rooms = self._create_fallback_rooms({}, {})
+        total_area = sum(room.area for room in rooms)
+        
+        # Update metadata with error information
+        metadata.warnings.append(f"Complete parsing failure: {error}")
+        metadata.errors_encountered.append({
+            'stage': 'final_fallback',
+            'error': error,
+            'error_type': 'ParseFailure',
+            'impact': 'Using estimated room layout - HVAC calculations will be approximate'
+        })
         
         return BlueprintSchema(
             project_id=project_id or str(uuid4()),
             zip_code=zip_code,
-            sqft_total=300.0,
+            sqft_total=total_area,
             stories=1,
-            rooms=[fallback_room],
+            rooms=rooms,
             raw_geometry={},
             raw_text={},
             dimensions=[],
