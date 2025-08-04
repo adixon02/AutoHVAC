@@ -46,22 +46,32 @@ class BlueprintAIParser:
     
     def __init__(self):
         api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key or api_key == "your-openai-api-key-here":
+        if not api_key or api_key == "your-openai-api-key-here" or api_key.strip() == "":
             logger.error("OPENAI_API_KEY not configured! AI blueprint parsing will fail.")
-            logger.error("Please set OPENAI_API_KEY in your .env file")
+            logger.error("Please set OPENAI_API_KEY in your environment variables")
             logger.error("Get your API key from: https://platform.openai.com/api-keys")
-            raise BlueprintAIParsingError(
-                "OPENAI_API_KEY environment variable not set. "
-                "AI parsing is disabled. Please configure your OpenAI API key in the .env file."
-            )
+            # Don't raise exception immediately - allow fallback to traditional parsing
+            self.client = None
+            self.api_key_valid = False
+            return
+        
+        # Validate API key format (should start with sk-)
+        if not api_key.startswith(('sk-', 'sk_test_', 'sk_live_')):
+            logger.error(f"Invalid OpenAI API key format. Key should start with 'sk-' but got: {api_key[:10]}...")
+            self.client = None
+            self.api_key_valid = False
+            return
         
         self.client = AsyncOpenAI(api_key=api_key)
+        self.api_key_valid = True
+        logger.info("OpenAI API key validated successfully - AI parsing enabled")
         
-        # Configuration
-        self.max_image_size = 20 * 1024 * 1024  # 20MB max for OpenAI
-        self.target_dpi = 300  # High quality for blueprint analysis
-        self.max_pages = 10  # Limit pages to analyze
-        self.min_resolution = 800  # Minimum resolution to maintain blueprint readability
+        # Optimized configuration for fast processing
+        self.max_image_size = 5 * 1024 * 1024   # 5MB max - much smaller for speed
+        self.target_image_size = 2 * 1024 * 1024  # Target 2MB for optimal balance
+        self.max_pages = 5  # Reduced to speed up processing
+        self.min_resolution = 1024  # Increased minimum for better OCR
+        self.max_resolution = 2048  # Cap maximum resolution to control size
         
     async def parse_pdf_with_gpt4v(
         self, 
@@ -191,22 +201,33 @@ class BlueprintAIParser:
                 try:
                     page = doc[page_num]
                     
-                    # Create moderate resolution for GPT-4V (1.5x zoom for good balance)
-                    mat = fitz.Matrix(1.5, 1.5)  # 1.5x zoom for good quality without being too large
+                    # Optimized resolution - start smaller and scale up if needed
+                    # Target ~1200px on longest side for optimal GPT-4V performance
+                    page_rect = page.rect
+                    max_dimension = max(page_rect.width, page_rect.height)
+                    
+                    # Calculate optimal zoom to target 1200px on longest side
+                    target_size = 1200
+                    zoom_factor = target_size / max_dimension
+                    zoom_factor = min(zoom_factor, 2.0)  # Cap at 2x zoom
+                    zoom_factor = max(zoom_factor, 0.5)  # Minimum 0.5x zoom
+                    
+                    mat = fitz.Matrix(zoom_factor, zoom_factor)
+                    logger.info(f"Page {page_num + 1}: Using {zoom_factor:.2f}x zoom (target: {target_size}px)")
                     
                     # Render page as pixmap
                     pix = page.get_pixmap(matrix=mat)
                     
-                    # Try PNG first for lossless compression (better for line drawings)
-                    png_bytes = pix.tobytes("png")
+                    # Use JPEG first for smaller file sizes (better for GPT-4V API limits)
+                    img_bytes = pix.tobytes("jpeg", jpg_quality=85)
+                    logger.info(f"Page {page_num + 1}: JPEG format ({len(img_bytes) / 1024 / 1024:.1f}MB)")
                     
-                    if len(png_bytes) <= self.max_image_size:
-                        logger.info(f"Page {page_num + 1}: Using PNG format ({len(png_bytes) / 1024 / 1024:.1f}MB)")
-                        img_bytes = png_bytes
-                    else:
-                        # Fall back to JPEG with progressive compression
-                        img_bytes = pix.tobytes("jpeg", jpg_quality=90)
-                        logger.info(f"Page {page_num + 1}: Using JPEG format ({len(img_bytes) / 1024 / 1024:.1f}MB)")
+                    # If still too large, try PNG with compression
+                    if len(img_bytes) > self.target_image_size:
+                        png_bytes = pix.tobytes("png")
+                        if len(png_bytes) < len(img_bytes):
+                            img_bytes = png_bytes
+                            logger.info(f"Page {page_num + 1}: Switched to PNG ({len(img_bytes) / 1024 / 1024:.1f}MB)")
                     
                     # Compress if still too large
                     if len(img_bytes) > self.max_image_size:
@@ -235,76 +256,84 @@ class BlueprintAIParser:
             raise BlueprintAIParsingError(f"Failed to convert PDF to images with PyMuPDF: {str(e)}")
     
     def _compress_image_for_gpt4v(self, img_bytes: bytes, page_num: int, orig_width: int, orig_height: int) -> bytes:
-        """Compress image to stay under GPT-4V limit while maintaining readability"""
+        """Aggressively compress image for optimal GPT-4V performance"""
         logger.info(f"Compressing page {page_num} (original: {len(img_bytes) / 1024 / 1024:.1f}MB)")
         
-        # First try JPEG quality reduction
         img = Image.open(BytesIO(img_bytes))
         
-        # Try different JPEG qualities
-        for quality in [85, 75, 65, 50]:
+        # Target the smaller size for better API performance
+        target_size = self.target_image_size
+        
+        # First try quality reduction with progressive compression
+        for quality in [75, 65, 55, 45, 35]:
             buffer = BytesIO()
-            img.save(buffer, format='JPEG', quality=quality, optimize=True)
+            img.save(buffer, format='JPEG', quality=quality, optimize=True, progressive=True)
             compressed = buffer.getvalue()
             
-            if len(compressed) <= self.max_image_size:
+            if len(compressed) <= target_size:
                 logger.info(f"Compressed page {page_num} to {len(compressed) / 1024 / 1024:.1f}MB with JPEG quality {quality}")
                 return compressed
         
-        # If still too large, reduce resolution while maintaining aspect ratio
-        return self._reduce_resolution(img, page_num)
+        # If still too large, reduce resolution more aggressively
+        return self._reduce_resolution_aggressive(img, page_num, target_size)
     
-    def _reduce_resolution(self, img: Image.Image, page_num: int) -> bytes:
-        """Reduce image resolution while maintaining minimum readability"""
+    def _reduce_resolution_aggressive(self, img: Image.Image, page_num: int, target_size: int) -> bytes:
+        """Aggressively reduce resolution to hit target size for optimal GPT-4V performance"""
         orig_width, orig_height = img.size
+        logger.info(f"Aggressively reducing resolution from {orig_width}x{orig_height}")
         
-        # Calculate scaling factor to stay above minimum resolution
-        min_dimension = min(orig_width, orig_height)
+        # Calculate target dimensions for optimal GPT-4V performance
+        # GPT-4V works well with images around 1024-1500px on longest side
+        max_dimension = max(orig_width, orig_height)
         
-        # Try different scale factors
-        for scale in [0.75, 0.5, 0.4]:
+        # Try progressively smaller sizes until we hit target file size
+        target_dimensions = [1400, 1200, 1000, 800, 600]
+        
+        for target_dim in target_dimensions:
+            if target_dim >= max_dimension:
+                continue
+                
+            scale = target_dim / max_dimension
             new_width = int(orig_width * scale)
             new_height = int(orig_height * scale)
             
-            # Ensure minimum resolution for readability
-            if min(new_width, new_height) < self.min_resolution:
-                new_width = max(new_width, self.min_resolution)
-                new_height = max(new_height, self.min_resolution)
+            # Ensure minimum readable size
+            if min(new_width, new_height) < 600:
+                continue
             
             # Resize with high-quality resampling
             resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
             
-            # Try PNG first for resized image
-            buffer = BytesIO()
-            resized.save(buffer, format='PNG', optimize=True)
-            png_bytes = buffer.getvalue()
-            
-            if len(png_bytes) <= self.max_image_size:
-                logger.info(f"Reduced page {page_num} to {new_width}x{new_height} PNG ({len(png_bytes) / 1024 / 1024:.1f}MB)")
-                return png_bytes
-            
-            # Try JPEG if PNG is too large
-            buffer = BytesIO()
-            resized.save(buffer, format='JPEG', quality=75, optimize=True)
-            jpeg_bytes = buffer.getvalue()
-            
-            if len(jpeg_bytes) <= self.max_image_size:
-                logger.info(f"Reduced page {page_num} to {new_width}x{new_height} JPEG ({len(jpeg_bytes) / 1024 / 1024:.1f}MB)")
-                return jpeg_bytes
+            # Try different qualities to hit target size
+            for quality in [70, 60, 50, 40]:
+                buffer = BytesIO()
+                resized.save(buffer, format='JPEG', quality=quality, optimize=True, progressive=True)
+                result = buffer.getvalue()
+                
+                if len(result) <= target_size:
+                    logger.info(f"Reduced page {page_num} to {new_width}x{new_height} JPEG Q{quality} ({len(result) / 1024 / 1024:.1f}MB)")
+                    return result
         
-        # Last resort: very low quality JPEG at minimum resolution
-        min_size = (self.min_resolution, self.min_resolution)
-        last_resort = img.resize(min_size, Image.Resampling.LANCZOS)
+        # Final fallback: 800px longest side, low quality
+        final_scale = 800 / max_dimension
+        final_width = max(int(orig_width * final_scale), 600)
+        final_height = max(int(orig_height * final_scale), 600)
+        
+        final_resized = img.resize((final_width, final_height), Image.Resampling.LANCZOS)
         buffer = BytesIO()
-        last_resort.save(buffer, format='JPEG', quality=40, optimize=True)
+        final_resized.save(buffer, format='JPEG', quality=35, optimize=True, progressive=True)
         result = buffer.getvalue()
         
-        logger.warning(f"Page {page_num} compressed to minimum size: {len(result) / 1024 / 1024:.1f}MB")
+        logger.warning(f"Page {page_num} final compression: {final_width}x{final_height} Q35 ({len(result) / 1024 / 1024:.1f}MB)")
         return result
     
     
     async def _extract_blueprint_data(self, image_bytes: bytes) -> Dict[str, Any]:
         """Extract blueprint data using GPT-4V"""
+        # Check if API key is valid before attempting call
+        if not self.api_key_valid or not self.client:
+            raise BlueprintAIParsingError("OpenAI API key not configured - cannot use GPT-4V parsing")
+        
         try:
             # Encode image to base64
             image_base64 = base64.b64encode(image_bytes).decode('utf-8')
@@ -328,14 +357,15 @@ class BlueprintAIParser:
                                     "type": "image_url",
                                     "image_url": {
                                         "url": f"data:image/jpeg;base64,{image_base64}",
-                                        "detail": "low"  # Use low detail for complex blueprints
+                                        "detail": "high"  # Use high detail for accurate room detection
                                     }
                                 }
                             ]
                         }
                     ],
-                    max_tokens=1000,
-                    temperature=0.3  # Slightly higher temperature for flexibility
+                    max_tokens=2000,  # Increased for comprehensive room lists
+                    temperature=0.1,  # Lower temperature for consistent JSON
+                    timeout=60  # 60 second timeout to prevent hanging
                 )
                 logger.info("GPT-4V API call completed successfully")
                 
@@ -368,120 +398,51 @@ class BlueprintAIParser:
             raise BlueprintAIParsingError(f"GPT-4V API call failed: {str(e)}")
     
     def _create_blueprint_prompt(self) -> str:
-        """Create comprehensive prompt for accurate HVAC data extraction with confidence tracking"""
+        """Create optimized prompt for fast, accurate HVAC data extraction"""
         return """
-Analyze this architectural floor plan for HVAC load calculations. Your goal is to identify ALL rooms in the building.
+Analyze this floor plan for HVAC calculations. Extract room data systematically.
 
-CRITICAL STEP 1 - FIND THE SCALE:
-Look for scale notation in:
-- Title block (usually bottom right)
-- Near the drawing title
-- Common formats: "1/4" = 1'-0"", "1/8" = 1'-0"", "3/16" = 1'-0"", "1:48", "SCALE: 1/4" = 1'-0""
+STEPS:
+1. Find scale notation (e.g., "1/4\"=1'-0\", "1:48") - usually in title block
+2. Identify ALL rooms with labels and dimensions
+3. Estimate missing data using typical residential sizes
 
-CRITICAL STEP 2 - EXTRACT DIMENSIONS CORRECTLY:
-- Read dimensions EXACTLY as shown (e.g., "12'-6"", "15'0"", "29 x 12")
-- DO NOT convert or calculate - report raw dimensions
-- Note whether dimensions are shown for each room
-
-CRITICAL STEP 3 - IDENTIFY ALL ROOMS:
-You MUST identify EVERY room visible on the floor plan, including:
-- All bedrooms (Master, Bedroom 1, 2, 3, etc.)
-- All bathrooms (Full bath, half bath, powder room)
-- Kitchen and dining areas
-- Living spaces (Living room, family room, great room)
-- Utility spaces (Laundry, mudroom, pantry)
-- Storage areas (Closets, storage rooms)
-- Entry areas (Foyer, vestibule)
-- Hallways and corridors
-- Any other labeled spaces
-
-Return the following JSON structure:
-
+RETURN THIS JSON STRUCTURE:
 {
   "scale_found": true,
   "scale_notation": "1/4\" = 1'-0\"",
   "scale_factor": 48,
-  "scale_confidence": 0.9,
-  "north_arrow_found": false,
-  "north_direction": "unknown",
-  "orientation_confidence": 0.0,
-  "total_area": 1500.0,
-  "total_area_source": "labeled|calculated|estimated",
+  "total_area": 2000.0,
   "stories": 1,
   "rooms": [
     {
       "name": "Living Room",
-      "raw_dimensions": "29' x 12'",
-      "dimensions_ft": [29.0, 12.0],
-      "area": 348.0,
-      "area_matches_dimensions": true,
+      "raw_dimensions": "20' x 15'",
+      "dimensions_ft": [20.0, 15.0],
+      "area": 300.0,
       "floor": 1,
       "windows": 2,
-      "exterior_doors": 0,
-      "orientation": "unknown",
       "room_type": "living",
-      "exterior_walls": 1,
-      "corner_room": false,
-      "ceiling_height": 9.0,
       "confidence": 0.8,
-      "dimension_source": "measured|estimated|unclear",
-      "notes": "Clear dimensions visible on plan"
+      "dimension_source": "measured"
     }
   ]
 }
 
-IMPORTANT INSTRUCTIONS:
-1. SCALE VALIDATION:
-   - If scale_found is false, set all dimensions as "estimated" with confidence < 0.5
-   - Common scale factors: 1/4"=1' is 48, 1/8"=1' is 96, 3/16"=1' is 64
-   - CRITICAL: Report dimensions in FEET, not inches!
+ROOM TYPES: bedroom, bathroom, kitchen, living, dining, hallway, closet, laundry, office, other
+DIMENSION SOURCES: measured (shown on plan), estimated (typical size), scaled (from scale bar)
+CONFIDENCE: 0.9 (clear label+dims), 0.7 (clear label), 0.5 (unlabeled), 0.3 (uncertain)
 
-2. DIMENSION SANITY CHECKS:
-   - Typical residential room sizes:
-     * Bedroom: 100-200 sq ft (10x10 to 14x14)
-     * Master bedroom: 150-400 sq ft
-     * Bathroom: 20-100 sq ft
-     * Kitchen: 100-300 sq ft
-     * Living room: 200-400 sq ft
-     * Great room: 300-800 sq ft
-     * Closet: 10-50 sq ft
-     * Hallway: 30-100 sq ft
-   - If any room > 800 sq ft (except great rooms), double-check your dimensions
-   - If total area > 10,000 sq ft for residential, flag as suspicious
+TYPICAL SIZES (use if dimensions unclear):
+- Bedroom: 120-180 sqft
+- Master: 200-300 sqft  
+- Bathroom: 40-80 sqft
+- Kitchen: 150-250 sqft
+- Living: 250-350 sqft
+- Dining: 120-200 sqft
+- Closet: 15-40 sqft
 
-3. ROOM DETECTION:
-   - Scan the ENTIRE floor plan systematically
-   - Expected room counts:
-     * Small homes (1000-1500 sqft): 6-12 rooms
-     * Medium homes (1500-2500 sqft): 10-18 rooms
-     * Large homes (2500+ sqft): 15-30 rooms
-   - Common missed rooms: Pantry, Laundry, Mudroom, Walk-in Closets, Powder rooms
-
-4. AREA VALIDATION:
-   - ALWAYS verify: width × length = area
-   - Set area_matches_dimensions to false if calculation differs by > 5%
-   - If dimensions produce unrealistic area (e.g., 29,000 sq ft for a room), flag it
-
-5. CONFIDENCE SCORING:
-   - 0.9-1.0: Clearly labeled room with visible dimensions that pass sanity checks
-   - 0.7-0.8: Clearly labeled room without dimensions
-   - 0.5-0.6: Unlabeled room with clear boundaries
-   - 0.3-0.4: Partially visible or uncertain room
-   - 0.0-0.2: Dimensions or area failed sanity checks
-
-6. Mark dimension_source as:
-   - "measured" if dimensions are clearly marked on the plan
-   - "scaled" if you calculated from scale bar/grid
-   - "estimated" if you're estimating from typical sizes
-   - "error" if dimensions produce impossible areas
-
-CONSTRUCTION DETAILS TO FIND:
-- Wall construction (e.g., "2x6 frame", "R-21 insulation")
-- Window specs (e.g., "Low-E", "U-0.30")
-- Insulation values (e.g., "R-38 attic", "R-19 walls")
-- Any scale or dimension notes
-
-Return only valid JSON. Flag suspicious dimensions rather than reporting incorrect values.
+If scale not found, estimate dimensions. Report dimensions in FEET only. Include ALL visible rooms.
 """
     
     def _extract_json_from_response(self, response_text: str) -> str:

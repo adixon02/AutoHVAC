@@ -8,6 +8,36 @@ import numpy as np
 from typing import Dict, List, Tuple
 from datetime import datetime
 
+# Import validation utilities
+try:
+    from utils.validation import safe_float, safe_int, validate_calculation_inputs
+except ImportError:
+    # Fallback implementations if validation module not available
+    def safe_float(value, default=0.0, min_val=None, max_val=None):
+        try:
+            result = float(value)
+            if min_val is not None and result < min_val:
+                result = min_val
+            if max_val is not None and result > max_val:
+                result = max_val
+            return result
+        except (ValueError, TypeError):
+            return default
+    
+    def safe_int(value, default=0, min_val=None, max_val=None):
+        try:
+            result = int(float(value))
+            if min_val is not None and result < min_val:
+                result = min_val
+            if max_val is not None and result > max_val:
+                result = max_val
+            return result
+        except (ValueError, TypeError):
+            return default
+    
+    def validate_calculation_inputs(area, u_factor, temp_diff, component_type="wall"):
+        return safe_float(area, 100.0), safe_float(u_factor, 0.5), safe_float(temp_diff, 20.0)
+
 # Cooling Load Temperature Differences (CLTD) for different wall types
 # Based on ASHRAE fundamentals - simplified for common construction types
 # Using NumPy arrays for vectorized calculations
@@ -69,6 +99,12 @@ def get_wall_cltd(wall_type: str, orientation: str, hour: int = 14, outdoor_temp
     Returns:
         CLTD value adjusted for actual conditions
     """
+    # Ensure hour is an integer to prevent type errors
+    try:
+        hour = int(hour)
+    except (ValueError, TypeError):
+        hour = 14  # Default to peak hour if conversion fails
+    
     # Get base CLTD from tables
     base_cltd_data = WALL_CLTD_DATA.get(wall_type, WALL_CLTD_DATA['frame_medium'])
     base_cltd = base_cltd_data[min(hour, 23)]
@@ -141,6 +177,12 @@ def get_roof_cltd(roof_type: str, hour: int = 15, outdoor_temp: float = 95, indo
     Returns:
         CLTD value adjusted for actual conditions
     """
+    # Ensure hour is an integer to prevent type errors
+    try:
+        hour = int(hour)
+    except (ValueError, TypeError):
+        hour = 15  # Default to peak hour if conversion fails
+    
     # Get base CLTD from tables
     base_cltd_data = ROOF_CLTD_DATA.get(roof_type, ROOF_CLTD_DATA['medium_roof'])
     base_cltd = base_cltd_data[min(hour, 23)]
@@ -216,6 +258,12 @@ def get_glass_clf(orientation: str, hour: int = 14) -> float:
     Returns:
         CLF value for solar heat gain through glass
     """
+    # Ensure hour is an integer to prevent type errors
+    try:
+        hour = int(hour)
+    except (ValueError, TypeError):
+        hour = 14  # Default to peak hour if conversion fails
+    
     # Simplified CLF for glass - varies by orientation and time
     clf_data = {
         'N': [0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.55, 0.50, 0.45, 0.40, 0.35, 0.30, 0.25, 0.20, 0.15],
@@ -236,7 +284,7 @@ def calculate_wall_load_cltd(area: float, u_factor: float, wall_type: str, orien
                             outdoor_temp: float, indoor_temp: float = 75, hour: int = 14, 
                             climate_zone: str = "4A") -> float:
     """
-    Calculate cooling load through walls using CLTD method
+    Calculate cooling load through walls using CLTD method with input validation
     
     Q = U × A × CLTD
     
@@ -248,10 +296,16 @@ def calculate_wall_load_cltd(area: float, u_factor: float, wall_type: str, orien
         outdoor_temp: Outdoor design temperature
         indoor_temp: Indoor design temperature
         hour: Hour of day for peak calculation
+        climate_zone: IECC climate zone
         
     Returns:
         Cooling load in BTU/hr
     """
+    # Validate inputs
+    area, u_factor, temp_diff = validate_calculation_inputs(area, u_factor, outdoor_temp - indoor_temp, "wall")
+    outdoor_temp = safe_float(outdoor_temp, 95.0, min_val=70.0, max_val=130.0)
+    indoor_temp = safe_float(indoor_temp, 75.0, min_val=65.0, max_val=85.0)
+    
     cltd = get_wall_cltd(wall_type, orientation, hour, outdoor_temp, indoor_temp, climate_zone)
     return u_factor * area * cltd
 
@@ -260,7 +314,7 @@ def calculate_roof_load_cltd(area: float, u_factor: float, roof_type: str,
                             outdoor_temp: float, indoor_temp: float = 75, hour: int = 15,
                             climate_zone: str = "4A") -> float:
     """
-    Calculate cooling load through roof using CLTD method
+    Calculate cooling load through roof using CLTD method with input validation
     
     Args:
         area: Roof area in sq ft
@@ -269,10 +323,16 @@ def calculate_roof_load_cltd(area: float, u_factor: float, roof_type: str,
         outdoor_temp: Outdoor design temperature
         indoor_temp: Indoor design temperature
         hour: Hour of day for peak calculation
+        climate_zone: IECC climate zone
         
     Returns:
         Cooling load in BTU/hr
     """
+    # Validate inputs
+    area, u_factor, temp_diff = validate_calculation_inputs(area, u_factor, outdoor_temp - indoor_temp, "roof")
+    outdoor_temp = safe_float(outdoor_temp, 95.0, min_val=70.0, max_val=130.0)
+    indoor_temp = safe_float(indoor_temp, 75.0, min_val=65.0, max_val=85.0)
+    
     cltd = get_roof_cltd(roof_type, hour, outdoor_temp, indoor_temp, climate_zone)
     return u_factor * area * cltd
 
@@ -387,7 +447,7 @@ def calculate_overhang_shading(orientation: str, latitude: float, month: str, ho
 def calculate_window_conduction_load(area: float, u_factor: float, outdoor_temp: float, 
                                    indoor_temp: float = 75) -> float:
     """
-    Calculate conduction heat gain through windows
+    Calculate conduction heat gain through windows with input validation
     
     Q = U × A × ΔT
     
@@ -400,7 +460,8 @@ def calculate_window_conduction_load(area: float, u_factor: float, outdoor_temp:
     Returns:
         Conduction cooling load in BTU/hr
     """
-    delta_t = outdoor_temp - indoor_temp
+    # Validate inputs
+    area, u_factor, delta_t = validate_calculation_inputs(area, u_factor, outdoor_temp - indoor_temp, "window")
     return u_factor * area * delta_t
 
 
@@ -416,6 +477,12 @@ def calculate_internal_load_clf(heat_gain: float, source_type: str, hour: int = 
     Returns:
         Cooling load in BTU/hr
     """
+    # Ensure hour is an integer to prevent type errors
+    try:
+        hour = int(hour)
+    except (ValueError, TypeError):
+        hour = 14  # Default to peak hour if conversion fails
+    
     clf_data = INTERNAL_CLF_DATA.get(source_type, INTERNAL_CLF_DATA['equipment'])
     clf = clf_data[min(hour, 23)]
     
