@@ -45,6 +45,61 @@ class ValidationResult:
     confidence_score: float  # 0-1 overall confidence
 
 
+class BlueprintValidationError(Exception):
+    """
+    Custom exception for blueprint parsing validation failures
+    Includes user-friendly messaging and recovery suggestions
+    """
+    def __init__(self, error_type: str, message: str, details: Dict[str, Any], 
+                 recovery_suggestions: List[str] = None):
+        self.error_type = error_type
+        self.message = message
+        self.details = details
+        self.recovery_suggestions = recovery_suggestions or []
+        super().__init__(self.message)
+
+
+def calculate_data_quality_score(blueprint: BlueprintSchema, 
+                               warnings: List[ValidationIssue]) -> float:
+    """
+    Calculate overall data quality score (0-100)
+    
+    Args:
+        blueprint: The parsed blueprint
+        warnings: List of validation warnings/issues
+        
+    Returns:
+        float: Data quality score from 0 to 100
+    """
+    # Start with perfect score
+    score = 100.0
+    
+    # Deduct points for warnings based on severity
+    for warning in warnings:
+        if warning.severity == ValidationSeverity.ERROR:
+            score -= 20.0  # Major deduction for errors
+        elif warning.severity == ValidationSeverity.WARNING:
+            score -= 10.0  # Moderate deduction for warnings
+        elif warning.severity == ValidationSeverity.INFO:
+            score -= 2.0   # Minor deduction for info
+    
+    # Additional factors
+    if hasattr(blueprint, 'parsing_metadata') and blueprint.parsing_metadata:
+        # Deduct for low confidence
+        avg_confidence = blueprint.parsing_metadata.overall_confidence or 0.5
+        if avg_confidence < 0.7:
+            score -= (0.7 - avg_confidence) * 20  # Up to 14 points for low confidence
+        
+        # Deduct for missing data
+        if blueprint.parsing_metadata.geometry_status == "failed":
+            score -= 15.0
+        if blueprint.parsing_metadata.text_status == "failed":
+            score -= 10.0
+    
+    # Ensure score stays in valid range
+    return max(0.0, min(100.0, score))
+
+
 class BlueprintValidator:
     """Validates blueprint parsing results for accuracy and sanity"""
     

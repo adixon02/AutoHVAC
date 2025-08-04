@@ -22,7 +22,10 @@ from app.parser.ai_cleanup import cleanup, AICleanupError
 from services.pdf_thread_manager import pdf_thread_manager, PDFDocumentClosedError, PDFProcessingTimeoutError
 from services.pdf_page_analyzer import PDFPageAnalyzer
 from services.blueprint_ai_parser import blueprint_ai_parser, BlueprintAIParsingError
-from services.blueprint_validation import BlueprintValidator, BlueprintValidationError, calculate_data_quality_score
+from services.blueprint_validator import (
+    BlueprintValidator, ValidationSeverity, BlueprintValidationError, 
+    calculate_data_quality_score
+)
 
 logger = logging.getLogger(__name__)
 
