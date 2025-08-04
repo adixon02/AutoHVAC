@@ -53,6 +53,7 @@ class BlueprintAIParser:
         self.max_image_size = 20 * 1024 * 1024  # 20MB max for OpenAI
         self.target_dpi = 300  # High quality for blueprint analysis
         self.max_pages = 10  # Limit pages to analyze
+        self.min_resolution = 800  # Minimum resolution to maintain blueprint readability
         
     async def parse_pdf_with_gpt4v(
         self, 
