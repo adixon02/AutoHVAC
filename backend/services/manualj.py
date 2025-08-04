@@ -64,6 +64,148 @@ def _get_humidity_ratio(temp_f: float, rh_percent: float) -> float:
     return w
 
 
+def _apply_thermal_bridging_factor(
+    base_load: float,
+    construction_type: str,
+    component: str
+) -> float:
+    """
+    Apply thermal bridging factor to conduction loads
+    
+    Args:
+        base_load: Base conduction load (BTU/hr)
+        construction_type: "wood_frame", "steel_frame", "masonry", etc.
+        component: "wall", "roof", "floor"
+    
+    Returns:
+        Load including thermal bridging effects
+    """
+    # Thermal bridging factors (multiply base load)
+    # These account for heat transfer through structural members
+    bridging_factors = {
+        ("wood_frame", "wall"): 1.05,      # 5% for wood studs
+        ("wood_frame", "roof"): 1.07,      # 7% for roof trusses
+        ("wood_frame", "floor"): 1.05,     # 5% for floor joists
+        ("steel_frame", "wall"): 1.25,     # 25% for steel studs (much higher thermal conductivity)
+        ("steel_frame", "roof"): 1.20,     # 20% for steel trusses
+        ("steel_frame", "floor"): 1.15,    # 15% for steel joists
+        ("masonry", "wall"): 1.10,         # 10% for masonry ties and mortar joints
+        ("masonry", "roof"): 1.05,         # 5% for roof connections
+        ("masonry", "floor"): 1.05,        # 5% for floor connections
+        ("concrete", "wall"): 1.15,        # 15% for concrete thermal bridges
+        ("concrete", "roof"): 1.10,        # 10% for concrete roof
+        ("concrete", "floor"): 1.10,       # 10% for concrete floor
+    }
+    
+    # Default to wood frame if construction type unknown
+    if construction_type is None or construction_type == "":
+        construction_type = "wood_frame"
+    
+    # Normalize construction type
+    construction_type = construction_type.lower().replace("-", "_").replace(" ", "_")
+    
+    # Get factor or default to 1.0 (no adjustment)
+    factor = bridging_factors.get((construction_type, component), 1.0)
+    
+    return base_load * factor
+
+
+def _calculate_floor_losses(
+    floor_area: float,
+    floor_type: str,
+    outdoor_temp: float,
+    indoor_temp: float,
+    climate_zone: str,
+    perimeter_length: float = None
+) -> Dict[str, float]:
+    """
+    Calculate heat loss through floors (slab, crawlspace, or basement)
+    
+    Args:
+        floor_area: Floor area in sq ft
+        floor_type: "slab", "crawlspace", "basement", "above_grade"
+        outdoor_temp: Outdoor design temperature (°F)
+        indoor_temp: Indoor design temperature (°F)
+        climate_zone: ASHRAE climate zone
+        perimeter_length: Perimeter length for slab edge losses (ft)
+    
+    Returns:
+        Dict with heating and cooling loads in BTU/hr
+    """
+    delta_t_heating = indoor_temp - outdoor_temp
+    delta_t_cooling = outdoor_temp - indoor_temp
+    
+    if floor_type == "above_grade":
+        # No ground contact - minimal loss
+        return {"heating": 0, "cooling": 0}
+    
+    elif floor_type == "slab":
+        # Slab-on-grade losses are primarily through the perimeter
+        if perimeter_length is None:
+            # Estimate perimeter from area (assume square for simplicity)
+            perimeter_length = 4 * math.sqrt(floor_area)
+        
+        # F-factors for slab edge heat loss (BTU/hr·ft·°F)
+        # Based on insulation level and climate zone
+        if climate_zone in ["6A", "6B", "7", "8"]:
+            f_factor = 0.73  # Assumes R-10 edge insulation
+        elif climate_zone in ["4A", "4B", "5A", "5B"]:
+            f_factor = 0.86  # Assumes R-5 edge insulation
+        else:
+            f_factor = 1.20  # Uninsulated or minimal insulation
+        
+        # Slab edge loss
+        heating_loss = f_factor * perimeter_length * delta_t_heating
+        
+        # Slab provides thermal mass benefit in cooling
+        cooling_loss = 0  # Slab typically helps with cooling
+        
+    elif floor_type == "crawlspace":
+        # Crawlspace with insulated floor above
+        # U-factor depends on floor insulation
+        if climate_zone in ["6A", "6B", "7", "8"]:
+            u_factor = 0.033  # R-30 floor insulation
+        elif climate_zone in ["4A", "4B", "5A", "5B"]:
+            u_factor = 0.050  # R-20 floor insulation
+        else:
+            u_factor = 0.067  # R-15 floor insulation
+        
+        # Apply crawlspace temperature modifier (crawlspace is warmer than outside)
+        crawl_temp_ratio = 0.5  # Crawlspace temp is halfway between indoor and outdoor
+        effective_delta_t = delta_t_heating * crawl_temp_ratio
+        
+        heating_loss = u_factor * floor_area * effective_delta_t
+        cooling_loss = u_factor * floor_area * delta_t_cooling * 0.3  # Reduced cooling impact
+        
+    elif floor_type == "basement":
+        # Basement floor losses (below grade)
+        # Use simplified basement heat loss factors
+        if perimeter_length is None:
+            perimeter_length = 4 * math.sqrt(floor_area)
+        
+        # Below-grade wall loss factor (BTU/hr·ft·°F per linear foot of perimeter)
+        # Assumes 4 ft below grade average
+        below_grade_factor = 0.35  # For insulated basement walls
+        
+        # Basement floor loss factor (BTU/hr·ft²·°F)
+        floor_factor = 0.025  # For uninsulated basement floor
+        
+        heating_loss = (below_grade_factor * perimeter_length * 4 + 
+                       floor_factor * floor_area) * delta_t_heating
+        cooling_loss = heating_loss * 0.1  # Minimal cooling loss for basements
+    
+    else:
+        # Unknown floor type - use conservative estimate
+        u_factor = 0.05  # Moderate insulation
+        heating_loss = u_factor * floor_area * delta_t_heating
+        cooling_loss = u_factor * floor_area * delta_t_cooling * 0.5
+    
+    return {
+        "heating": max(0, heating_loss),
+        "cooling": max(0, cooling_loss)
+    }
+
+
 # Legacy climate zone data - now replaced by climate_data service
 # Keeping for backward compatibility with tests
 CLIMATE_ZONES = {
@@ -175,12 +317,34 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
         logger.info(f"Room {room.name} is interior - no exterior wall loads")
     else:
         # Calculate room perimeter based on area
-        # Assume roughly square rooms for perimeter estimation
-        room_perimeter = 4 * math.sqrt(room.area)
+        # Use actual dimensions if available, otherwise estimate
+        if hasattr(room, 'dimensions_ft') and room.dimensions_ft and len(room.dimensions_ft) >= 2:
+            width = room.dimensions_ft[0]
+            length = room.dimensions_ft[1]
+            room_perimeter = 2 * (width + length)
+        else:
+            # Assume rectangular room with 1.5:1 aspect ratio (more realistic than square)
+            width = math.sqrt(room.area / 1.5)
+            length = width * 1.5
+            room_perimeter = 2 * (width + length)
         
-        # Calculate exterior wall length based on number of exterior walls
-        # Each wall is approximately 1/4 of perimeter
-        exterior_wall_length = room_perimeter * (exterior_walls_count / 4.0)
+        # Calculate exterior wall length based on actual number of exterior walls
+        # This is more accurate than dividing by 4
+        if exterior_walls_count == 1:
+            # One exterior wall - typically the longer dimension
+            exterior_wall_length = max(width, length) if 'width' in locals() else room_perimeter * 0.3
+        elif exterior_walls_count == 2:
+            # Corner room - one long + one short wall
+            exterior_wall_length = (max(width, length) + min(width, length)) if 'width' in locals() else room_perimeter * 0.5
+        elif exterior_walls_count == 3:
+            # Three walls exposed
+            exterior_wall_length = room_perimeter * 0.75
+        elif exterior_walls_count >= 4:
+            # All walls exposed (rare, usually standalone structure)
+            exterior_wall_length = room_perimeter
+        else:
+            # Interior room or default
+            exterior_wall_length = 0
         
         # Calculate wall area
         wall_area = exterior_wall_length * ceiling_height
@@ -404,17 +568,38 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     # HEATING LOAD CALCULATIONS (simplified conduction method)
     heating_load = 0.0
     
-    # Wall conduction
+    # Wall conduction with thermal bridging
     if wall_area > 0:
-        heating_load += wall_u_factor * wall_area * (indoor_temp - outdoor_heating_temp)
+        base_wall_load = wall_u_factor * wall_area * (indoor_temp - outdoor_heating_temp)
+        # Determine construction type for thermal bridging
+        construction_type = "wood_frame"  # Default
+        if envelope_data and hasattr(envelope_data, 'wall_construction'):
+            if "steel" in envelope_data.wall_construction.lower():
+                construction_type = "steel_frame"
+            elif "masonry" in envelope_data.wall_construction.lower():
+                construction_type = "masonry"
+            elif "concrete" in envelope_data.wall_construction.lower():
+                construction_type = "concrete"
+        wall_heating_load = _apply_thermal_bridging_factor(base_wall_load, construction_type, "wall")
+        heating_load += wall_heating_load
     
-    # Roof conduction
+    # Roof conduction with thermal bridging
     if roof_area > 0:
-        heating_load += roof_u_factor * roof_area * (indoor_temp - outdoor_heating_temp)
+        base_roof_load = roof_u_factor * roof_area * (indoor_temp - outdoor_heating_temp)
+        # Determine construction type for thermal bridging
+        construction_type = "wood_frame"  # Default
+        if envelope_data and hasattr(envelope_data, 'roof_construction'):
+            if "steel" in envelope_data.roof_construction.lower():
+                construction_type = "steel_frame"
+            elif "concrete" in envelope_data.roof_construction.lower():
+                construction_type = "concrete"
+        roof_heating_load = _apply_thermal_bridging_factor(base_roof_load, construction_type, "roof")
+        heating_load += roof_heating_load
     
-    # Window conduction
+    # Window conduction (no thermal bridging for windows)
     if window_area > 0:
-        heating_load += window_u_factor * window_area * (indoor_temp - outdoor_heating_temp)
+        window_heating_load = window_u_factor * window_area * (indoor_temp - outdoor_heating_temp)
+        heating_load += window_heating_load
     
     # Infiltration heating load - enhanced with blower door support
     room_volume = room.area * ceiling_height
@@ -478,6 +663,34 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     # Add ventilation heating load
     heating_load += ventilation['heating']
     
+    # Add floor losses (only for ground floor rooms)
+    if room.floor == 1:
+        # Determine floor type from envelope data or use default
+        floor_type = "slab"  # Default assumption
+        if envelope_data:
+            if envelope_data.floor_construction:
+                if "slab" in envelope_data.floor_construction.lower():
+                    floor_type = "slab"
+                elif "crawl" in envelope_data.floor_construction.lower():
+                    floor_type = "crawlspace"
+                elif "basement" in envelope_data.floor_construction.lower():
+                    floor_type = "basement"
+        
+        # Calculate floor losses
+        floor_losses = _calculate_floor_losses(
+            room.area,
+            floor_type,
+            outdoor_heating_temp,
+            indoor_temp,
+            climate_data['climate_zone'],
+            perimeter_length=room_perimeter  # Use the calculated room perimeter
+        )
+        
+        heating_load += floor_losses['heating']
+        cooling_load += floor_losses['cooling']
+        
+        logger.info(f"Room {room.name}: Added floor losses - Heating: {floor_losses['heating']:.0f} BTU/hr, Type: {floor_type}")
+    
     # Apply thermal mass adjustments
     if envelope_data:
         # Classify thermal mass level
@@ -525,12 +738,13 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     # Create detailed load breakdown
     load_breakdown = {
         'heating': {
-            'wall_conduction': wall_load if 'wall_load' in locals() and wall_area > 0 else 0,
-            'roof_conduction': roof_load if 'roof_load' in locals() and roof_area > 0 else 0,
-            'window_conduction': window_u_factor * window_area * (indoor_temp - outdoor_heating_temp) if window_area > 0 else 0,
+            'wall_conduction': wall_heating_load if 'wall_heating_load' in locals() else 0,
+            'roof_conduction': roof_heating_load if 'roof_heating_load' in locals() else 0,
+            'window_conduction': window_heating_load if 'window_heating_load' in locals() else 0,
             'infiltration_sensible': infiltration_heating,
             'infiltration_cfm': infiltration_cfm if 'infiltration_cfm' in locals() else temp_infiltration_cfm,
             'ventilation': ventilation['heating'],
+            'floor_losses': floor_losses['heating'] if 'floor_losses' in locals() else 0,
             'subtotal': heating_load / (factors.get('heating', 1.0) if 'factors' in locals() else 1.0),
             'multipliers_applied': []
         },
@@ -547,6 +761,7 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
             'infiltration_cfm': infiltration_cfm if 'infiltration_cfm' in locals() else temp_infiltration_cfm,
             'ventilation_sensible': ventilation.get('sensible_cooling', ventilation['cooling']),
             'ventilation_latent': ventilation.get('latent_cooling', 0),
+            'floor_losses': floor_losses['cooling'] if 'floor_losses' in locals() else 0,
             'subtotal': cooling_load / (factors.get('cooling', 1.0) if 'factors' in locals() else 1.0),
             'multipliers_applied': []
         }
