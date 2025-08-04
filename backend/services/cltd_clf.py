@@ -55,7 +55,7 @@ ORIENTATION_CORRECTIONS = {
 }
 
 
-def get_wall_cltd(wall_type: str, orientation: str, hour: int = 14, outdoor_temp: float = 95, indoor_temp: float = 75) -> float:
+def get_wall_cltd(wall_type: str, orientation: str, hour: int = 14, outdoor_temp: float = 95, indoor_temp: float = 75, climate_zone: str = "4A") -> float:
     """
     Get Cooling Load Temperature Difference for walls
     
@@ -117,13 +117,18 @@ def get_wall_cltd_vectorized(wall_types: List[str], orientations: List[str],
         # Apply temperature correction
         temp_correction = (outdoor_temp - 95) + (indoor_temp - 75)
         
+        # Apply climate-specific CLTD adjustments per HVAC expert analysis
+        climate_adjusted_cltd = _apply_climate_cltd_adjustment(
+            base_cltd + orientation_correction + temp_correction, climate_zone, outdoor_temp
+        )
+        
         # Final CLTD
-        results[i] = max(base_cltd + orientation_correction + temp_correction, 0)
+        results[i] = max(climate_adjusted_cltd, 0)
     
     return results
 
 
-def get_roof_cltd(roof_type: str, hour: int = 15, outdoor_temp: float = 95, indoor_temp: float = 75) -> float:
+def get_roof_cltd(roof_type: str, hour: int = 15, outdoor_temp: float = 95, indoor_temp: float = 75, climate_zone: str = "4A") -> float:
     """
     Get Cooling Load Temperature Difference for roofs
     
@@ -143,10 +148,45 @@ def get_roof_cltd(roof_type: str, hour: int = 15, outdoor_temp: float = 95, indo
     # Apply temperature correction
     temp_correction = (outdoor_temp - 95) + (indoor_temp - 75)
     
+    # Apply climate-specific CLTD adjustments per HVAC expert analysis
+    climate_adjusted_cltd = _apply_climate_cltd_adjustment(base_cltd + temp_correction, climate_zone, outdoor_temp)
+    
     # Final CLTD
-    cltd = base_cltd + temp_correction
+    cltd = climate_adjusted_cltd
     
     return max(cltd, 0)
+
+
+def _apply_climate_cltd_adjustment(base_cltd: float, climate_zone: str, outdoor_temp: float) -> float:
+    """
+    Apply climate-specific CLTD adjustments per HVAC expert analysis
+    Reduces cooling loads in cold climates and adjusts for hot climates
+    
+    Args:
+        base_cltd: Base CLTD value after temperature correction
+        climate_zone: IECC climate zone (e.g., '5A', '6B')
+        outdoor_temp: Outdoor design temperature
+        
+    Returns:
+        Climate-adjusted CLTD value
+    """
+    if not climate_zone:
+        return base_cltd
+    
+    # Extract climate zone number
+    zone_num = int(climate_zone[0]) if climate_zone[0].isdigit() else 4
+    
+    # Apply climate-specific adjustments to reduce overestimation
+    if zone_num >= 5:  # Cold climates (5, 6, 7, 8)
+        # Reduce cooling loads in cold climates - less solar impact, shorter cooling season
+        adjustment_factor = 0.85  # 15% reduction
+    elif zone_num <= 2:  # Very hot climates (1, 2)
+        # Slightly increase for very hot climates but be conservative
+        adjustment_factor = 1.05  # 5% increase only
+    else:  # Mixed climates (3, 4)
+        adjustment_factor = 0.95  # 5% reduction to address overestimation
+    
+    return base_cltd * adjustment_factor
 
 
 def calculate_loads_vectorized(areas: np.ndarray, u_factors: np.ndarray, 
@@ -193,7 +233,8 @@ def get_glass_clf(orientation: str, hour: int = 14) -> float:
 
 
 def calculate_wall_load_cltd(area: float, u_factor: float, wall_type: str, orientation: str, 
-                            outdoor_temp: float, indoor_temp: float = 75, hour: int = 14) -> float:
+                            outdoor_temp: float, indoor_temp: float = 75, hour: int = 14, 
+                            climate_zone: str = "4A") -> float:
     """
     Calculate cooling load through walls using CLTD method
     
@@ -211,12 +252,13 @@ def calculate_wall_load_cltd(area: float, u_factor: float, wall_type: str, orien
     Returns:
         Cooling load in BTU/hr
     """
-    cltd = get_wall_cltd(wall_type, orientation, hour, outdoor_temp, indoor_temp)
+    cltd = get_wall_cltd(wall_type, orientation, hour, outdoor_temp, indoor_temp, climate_zone)
     return u_factor * area * cltd
 
 
 def calculate_roof_load_cltd(area: float, u_factor: float, roof_type: str,
-                            outdoor_temp: float, indoor_temp: float = 75, hour: int = 15) -> float:
+                            outdoor_temp: float, indoor_temp: float = 75, hour: int = 15,
+                            climate_zone: str = "4A") -> float:
     """
     Calculate cooling load through roof using CLTD method
     
@@ -231,7 +273,7 @@ def calculate_roof_load_cltd(area: float, u_factor: float, roof_type: str,
     Returns:
         Cooling load in BTU/hr
     """
-    cltd = get_roof_cltd(roof_type, hour, outdoor_temp, indoor_temp)
+    cltd = get_roof_cltd(roof_type, hour, outdoor_temp, indoor_temp, climate_zone)
     return u_factor * area * cltd
 
 
