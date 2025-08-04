@@ -37,11 +37,7 @@ def get_database_config():
         base_config.update({
             "connect_args": {
                 "sslmode": "require",
-                "connect_timeout": 10,
-                "server_settings": {
-                    "application_name": "autohvac_backend",
-                    "jit": "off",  # Disable JIT for stability
-                }
+                "application_name": "autohvac_backend"
             }
         })
         logger.info("Database: Production PostgreSQL with SSL configured")
@@ -49,10 +45,7 @@ def get_database_config():
         # Development PostgreSQL
         base_config.update({
             "connect_args": {
-                "connect_timeout": 10,
-                "server_settings": {
-                    "application_name": "autohvac_dev"
-                }
+                "application_name": "autohvac_dev"
             }
         })
         logger.info("Database: Development PostgreSQL configured")
@@ -78,14 +71,17 @@ elif async_database_url.startswith("sqlite://"):
     async_database_url = async_database_url.replace("sqlite://", "sqlite+aiosqlite://", 1)
 
 # Configure async engine with retry logic
-async_config = get_database_config()
-if "connect_args" in async_config:
-    # Async engines need different connect_args format
-    if async_database_url.startswith("postgresql+asyncpg://"):
-        async_config["connect_args"] = {
-            "ssl": "require" if os.getenv("ENV") == "production" else "prefer",
-            "connect_timeout": 10,
+async_config = get_database_config().copy()
+
+# Async engines need different connect_args format for PostgreSQL
+if async_database_url.startswith("postgresql+asyncpg://"):
+    is_production = os.getenv("ENV") == "production" or "render.com" in DATABASE_URL
+    async_config["connect_args"] = {
+        "ssl": "require" if is_production else "prefer",
+        "server_settings": {
+            "application_name": "autohvac_async",
         }
+    }
 
 async_engine = create_async_engine(async_database_url, **async_config)
 
