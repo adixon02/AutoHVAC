@@ -1073,10 +1073,9 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     total_heating *= duct_loss_factor
     total_cooling *= duct_loss_factor
     
-    # Safety factor
-    safety_factor = 1.1
-    total_heating *= safety_factor
-    total_cooling *= safety_factor
+    # NO SAFETY FACTORS - Per ACCA Manual J best practices
+    # Equipment should be sized to calculated loads only
+    # Safety factors lead to oversizing and performance issues
     
     # Equipment sizing recommendations
     equipment = _recommend_equipment(total_heating, total_cooling, schema.sqft_total, heating_fuel)
@@ -1097,7 +1096,7 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
             "duct_config": duct_config,
             "heating_fuel": heating_fuel,
             "duct_loss_factor": duct_loss_factor,
-            "safety_factor": safety_factor,
+            "safety_factor": 1.0,  # No safety factor per Manual J best practices
             "diversity_factor": diversity_factor,
             "construction_vintage": construction_vintage,
             "calculation_method": calculation_method,
@@ -1134,6 +1133,36 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     # Update validation warnings in result
     result["validation"]["warnings"] = validation_warnings
     
+    # Perform Manual J sanity checks
+    sanity_checks = _perform_manual_j_sanity_checks(
+        schema.sqft_total,
+        total_heating,
+        total_cooling,
+        climate["zone"],
+        construction_vintage
+    )
+    
+    # Add sanity check results to validation
+    result["validation"]["sanity_checks"] = sanity_checks
+    result["validation"]["sqft_per_ton"] = sanity_checks["sqft_per_ton"]
+    
+    # Add sanity check warnings/errors to main warnings
+    for error in sanity_checks.get("errors", []):
+        validation_warnings.append({
+            "severity": "error",
+            "message": error,
+            "fix": "Review calculation inputs - loads appear incorrect",
+            "details": {"source": "manual_j_sanity_check"}
+        })
+    
+    for warning in sanity_checks.get("warnings", []):
+        validation_warnings.append({
+            "severity": "warning", 
+            "message": warning,
+            "fix": "Verify inputs are accurate",
+            "details": {"source": "manual_j_sanity_check"}
+        })
+    
     # Create audit snapshot if requested
     if create_audit:
         try:
@@ -1154,6 +1183,79 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
             result["audit_id"] = None
     
     return result
+
+
+def _perform_manual_j_sanity_checks(
+    total_area: float, 
+    heating_btu: float, 
+    cooling_btu: float,
+    climate_zone: str,
+    construction_vintage: str
+) -> Dict[str, Any]:
+    """Perform comprehensive Manual J sanity checks per ACCA best practices"""
+    
+    cooling_tons = cooling_btu / 12000
+    sqft_per_ton = total_area / cooling_tons if cooling_tons > 0 else 0
+    heating_per_sqft = heating_btu / total_area if total_area > 0 else 0
+    cooling_per_sqft = cooling_btu / total_area if total_area > 0 else 0
+    
+    checks = {
+        "passed": True,
+        "sqft_per_ton": round(sqft_per_ton),
+        "heating_btu_per_sqft": round(heating_per_sqft, 1),
+        "cooling_btu_per_sqft": round(cooling_per_sqft, 1),
+        "warnings": [],
+        "errors": []
+    }
+    
+    # Primary check: sq ft/ton for construction vintage
+    if construction_vintage in ['current-code', '2000-2020']:
+        # New construction should be 600-1500 sq ft/ton
+        if sqft_per_ton < 600:
+            checks["errors"].append(f"Equipment oversized: {sqft_per_ton:.0f} sq ft/ton (expect 600-1500 for new construction)")
+            checks["passed"] = False
+        elif sqft_per_ton > 1500:
+            checks["warnings"].append(f"Equipment may be undersized: {sqft_per_ton:.0f} sq ft/ton (expect 600-1500 for new construction)")
+    else:
+        # Older construction 400-1200 sq ft/ton
+        if sqft_per_ton < 400:
+            checks["errors"].append(f"Equipment severely oversized: {sqft_per_ton:.0f} sq ft/ton (expect 400-1200 for older construction)")
+            checks["passed"] = False
+        elif sqft_per_ton > 1200:
+            checks["warnings"].append(f"Equipment may be undersized: {sqft_per_ton:.0f} sq ft/ton (expect 400-1200 for older construction)")
+    
+    # Climate-specific BTU/sqft ranges
+    zone_num = int(climate_zone[0]) if climate_zone[0].isdigit() else 4
+    expected_ranges = {
+        1: {"heating": (10, 30), "cooling": (25, 50)},  # Very hot
+        2: {"heating": (15, 35), "cooling": (20, 45)},  # Hot  
+        3: {"heating": (20, 40), "cooling": (15, 35)},  # Warm
+        4: {"heating": (25, 50), "cooling": (12, 30)},  # Mixed
+        5: {"heating": (30, 60), "cooling": (10, 25)},  # Cool
+        6: {"heating": (35, 70), "cooling": (8, 20)},   # Cold
+        7: {"heating": (40, 80), "cooling": (5, 15)},   # Very cold
+        8: {"heating": (45, 90), "cooling": (3, 12)}    # Subarctic
+    }
+    
+    h_min, h_max = expected_ranges.get(zone_num, (25, 50))["heating"]
+    c_min, c_max = expected_ranges.get(zone_num, (12, 30))["cooling"]
+    
+    if not (h_min <= heating_per_sqft <= h_max):
+        checks["warnings"].append(f"Heating load {heating_per_sqft:.1f} BTU/sqft outside climate zone {climate_zone} range ({h_min}-{h_max})")
+    
+    if not (c_min <= cooling_per_sqft <= c_max):
+        checks["warnings"].append(f"Cooling load {cooling_per_sqft:.1f} BTU/sqft outside climate zone {climate_zone} range ({c_min}-{c_max})")
+    
+    # Add recommendations
+    if not checks["passed"]:
+        checks["recommendations"] = [
+            "Review envelope inputs (insulation, windows, infiltration)",
+            "Verify room areas and counts are accurate",
+            "Check that no arbitrary safety factors were applied",
+            "Ensure proper climate data is being used"
+        ]
+    
+    return checks
 
 
 def _classify_room_type(room_name: str) -> str:
@@ -1380,7 +1482,7 @@ def _get_equipment_match_rating(equipment_capacity_tons: float, cooling_load_ton
 
 
 def _recommend_equipment(heating_btu: float, cooling_btu: float, total_sqft: float, heating_fuel: str = "gas") -> Dict[str, Any]:
-    """Recommend HVAC equipment based on loads and fuel type"""
+    """Recommend HVAC equipment based on loads and fuel type - Manual S compliant"""
     
     # Convert to tons (cooling)
     cooling_tons = cooling_btu / 12000
@@ -1396,32 +1498,61 @@ def _recommend_equipment(heating_btu: float, cooling_btu: float, total_sqft: flo
         system_type = "Electric Furnace + AC"
         primary_capacity = cooling_btu
     
+    # Manual S compliant sizing (95-115% of calculated load)
+    min_capacity = cooling_tons * 0.95  # 95% minimum
+    max_capacity = cooling_tons * 1.15  # 115% maximum for good rating
+    acceptable_max = cooling_tons * 1.25  # 125% maximum for acceptable rating
+    
     # Size recommendations with Manual S match ratings
     size_options = []
     available_sizes = [1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0]
     
+    # Sanity check
+    sqft_per_ton = total_sqft / cooling_tons if cooling_tons > 0 else 0
+    sanity_check_passed = 400 <= sqft_per_ton <= 2000  # Wide range for all construction types
+    
     for size in available_sizes:
-        if size >= cooling_tons * 0.85 and size <= cooling_tons * 1.3:  # Broader range for options
-            # Get Manual S match rating
-            match_rating = _get_equipment_match_rating(size, cooling_tons)
+        if size >= min_capacity and size <= acceptable_max:
+            # Get Manual S match rating based on proper criteria
+            if size >= min_capacity and size <= max_capacity:
+                rating = "Good"
+                explanation = f"Within optimal Manual S range (95-115% of {cooling_tons:.1f} tons)"
+            elif size <= acceptable_max:
+                rating = "Acceptable"
+                explanation = f"Within acceptable Manual S range (115-125% of {cooling_tons:.1f} tons)"
+            else:
+                rating = "Poor"
+                explanation = f"Oversized per Manual S (>125% of {cooling_tons:.1f} tons)"
             
-            efficiency = "Standard" if size <= cooling_tons * 1.1 else "High Efficiency"
+            # Validate against sq ft/ton
+            size_sqft_per_ton = total_sqft / size
+            size_sanity_check = 400 <= size_sqft_per_ton <= 2000
+            
             size_options.append({
                 "capacity_tons": size,
                 "capacity_btu": size * 12000,
-                "efficiency_rating": efficiency,
+                "sqft_per_ton": round(size_sqft_per_ton),
+                "efficiency_rating": "16+ SEER recommended",
                 "estimated_cost": f"${size * 2500:.0f} - ${size * 4000:.0f}",
-                "manual_s_rating": match_rating["rating"],
-                "manual_s_explanation": match_rating["explanation"],
-                "recommended": match_rating["rating"] == "Good"
+                "manual_s_rating": rating,
+                "manual_s_explanation": explanation,
+                "sanity_check_passed": size_sanity_check,
+                "recommended": rating == "Good" and size_sanity_check
             })
     
     return {
         "system_type": system_type,
-        "recommended_size_tons": round(cooling_tons, 1),
+        "calculated_load_tons": round(cooling_tons, 2),
+        "manual_s_sizing_range": f"{min_capacity:.1f} - {max_capacity:.1f} tons",
+        "sqft_per_ton": round(sqft_per_ton),
+        "load_sanity_check": "PASS" if sanity_check_passed else "REVIEW NEEDED",
         "size_options": size_options[:3],  # Top 3 options
         "ductwork_recommendation": _recommend_ductwork(total_sqft),
-        "estimated_install_time": f"{max(1, round(cooling_tons))} - {max(2, round(cooling_tons) + 1)} days"
+        "sizing_notes": [
+            "Equipment sized per ACCA Manual S (95-115% of calculated load)",
+            "No safety factors applied to load calculations",
+            f"Calculated {sqft_per_ton:.0f} sq ft/ton" + (" - typical for new construction" if 600 <= sqft_per_ton <= 1500 else "")
+        ]
     }
 
 
