@@ -67,7 +67,8 @@ def _get_humidity_ratio(temp_f: float, rh_percent: float) -> float:
 def _apply_thermal_bridging_factor(
     base_load: float,
     construction_type: str,
-    component: str
+    component: str,
+    load_type: str = "cooling"
 ) -> float:
     """
     Apply thermal bridging factor to conduction loads
@@ -76,28 +77,47 @@ def _apply_thermal_bridging_factor(
         base_load: Base conduction load (BTU/hr)
         construction_type: "wood_frame", "steel_frame", "masonry", etc.
         component: "wall", "roof", "floor"
+        load_type: "heating" or "cooling" - different factors for each
     
     Returns:
         Load including thermal bridging effects
     """
     # Thermal bridging factors (multiply base load)
     # These account for heat transfer through structural members
-    # BALANCED thermal bridging factors for accurate loads
-    # Previous over-reduction caused cooling underestimation
-    bridging_factors = {
-        ("wood_frame", "wall"): 1.04,      # Balanced: 4% for wood studs (was 1.05→1.03, now 1.04)
-        ("wood_frame", "roof"): 1.06,      # Balanced: 6% for roof trusses (was 1.07→1.05, now 1.06)
-        ("wood_frame", "floor"): 1.04,     # Balanced: 4% for floor joists (was 1.05→1.03, now 1.04)
-        ("steel_frame", "wall"): 1.20,     # Balanced: 20% for steel studs (was 1.25→1.15, now 1.20)
-        ("steel_frame", "roof"): 1.16,     # Balanced: 16% for steel trusses (was 1.20→1.12, now 1.16)
-        ("steel_frame", "floor"): 1.12,    # Balanced: 12% for steel joists (was 1.15→1.10, now 1.12)
-        ("masonry", "wall"): 1.09,         # Balanced: 9% for masonry ties (was 1.10→1.08, now 1.09)
-        ("masonry", "roof"): 1.04,         # Balanced: 4% for roof connections (was 1.05→1.03, now 1.04)
-        ("masonry", "floor"): 1.03,        # Reduced from 1.05 to 1.03 (3% for floor connections)
-        ("concrete", "wall"): 1.12,        # Reduced from 1.15 to 1.12 (12% for concrete bridges)
-        ("concrete", "roof"): 1.08,        # Reduced from 1.10 to 1.08 (8% for concrete roof)
-        ("concrete", "floor"): 1.08,       # Reduced from 1.10 to 1.08 (8% for concrete floor)
-    }
+    # Different factors for heating vs cooling - thermal bridging less significant in heating
+    
+    if load_type == "heating":
+        # REDUCED factors for heating to address overestimation
+        bridging_factors = {
+            ("wood_frame", "wall"): 1.02,      # Reduced: 2% for wood studs (was 1.04)
+            ("wood_frame", "roof"): 1.04,      # Reduced: 4% for roof trusses (was 1.06)
+            ("wood_frame", "floor"): 1.02,     # Reduced: 2% for floor joists (was 1.04)
+            ("steel_frame", "wall"): 1.15,     # Reduced: 15% for steel studs (was 1.20)
+            ("steel_frame", "roof"): 1.12,     # Reduced: 12% for steel trusses (was 1.16)
+            ("steel_frame", "floor"): 1.10,    # Reduced: 10% for steel joists (was 1.12)
+            ("masonry", "wall"): 1.06,         # Reduced: 6% for masonry ties (was 1.09)
+            ("masonry", "roof"): 1.02,         # Reduced: 2% for roof connections (was 1.04)
+            ("masonry", "floor"): 1.02,        # Reduced: 2% for floor connections (was 1.03)
+            ("concrete", "wall"): 1.08,        # Reduced: 8% for concrete bridges (was 1.12)
+            ("concrete", "roof"): 1.05,        # Reduced: 5% for concrete roof (was 1.08)
+            ("concrete", "floor"): 1.05,       # Reduced: 5% for concrete floor (was 1.08)
+        }
+    else:
+        # MAINTAIN cooling factors for accuracy
+        bridging_factors = {
+            ("wood_frame", "wall"): 1.04,      # 4% for wood studs
+            ("wood_frame", "roof"): 1.06,      # 6% for roof trusses
+            ("wood_frame", "floor"): 1.04,     # 4% for floor joists
+            ("steel_frame", "wall"): 1.20,     # 20% for steel studs
+            ("steel_frame", "roof"): 1.16,     # 16% for steel trusses
+            ("steel_frame", "floor"): 1.12,    # 12% for steel joists
+            ("masonry", "wall"): 1.09,         # 9% for masonry ties
+            ("masonry", "roof"): 1.04,         # 4% for roof connections
+            ("masonry", "floor"): 1.03,        # 3% for floor connections
+            ("concrete", "wall"): 1.12,        # 12% for concrete bridges
+            ("concrete", "roof"): 1.08,        # 8% for concrete roof
+            ("concrete", "floor"): 1.08,       # 8% for concrete floor
+        }
     
     # Default to wood frame if construction type unknown
     if construction_type is None or construction_type == "":
@@ -598,7 +618,7 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
                 construction_type = "masonry"
             elif "concrete" in envelope_data.wall_construction.lower():
                 construction_type = "concrete"
-        wall_heating_load = _apply_thermal_bridging_factor(base_wall_load, construction_type, "wall")
+        wall_heating_load = _apply_thermal_bridging_factor(base_wall_load, construction_type, "wall", "heating")
         heating_load += wall_heating_load
     
     # Roof conduction with thermal bridging
@@ -611,7 +631,7 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
                 construction_type = "steel_frame"
             elif "concrete" in envelope_data.roof_construction.lower():
                 construction_type = "concrete"
-        roof_heating_load = _apply_thermal_bridging_factor(base_roof_load, construction_type, "roof")
+        roof_heating_load = _apply_thermal_bridging_factor(base_roof_load, construction_type, "roof", "heating")
         heating_load += roof_heating_load
     
     # Window conduction (no thermal bridging for windows)
@@ -671,9 +691,11 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
         ach = construction_values.get('infiltration_ach', 0.5)
         infiltration_cfm = (room_volume * ach) / 60
     
-    # Calculate infiltration heating load
+    # Calculate infiltration heating load with seasonal adjustment
+    # Apply 15% reduction for heating season (building contraction, less wind)
+    heating_infiltration_cfm = infiltration_cfm * 0.85
     infiltration_loads = calculate_infiltration_loads(
-        infiltration_cfm, outdoor_heating_temp, indoor_temp
+        heating_infiltration_cfm, outdoor_heating_temp, indoor_temp
     )
     infiltration_heating = infiltration_loads['sensible']
     heating_load += infiltration_heating
@@ -760,7 +782,7 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
             'roof_conduction': roof_heating_load if 'roof_heating_load' in locals() else 0,
             'window_conduction': window_heating_load if 'window_heating_load' in locals() else 0,
             'infiltration_sensible': infiltration_heating,
-            'infiltration_cfm': infiltration_cfm if 'infiltration_cfm' in locals() else temp_infiltration_cfm,
+            'infiltration_cfm': heating_infiltration_cfm if 'heating_infiltration_cfm' in locals() else infiltration_cfm if 'infiltration_cfm' in locals() else temp_infiltration_cfm,
             'ventilation': ventilation['heating'],
             'floor_losses': floor_losses['heating'] if 'floor_losses' in locals() else 0,
             'subtotal': heating_load / (factors.get('heating', 1.0) if 'factors' in locals() else 1.0),
@@ -1106,10 +1128,10 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
         duct_heating_factor = 1.0   # No duct losses for ductless systems
         duct_cooling_factor = 1.0   # No duct gains for ductless systems
     elif duct_config == "ducted_crawl":
-        duct_heating_factor = 1.10  # 10% heating loss in conditioned crawl space
+        duct_heating_factor = 1.08  # 8% heating loss in conditioned crawl space (reduced from 10%)
         duct_cooling_factor = 1.05  # 5% cooling gain in conditioned crawl space
     else:  # ducted_attic
-        duct_heating_factor = 1.15  # 15% heating loss in unconditioned attic
+        duct_heating_factor = 1.12  # 12% heating loss in unconditioned attic (reduced from 15%)
         duct_cooling_factor = 1.10  # 10% cooling gain in unconditioned attic
     
     total_heating *= duct_heating_factor
