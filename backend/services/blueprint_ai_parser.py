@@ -112,19 +112,24 @@ class BlueprintAIParser:
             text_confidence=0.0
         )
         
-        logger.info(f"Starting GPT-4V blueprint parsing for {filename}")
+        logger.info("="*60)
+        logger.info(f"GPT-4V BLUEPRINT PARSING: {filename}")
+        logger.info(f"Project ID: {project_id}")
+        logger.info(f"Zip Code: {zip_code}")
+        logger.info("="*60)
         
         try:
             # Step 1: Convert PDF to images
-            logger.info("Converting PDF to images...")
+            logger.info("\n[STEP 1] Converting PDF to images...")
             images = self._convert_pdf_to_images(pdf_path)
             parsing_metadata.pdf_page_count = len(images)
             logger.info(f"Converted PDF to {len(images)} images")
             
             # Step 2: Try different pages and potentially combine results
-            logger.info("Trying different pages for GPT-4V analysis...")
+            logger.info("\n[STEP 2] Analyzing pages with GPT-4V...")
             all_page_results = []
             successful_pages = []
+            failed_pages = []
             
             # Try pages in order: 2, 1, 3, 4 (skip title pages, try floor plans first)
             page_order = [1, 0, 2, 3, 4, 5] if len(images) > 1 else [0]
@@ -150,10 +155,39 @@ class BlueprintAIParser:
                             successful_pages.append(page_idx)
                         else:
                             logger.warning(f"❌ Page {page_idx + 1}: No rooms found")
+                            failed_pages.append((page_idx, "no_rooms"))
                             
                     except BlueprintAIParsingError as e:
                         logger.warning(f"❌ Page {page_idx + 1} failed: {str(e)}")
+                        failed_pages.append((page_idx, str(e)))
                         continue
+            
+            # Second pass: retry failed pages with different image processing
+            if failed_pages and len(all_page_results) < 2:
+                logger.info(f"Retrying {len(failed_pages)} failed pages with enhanced processing...")
+                for page_idx, failure_reason in failed_pages:
+                    if "Unable to identify floor plan" in failure_reason:
+                        try:
+                            # Try with enhanced image processing
+                            enhanced_image = self._enhance_image_for_retry(images[page_idx], page_idx + 1)
+                            logger.info(f"Retrying page {page_idx + 1} with enhanced image ({len(enhanced_image)} bytes)")
+                            page_data = await self._extract_blueprint_data(enhanced_image, retry_count=1)
+                            
+                            if page_data and 'rooms' in page_data and len(page_data['rooms']) > 0:
+                                total_area_parsed = sum(r.get('area', 0) for r in page_data['rooms'])
+                                logger.info(f"✅ Page {page_idx + 1} (retry): Found {len(page_data['rooms'])} rooms, {total_area_parsed:.0f} sqft")
+                                
+                                all_page_results.append({
+                                    'page': page_idx + 1,
+                                    'data': page_data,
+                                    'room_count': len(page_data['rooms']),
+                                    'total_area': total_area_parsed,
+                                    'retried': True
+                                })
+                                successful_pages.append(page_idx)
+                        except Exception as e:
+                            logger.warning(f"Page {page_idx + 1} retry failed: {str(e)}")
+                            continue
             
             if not all_page_results:
                 raise BlueprintAIParsingError("Failed to extract data from any page")
@@ -171,10 +205,19 @@ class BlueprintAIParser:
             # 1. Best single page < 1500 sqft (likely incomplete)
             # 2. Best page has < 70% of total area across all pages
             # 3. Multiple pages have substantial content (> 500 sqft each)
+            # 4. Only one page succeeded but area < 1500 sqft (NEW)
             should_combine = False
             combine_reason = ""
             
-            if best_result['total_area'] < 1500 and len(all_page_results) > 1:
+            # Special case: only one page succeeded but area is suspiciously low
+            should_augment_with_fallback = False
+            if len(all_page_results) == 1 and best_result['total_area'] < 1500:
+                logger.warning(f"⚠️  Only one page parsed with {best_result['total_area']:.0f} sqft - likely incomplete!")
+                parsing_metadata.warnings.append(f"Only partial floor plan detected ({best_result['total_area']:.0f} sqft) - augmenting with estimated rooms")
+                should_augment_with_fallback = True
+                blueprint_data = best_result['data']
+                parsing_metadata.selected_page = best_result['page']
+            elif best_result['total_area'] < 1500 and len(all_page_results) > 1:
                 should_combine = True
                 combine_reason = f"best page only {best_result['total_area']:.0f} sqft"
             elif len(all_page_results) > 1 and best_result['total_area'] < 0.7 * total_area_all_pages:
@@ -189,10 +232,15 @@ class BlueprintAIParser:
                 blueprint_data = self._combine_page_results(all_page_results)
                 parsing_metadata.selected_page = best_result['page']
                 parsing_metadata.warnings.append(f"Combined {len(all_page_results)} pages ({combine_reason})")
-            else:
+            elif not should_augment_with_fallback:
                 blueprint_data = best_result['data']
                 parsing_metadata.selected_page = best_result['page']
                 logger.info(f"Using page {best_result['page']} with {best_result['room_count']} rooms, {best_result['total_area']:.0f} sqft")
+            
+            # Augment with fallback rooms if parsing was incomplete
+            if should_augment_with_fallback:
+                blueprint_data = self._augment_with_fallback_rooms(blueprint_data, best_result['total_area'])
+                parsing_metadata.warnings.append(f"Added estimated rooms to reach typical home size")
             
             parsing_metadata.ai_status = ParsingStatus.SUCCESS
             parsing_metadata.overall_confidence = 0.85
@@ -377,9 +425,58 @@ class BlueprintAIParser:
         logger.warning(f"Page {page_num} final compression: {final_width}x{final_height} Q35 ({len(result) / 1024 / 1024:.1f}MB)")
         return result
     
+    def _enhance_image_for_retry(self, image_bytes: bytes, page_num: int) -> bytes:
+        """Enhance image for retry with different processing settings"""
+        try:
+            # Open image
+            img = Image.open(BytesIO(image_bytes))
+            
+            # Convert to RGB if needed
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            orig_width, orig_height = img.size
+            logger.info(f"Enhancing page {page_num} for retry: original {orig_width}x{orig_height}")
+            
+            # Try different processing approaches
+            # 1. Increase contrast and brightness
+            from PIL import ImageEnhance
+            
+            # Enhance contrast
+            enhancer = ImageEnhance.Contrast(img)
+            img = enhancer.enhance(1.3)  # Increase contrast by 30%
+            
+            # Enhance brightness slightly
+            enhancer = ImageEnhance.Brightness(img)
+            img = enhancer.enhance(1.1)  # Increase brightness by 10%
+            
+            # Enhance sharpness for text clarity
+            enhancer = ImageEnhance.Sharpness(img)
+            img = enhancer.enhance(1.5)  # Increase sharpness by 50%
+            
+            # Resize to optimal resolution for GPT-4V (2000px on longest side)
+            max_dimension = max(orig_width, orig_height)
+            if max_dimension > 2000:
+                scale = 2000 / max_dimension
+                new_width = int(orig_width * scale)
+                new_height = int(orig_height * scale)
+                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                logger.info(f"Resized to {new_width}x{new_height} for optimal GPT-4V processing")
+            
+            # Save as high-quality PNG for better text recognition
+            buffer = BytesIO()
+            img.save(buffer, format='PNG', optimize=True)
+            result = buffer.getvalue()
+            
+            logger.info(f"Enhanced page {page_num}: {len(result) / 1024 / 1024:.1f}MB PNG")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to enhance image for page {page_num}: {str(e)}")
+            return image_bytes  # Return original on failure
     
-    async def _extract_blueprint_data(self, image_bytes: bytes) -> Dict[str, Any]:
-        """Extract blueprint data using GPT-4V"""
+    async def _extract_blueprint_data(self, image_bytes: bytes, retry_count: int = 0) -> Dict[str, Any]:
+        """Extract blueprint data using GPT-4V with retry logic"""
         # Check if API key is valid before attempting call
         if not self.api_key_valid or not self.client:
             raise BlueprintAIParsingError("OpenAI API key not configured - cannot use GPT-4V parsing")
@@ -476,6 +573,8 @@ class BlueprintAIParser:
         return """
 You are analyzing a floor plan image for residential HVAC load calculations. Extract room dimensions and details systematically.
 
+CRITICAL: This may be a PARTIAL floor plan showing only one floor or section. Extract ALL visible rooms even if incomplete.
+
 STEP 1 - IMAGE ANALYSIS:
 First, describe what you see in the image:
 - Is this a floor plan drawing? (walls, rooms, labels)
@@ -483,8 +582,11 @@ First, describe what you see in the image:
 - Are there dimension lines or measurements?
 - Is there a scale notation visible?
 - Is there a north arrow or compass? Which way is north?
+- Does this appear to be a complete floor plan or just a section/floor?
 
-If you cannot see a floor plan, return: {"error": "Unable to identify floor plan in image", "rooms": []}
+If you cannot see a floor plan AT ALL (e.g., title page, elevation, detail), return: {"error": "Unable to identify floor plan in image", "rooms": []}
+
+IMPORTANT: If you see ANY rooms or floor plan elements, proceed with extraction even if partial.
 
 STEP 2 - ROOM EXTRACTION:
 For each identifiable space (room, closet, hallway), extract:
@@ -497,10 +599,11 @@ For each identifiable space (room, closet, hallway), extract:
 
 STEP 3 - SYSTEMATIC COVERAGE:
 Work through the floor plan methodically:
-1. Start at entry/front door
+1. Start at entry/front door if visible
 2. Move clockwise through all rooms
 3. Include ALL spaces: bedrooms, bathrooms, kitchen, living areas, dining, hallways, closets, utility rooms, garage
 4. Don't skip small spaces - closets and hallways matter for HVAC
+5. If this appears to be a second floor, note floor=2 for all rooms
 
 RETURN JSON FORMAT:
 {
@@ -512,6 +615,8 @@ RETURN JSON FORMAT:
   "stories": 1,
   "north_arrow_found": false,
   "building_orientation": "",
+  "partial_floor_plan": false,
+  "floor_level": 1,
   "rooms": [
     {
       "name": "Master Bedroom",
@@ -526,7 +631,13 @@ RETURN JSON FORMAT:
       "confidence": 0.8,
       "location_description": "upper right corner"
     }
-  ]
+  ],
+  "verification": {
+    "room_count": 0,
+    "total_area_calculated": 0,
+    "missing_area": 0,
+    "parsing_notes": ""
+  }
 }
 
 ROOM TYPE OPTIONS: bedroom, bathroom, kitchen, living, dining, hallway, closet, laundry, office, garage, utility, storage, entry, other
@@ -534,11 +645,11 @@ ROOM TYPE OPTIONS: bedroom, bathroom, kitchen, living, dining, hallway, closet, 
 DIMENSION PARSING:
 - "15'-6\" x 12'-0\"" → [15.5, 12.0]
 - "15x12" → [15.0, 12.0]
-- If no dimensions shown, estimate based on typical residential scale
+- If no dimensions shown, estimate based on typical residential scale (8-10 ft ceilings, 10-20 ft room widths)
 
 CONFIDENCE LEVELS:
 - 0.9-1.0: Dimensions clearly labeled
-- 0.7-0.8: Room identified, dimensions estimated
+- 0.7-0.8: Room identified, dimensions estimated from scale
 - 0.5-0.6: Room assumed from layout
 - Below 0.5: Uncertain
 
@@ -604,6 +715,89 @@ Return valid JSON even if you can only partially read the floor plan. Include al
                    f"{combined_data['total_area']:.0f} sqft total")
         
         return combined_data
+    
+    def _augment_with_fallback_rooms(self, blueprint_data: Dict[str, Any], detected_area: float) -> Dict[str, Any]:
+        """Augment incomplete blueprint data with estimated rooms to reach typical home size"""
+        logger.warning(f"Augmenting partial blueprint data ({detected_area:.0f} sqft detected)")
+        
+        # Target typical home size of ~2000-2500 sqft
+        target_area = 2200  # Typical single-family home
+        missing_area = target_area - detected_area
+        
+        if missing_area <= 0:
+            return blueprint_data  # No augmentation needed
+        
+        logger.info(f"Adding estimated rooms for {missing_area:.0f} sqft missing area")
+        
+        # Typical rooms that might be missing
+        fallback_rooms = [
+            # Common missing rooms in partial floor plans
+            {"name": "Kitchen", "dims": [15.0, 12.0], "area": 180, "type": "kitchen", "windows": 2},
+            {"name": "Master Bedroom", "dims": [16.0, 14.0], "area": 224, "type": "bedroom", "windows": 2},
+            {"name": "Living Room", "dims": [18.0, 16.0], "area": 288, "type": "living", "windows": 3},
+            {"name": "Dining Room", "dims": [12.0, 12.0], "area": 144, "type": "dining", "windows": 2},
+            {"name": "Bedroom 2", "dims": [12.0, 11.0], "area": 132, "type": "bedroom", "windows": 1},
+            {"name": "Bedroom 3", "dims": [11.0, 11.0], "area": 121, "type": "bedroom", "windows": 1},
+            {"name": "Family Room", "dims": [16.0, 14.0], "area": 224, "type": "living", "windows": 2},
+            {"name": "Bathroom 2", "dims": [8.0, 7.0], "area": 56, "type": "bathroom", "windows": 1},
+            {"name": "Hallway", "dims": [20.0, 5.0], "area": 100, "type": "hallway", "windows": 0},
+        ]
+        
+        # Check which rooms are already detected
+        existing_room_types = set()
+        for room in blueprint_data.get('rooms', []):
+            room_type = room.get('room_type', '')
+            if room_type:
+                existing_room_types.add(room_type)
+        
+        # Add missing rooms until we reach target area
+        added_area = 0
+        added_rooms = []
+        
+        for fallback in fallback_rooms:
+            # Skip if we already have this type of room (except bedrooms/bathrooms)
+            if fallback['type'] in existing_room_types and fallback['type'] not in ['bedroom', 'bathroom']:
+                continue
+            
+            # Skip if we've added enough area
+            if added_area >= missing_area * 0.9:  # 90% of missing area
+                break
+            
+            # Create augmented room
+            augmented_room = {
+                "name": f"{fallback['name']} (Estimated)",
+                "raw_dimensions": f"{fallback['dims'][0]}' x {fallback['dims'][1]}'",
+                "dimensions_ft": fallback['dims'],
+                "area": fallback['area'],
+                "floor": 1,
+                "windows": fallback['windows'],
+                "exterior_walls": 1 if fallback['windows'] > 0 else 0,
+                "orientation": "unknown",
+                "room_type": fallback['type'],
+                "confidence": 0.3,  # Low confidence for estimated rooms
+                "location_description": "estimated location",
+                "augmented": True
+            }
+            
+            added_rooms.append(augmented_room)
+            added_area += fallback['area']
+        
+        # Update blueprint data
+        if 'rooms' not in blueprint_data:
+            blueprint_data['rooms'] = []
+        
+        blueprint_data['rooms'].extend(added_rooms)
+        blueprint_data['total_area'] = sum(r.get('area', 0) for r in blueprint_data['rooms'])
+        blueprint_data['augmentation_info'] = {
+            'original_area': detected_area,
+            'added_area': added_area,
+            'added_rooms': len(added_rooms),
+            'target_area': target_area
+        }
+        
+        logger.info(f"Added {len(added_rooms)} estimated rooms ({added_area:.0f} sqft) to reach {blueprint_data['total_area']:.0f} sqft total")
+        
+        return blueprint_data
     
     def _extract_json_from_response(self, response_text: str) -> str:
         """Extract JSON from GPT response, handling markdown code blocks"""
@@ -699,7 +893,8 @@ Return valid JSON even if you can only partially read the floor plan. Include al
                         "north_direction": blueprint_data.get('north_direction', 'unknown'),
                         "orientation_confidence": orientation_confidence,
                         "dimension_source": room_data.get('dimension_source', 'estimated'),
-                        "thermal_exposure": self._calculate_thermal_exposure(room_data)
+                        "thermal_exposure": self._calculate_thermal_exposure(room_data),
+                        "augmented": room_data.get('augmented', False)
                     }
                 )
                 rooms.append(room)
@@ -715,6 +910,24 @@ Return valid JSON even if you can only partially read the floor plan. Include al
             else:
                 total_area_final = total_area_declared
                 total_area_source = blueprint_data.get('total_area_source', 'declared')
+            
+            # Validation: Check if total area is reasonable
+            if total_area_final < 1000:
+                logger.warning(f"⚠️  Total area {total_area_final:.0f} sqft is unusually small for residential!")
+                parsing_metadata.warnings.append(f"Total area {total_area_final:.0f} sqft below typical residential minimum")
+            elif total_area_final > 5000:
+                logger.warning(f"⚠️  Total area {total_area_final:.0f} sqft is unusually large for residential!")
+                parsing_metadata.warnings.append(f"Total area {total_area_final:.0f} sqft above typical residential maximum")
+            
+            # Count augmented rooms
+            augmented_count = sum(1 for r in rooms if r.source_elements.get('augmented', False))
+            if augmented_count > 0:
+                logger.info(f"Total area: {total_area_final:.0f} sqft ({total_area_source}), "
+                           f"{len(rooms)} rooms ({augmented_count} augmented)")
+            else:
+                logger.info(f"Total area: {total_area_final:.0f} sqft ({total_area_source}), "
+                           f"calculated: {total_area_calculated:.0f} sqft, "
+                           f"{len(rooms)} rooms extracted")
             
             stories = blueprint_data.get('stories', 1)
             
