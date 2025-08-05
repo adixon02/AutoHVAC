@@ -24,9 +24,13 @@ class PolygonRoomDetector:
         self.MIN_WALL_THICKNESS = 1.5  # pixels - minimum thickness for walls
         self.WALL_MERGE_DISTANCE = 10  # pixels - distance to merge parallel walls
         
-        # Room polygon thresholds
-        self.MIN_ROOM_AREA = 100  # square pixels (will be converted to sq ft)
-        self.MAX_ROOM_AREA = 100000  # square pixels
+        # Room polygon thresholds (now scale-aware)
+        self.MIN_ROOM_AREA_SQFT = 10  # Minimum room size in square feet
+        self.MAX_ROOM_AREA_SQFT = 1200  # Maximum room size in square feet
+        
+        # Legacy pixel-based thresholds (for when scale is unknown)
+        self.MIN_ROOM_AREA = 10  # square pixels (reduced from 100)
+        self.MAX_ROOM_AREA = 1000000  # square pixels (increased from 100000)
         
         # Connection tolerances
         self.ENDPOINT_TOLERANCE = 15  # pixels - max distance to connect wall endpoints
@@ -275,16 +279,14 @@ class PolygonRoomDetector:
         """
         rooms = []
         
-        for polygon in polygons:
+        logger.info(f"Filtering {len(polygons)} polygons with scale factor: {scale_factor}")
+        
+        for idx, polygon in enumerate(polygons):
             if len(polygon) < 3:
                 continue
             
-            # Calculate polygon area
-            area = self.calculate_polygon_area(polygon)
-            
-            # Skip if area is unreasonable
-            if area < self.MIN_ROOM_AREA or area > self.MAX_ROOM_AREA:
-                continue
+            # Calculate polygon area in pixels
+            area_pixels = self.calculate_polygon_area(polygon)
             
             # Calculate room properties
             centroid = self.calculate_centroid(polygon)
@@ -292,22 +294,33 @@ class PolygonRoomDetector:
             
             # Convert to feet if scale factor available
             if scale_factor and scale_factor > 0:
-                area_sqft = area / (scale_factor ** 2)
+                area_sqft = area_pixels / (scale_factor ** 2)
                 width_ft = (bbox[2] - bbox[0]) / scale_factor
                 height_ft = (bbox[3] - bbox[1]) / scale_factor
+                
+                # Use scale-aware thresholds
+                min_area = self.MIN_ROOM_AREA_SQFT
+                max_area = self.MAX_ROOM_AREA_SQFT
+                
+                # Skip if area is outside reasonable room size range
+                if area_sqft < min_area or area_sqft > max_area:
+                    logger.debug(f"Polygon {idx} filtered: area {area_sqft:.1f} sq ft outside range {min_area}-{max_area} sq ft")
+                    continue
+                    
             else:
-                area_sqft = area / 100  # Rough estimate
+                # No scale - use pixel-based filtering
+                if area_pixels < self.MIN_ROOM_AREA or area_pixels > self.MAX_ROOM_AREA:
+                    logger.debug(f"Polygon {idx} filtered: area {area_pixels:.0f} pixels outside range")
+                    continue
+                    
+                # Rough estimates when scale unknown
+                area_sqft = area_pixels / 100
                 width_ft = (bbox[2] - bbox[0]) / 10
                 height_ft = (bbox[3] - bbox[1]) / 10
             
-            # Additional validation
-            if area_sqft < 10 or area_sqft > 1200:  # Room size limits in sq ft
-                logger.debug(f"Polygon filtered: area {area_sqft:.1f} sq ft outside valid range")
-                continue
-            
             rooms.append({
                 'polygon': polygon,
-                'area_pixels': area,
+                'area_pixels': area_pixels,
                 'area_sqft': area_sqft,
                 'centroid': centroid,
                 'bounding_box': bbox,

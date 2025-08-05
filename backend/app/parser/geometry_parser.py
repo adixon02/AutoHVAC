@@ -13,6 +13,8 @@ import threading
 from typing import Dict, List, Any, Optional, Tuple
 import re
 from .schema import RawGeometry
+from .scale_detector import ScaleDetector, ScaleResult
+from .exceptions import ScaleDetectionError
 from services.pdf_thread_manager import safe_pdfplumber_operation, safe_pymupdf_operation
 
 logger = logging.getLogger(__name__)
@@ -22,6 +24,10 @@ class GeometryParser:
     """Advanced PDF geometry extraction for HVAC blueprints"""
     
     def __init__(self):
+        # Initialize scale detector
+        self.scale_detector = ScaleDetector(dpi=72.0)  # Standard PDF DPI
+        
+        # Keep legacy scale patterns for backward compatibility
         self.scale_patterns = [
             # Standard architectural scales
             r'1/(\d+)"?\s*=\s*1\'?-?0?"?',    # 1/4" = 1'-0" -> captures denominator
@@ -83,51 +89,63 @@ class GeometryParser:
                 page_height = float(page.height)
                 logger.info(f"[Thread {thread_name}:{thread_id}] Page dimensions: {page_width} x {page_height}")
                 
-                # CRITICAL: Detect scale directly - no method calls with page objects
-                logger.info(f"[Thread {thread_name}:{thread_id}] Detecting scale markers...")
+                # Use robust multi-method scale detection
+                logger.info(f"[Thread {thread_name}:{thread_id}] Starting robust scale detection...")
                 scale_start = time.time()
                 scale_factor = None
+                scale_result = None
+                
                 try:
+                    # Extract text elements for scale detection
                     words = page.extract_words()
-                    text = ' '.join([w['text'] for w in words])
+                    text_elements = [{'text': w['text'], 'x0': w.get('x0', 0), 'top': w.get('top', 0)} for w in words]
                     
-                    for i, pattern in enumerate(self.scale_patterns):
-                        match = re.search(pattern, text, re.IGNORECASE)
-                        if match:
-                            try:
-                                groups = match.groups()
-                                
-                                # Handle different pattern types
-                                if i == 0:  # 1/4" = 1'-0" pattern
-                                    denominator = float(groups[0])
-                                    scale_factor = 12.0 * denominator  # e.g., 1/4" = 48
-                                elif i == 1:  # 1" = 20'-0" pattern
-                                    feet = float(groups[0])
-                                    inches = float(groups[1]) if len(groups) > 1 and groups[1] else 0
-                                    scale_factor = (feet * 12 + inches)
-                                elif i in [2, 6]:  # Ratio patterns like 1:48
-                                    if len(groups) >= 2:
-                                        scale_factor = float(groups[1]) / float(groups[0])
-                                    else:
-                                        scale_factor = float(groups[0])
-                                elif i == 3:  # SCALE: 1/4 pattern
-                                    denominator = float(groups[0])
-                                    scale_factor = 12.0 * denominator
-                                elif i == 5:  # 1" = 8' pattern
-                                    inch_val = float(groups[0]) if groups[0] else 1
-                                    feet_val = float(groups[1])
-                                    scale_factor = (feet_val * 12) / inch_val
-                                else:
-                                    # Default to 1/4" scale if we can't parse
-                                    scale_factor = 48.0
-                                
-                                logger.info(f"[Thread {thread_name}:{thread_id}] Detected scale from pattern {i}: {scale_factor} ({match.group()})")
-                                break
-                            except Exception as e:
-                                logger.debug(f"[Thread {thread_name}:{thread_id}] Failed to parse scale with pattern {i}: {e}")
-                                continue
+                    # Extract dimensions (look for patterns like "12'-0"")
+                    dimensions = []
+                    dimension_pattern = r"(\d+)['\s]*-?\s*(\d+)?[\"\s]*"
+                    for word in words:
+                        if re.search(dimension_pattern, word['text']):
+                            dimensions.append({
+                                'dimension_text': word['text'],
+                                'x0': word.get('x0', 0),
+                                'top': word.get('top', 0),
+                                'parsed_dimensions': self._parse_dimension_text(word['text'])
+                            })
+                    
+                    # We'll get rectangles and lines later, but pass empty for initial detection
+                    # This allows text-based detection to work first
+                    scale_result = self.scale_detector.detect_scale(
+                        text_elements=text_elements,
+                        dimensions=dimensions,
+                        rectangles=[],  # Will be filled after we extract them
+                        lines=[],  # Will be filled after we extract them
+                        page_width=page_width,
+                        page_height=page_height
+                    )
+                    
+                    scale_factor = scale_result.scale_factor
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Scale detection result:")
+                    logger.info(f"[Thread {thread_name}:{thread_id}]   Scale: {scale_factor:.1f} px/ft")
+                    logger.info(f"[Thread {thread_name}:{thread_id}]   Confidence: {scale_result.confidence:.2f}")
+                    logger.info(f"[Thread {thread_name}:{thread_id}]   Method: {scale_result.detection_method}")
+                    logger.info(f"[Thread {thread_name}:{thread_id}]   Validation: {scale_result.validation_results}")
+                    
+                    # Check if confidence is too low and raise exception if needed
+                    if scale_result.confidence < 0.5:
+                        logger.warning(f"[Thread {thread_name}:{thread_id}] Scale detection confidence too low: {scale_result.confidence:.2f}")
+                        # We'll raise this after extracting geometry to provide more context
+                        
                 except Exception as e:
-                    logger.warning(f"[Thread {thread_name}:{thread_id}] Scale detection failed: {e}")
+                    logger.warning(f"[Thread {thread_name}:{thread_id}] Robust scale detection failed: {e}")
+                    # Use fallback scale
+                    scale_factor = 48.0  # Default to 1/4" scale
+                    scale_result = ScaleResult(
+                        scale_factor=scale_factor,
+                        confidence=0.3,
+                        detection_method="error_fallback",
+                        validation_results={},
+                        alternative_scales=[]
+                    )
                 
                 logger.info(f"[Thread {thread_name}:{thread_id}] Scale detection took {time.time() - scale_start:.2f}s, result: {scale_factor}")
                 
@@ -693,3 +711,35 @@ class GeometryParser:
         dist2 = np.sqrt((line1['x1'] - line2['x1'])**2 + (line1['y1'] - line2['y1'])**2)
         
         return min(dist1, dist2) < tolerance
+    
+    def _parse_dimension_text(self, text: str) -> List[float]:
+        """
+        Parse dimension text like "12'-0"" or "10'" into feet
+        Returns list of dimension values in feet
+        """
+        dimensions = []
+        
+        # Common dimension patterns
+        patterns = [
+            r"(\d+)['\s]*-?\s*(\d+)?[\"\s]*",  # 12'-0" or 12'-6"
+            r"(\d+\.?\d*)['\s]*",  # 10' or 10.5'
+            r"(\d+)[\"\s]*",  # 12" (inches)
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                try:
+                    groups = match.groups()
+                    if len(groups) >= 2 and groups[1]:  # Feet and inches
+                        feet = float(groups[0])
+                        inches = float(groups[1])
+                        dimensions.append(feet + inches / 12.0)
+                    elif "'" in text:  # Just feet
+                        dimensions.append(float(groups[0]))
+                    elif '"' in text:  # Just inches
+                        dimensions.append(float(groups[0]) / 12.0)
+                except:
+                    continue
+        
+        return dimensions

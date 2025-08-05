@@ -53,3 +53,33 @@ class LowConfidenceError(UserInterventionRequired):
             "user_action_required": "confirm_or_correct"
         }
         super().__init__(message, details)
+
+
+class ScaleDetectionError(UserInterventionRequired):
+    """Raised when blueprint scale cannot be reliably determined"""
+    
+    def __init__(self, detected_scale: float = None, confidence: float = 0.0, 
+                 alternatives: list = None, validation_issues: dict = None):
+        if detected_scale:
+            message = f"Blueprint scale detection confidence too low ({confidence:.2f}). Detected {detected_scale:.1f} px/ft may be incorrect."
+        else:
+            message = "Blueprint scale could not be detected. Manual scale entry required."
+        
+        details = {
+            "error_type": "scale_detection_failed",
+            "detected_scale": detected_scale,
+            "confidence": confidence,
+            "alternative_scales": alternatives or [],
+            "validation_issues": validation_issues or {},
+            "user_action_required": "select_or_enter_scale",
+            "common_scales": [
+                {"label": "1/8\" = 1'-0\"", "value": 96.0},
+                {"label": "3/16\" = 1'-0\"", "value": 64.0},
+                {"label": "1/4\" = 1'-0\"", "value": 48.0},
+                {"label": "3/8\" = 1'-0\"", "value": 32.0},
+                {"label": "1/2\" = 1'-0\"", "value": 24.0},
+                {"label": "3/4\" = 1'-0\"", "value": 16.0},
+                {"label": "1\" = 1'-0\"", "value": 12.0},
+            ]
+        }
+        super().__init__(message, details)
