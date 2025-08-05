@@ -45,6 +45,13 @@ class BlueprintAIParser:
     """
     
     def __init__(self):
+        # Set default configuration values first
+        self.max_image_size = 5 * 1024 * 1024   # 5MB max - much smaller for speed
+        self.target_image_size = 2 * 1024 * 1024  # Target 2MB for optimal balance
+        self.max_pages = 5  # Reduced to speed up processing
+        self.min_resolution = 1024  # Increased minimum for better OCR
+        self.max_resolution = 2048  # Cap maximum resolution to control size
+        
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key or api_key == "your-openai-api-key-here" or api_key.strip() == "":
             logger.error("OPENAI_API_KEY not configured! AI blueprint parsing will fail.")
@@ -65,13 +72,6 @@ class BlueprintAIParser:
         self.client = AsyncOpenAI(api_key=api_key)
         self.api_key_valid = True
         logger.info("OpenAI API key validated successfully - AI parsing enabled")
-        
-        # Optimized configuration for fast processing
-        self.max_image_size = 5 * 1024 * 1024   # 5MB max - much smaller for speed
-        self.target_image_size = 2 * 1024 * 1024  # Target 2MB for optimal balance
-        self.max_pages = 5  # Reduced to speed up processing
-        self.min_resolution = 1024  # Increased minimum for better OCR
-        self.max_resolution = 2048  # Cap maximum resolution to control size
         
     async def parse_pdf_with_gpt4v(
         self, 
@@ -652,15 +652,24 @@ If scale not found, estimate dimensions. Report dimensions in FEET only. Include
         logger.error("=" * 60)
         
         # Create a typical residential layout as fallback
+        # Target ~2500 sq ft typical home
         typical_rooms = [
-            ("Living Room", (20.0, 15.0), "living", 300, 3),
-            ("Kitchen", (12.0, 14.0), "kitchen", 168, 2),
-            ("Master Bedroom", (14.0, 12.0), "master_bedroom", 168, 2),
-            ("Bedroom 2", (11.0, 11.0), "bedroom", 121, 2),
-            ("Bedroom 3", (10.0, 11.0), "bedroom", 110, 2),
-            ("Bathroom 1", (8.0, 6.0), "bathroom", 48, 1),
-            ("Bathroom 2", (7.0, 5.0), "bathroom", 35, 0),
-            ("Hallway", (15.0, 4.0), "hallway", 60, 0),
+            ("Living Room", (20.0, 18.0), "living", 360, 3),
+            ("Kitchen", (15.0, 18.0), "kitchen", 270, 2),
+            ("Dining Room", (14.0, 12.0), "dining", 168, 2),
+            ("Master Bedroom", (16.0, 14.0), "master_bedroom", 224, 2),
+            ("Master Bathroom", (10.0, 8.0), "bathroom", 80, 1),
+            ("Bedroom 2", (12.0, 12.0), "bedroom", 144, 2),
+            ("Bedroom 3", (12.0, 11.0), "bedroom", 132, 2),
+            ("Bedroom 4", (11.0, 11.0), "bedroom", 121, 2),
+            ("Bathroom 2", (8.0, 7.0), "bathroom", 56, 1),
+            ("Bathroom 3", (7.0, 6.0), "bathroom", 42, 0),
+            ("Family Room", (18.0, 16.0), "living", 288, 3),
+            ("Laundry", (8.0, 8.0), "laundry", 64, 1),
+            ("Hallway", (30.0, 5.0), "hallway", 150, 0),
+            ("Entry", (10.0, 8.0), "other", 80, 1),
+            ("Closets", (10.0, 15.0), "closet", 150, 0),
+            ("Garage", (20.0, 20.0), "garage", 400, 2),
         ]
         
         rooms = []

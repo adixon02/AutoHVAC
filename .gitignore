@@ -157,6 +157,10 @@ pipeline_output_*.json
 audit_logs/
 backend/audit_logs/
 
+# Sample blueprint PDFs
+blueprint-example-*.pdf
+/blueprint-example-*.pdf
+
 # Test artifacts
 test_*.py
 test_*.html
