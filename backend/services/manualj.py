@@ -276,7 +276,8 @@ def _calculate_confidence_metrics(zones: List[Dict], schema: BlueprintSchema) ->
     # Check for area validation
     total_room_area = sum(zone['area'] for zone in zones)
     if abs(total_room_area - schema.sqft_total) > schema.sqft_total * 0.1:
-        warnings.append(f"Room areas ({total_room_area} sqft) differ from total ({schema.sqft_total} sqft) by >10%")
+        area_diff_pct = abs(total_room_area - schema.sqft_total) / schema.sqft_total * 100
+        warnings.append(f"Area correction applied: parsed {total_room_area:.0f} sqft vs declared {schema.sqft_total:.0f} sqft ({area_diff_pct:.0f}% difference)")
         overall_confidence *= 0.9
     
     return {
@@ -465,15 +466,24 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
         orientation_confidence = room.source_elements.get('orientation_confidence', 0.0) if hasattr(room, 'source_elements') else 0.0
         
         if room.orientation == 'unknown' or orientation_confidence < 0.3:
-            # Unknown orientation - use average of all orientations
-            orientations = ['N', 'S', 'E', 'W']
-            total_solar = 0
-            for orient in orientations:
-                total_solar += calculate_window_solar_load(
+            # Unknown orientation - use weighted worst-case approach based on solar physics
+            # South and West receive the most solar heat gain
+            orientation_weights = {
+                'S': 0.40,  # 40% - Maximum solar exposure
+                'W': 0.30,  # 30% - High afternoon heat gain
+                'E': 0.20,  # 20% - Morning heat gain
+                'N': 0.10   # 10% - Minimal solar exposure
+            }
+            
+            weighted_solar = 0
+            for orient, weight in orientation_weights.items():
+                solar_contribution = calculate_window_solar_load(
                     window_area, window_shgc, orient
                 )
-            solar_load = total_solar / len(orientations)
-            logger.info(f"Room {room.name}: Using averaged solar load due to unknown orientation")
+                weighted_solar += solar_contribution * weight
+            
+            solar_load = weighted_solar
+            logger.info(f"Room {room.name}: Using weighted solar load (S:40%, W:30%, E:20%, N:10%) due to unknown orientation")
         else:
             solar_load = calculate_window_solar_load(
                 window_area, window_shgc, room.orientation
@@ -1065,21 +1075,45 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
         total_heating += room_heating
         total_cooling += room_cooling
     
+    # Apply area correction factor if room areas don't match declared total
+    # This accounts for spaces that may not have been detected (hallways, closets, etc.)
+    total_room_area = sum(room.area for room in schema.rooms)
+    area_correction_factor = 1.0
+    
+    if total_room_area > 0 and abs(total_room_area - schema.sqft_total) > schema.sqft_total * 0.1:
+        # If room areas differ from declared total by more than 10%, apply scaling
+        area_correction_factor = schema.sqft_total / total_room_area
+        logger.info(f"Applying area correction factor: {area_correction_factor:.2f} "
+                   f"(parsed: {total_room_area:.0f} sqft, declared: {schema.sqft_total:.0f} sqft)")
+        
+        # Apply correction to both heating and cooling loads
+        total_heating *= area_correction_factor
+        total_cooling *= area_correction_factor
+        
+        # Also update zone data to reflect scaled loads
+        for zone in zones:
+            zone['heating_btu'] = int(zone['heating_btu'] * area_correction_factor)
+            zone['cooling_btu'] = int(zone['cooling_btu'] * area_correction_factor)
+    
     # Apply Manual J diversity factor to prevent oversizing
     diversity_factor = get_diversity_factor(len(schema.rooms))
     total_cooling *= diversity_factor
     
     # Apply system factors
-    # Duct losses based on configuration
+    # Duct losses/gains based on configuration
+    # ACCA Manual J requires accounting for both duct losses (heating) and gains (cooling)
     if duct_config == "ductless":
-        duct_loss_factor = 1.0  # No duct losses for ductless systems
+        duct_heating_factor = 1.0   # No duct losses for ductless systems
+        duct_cooling_factor = 1.0   # No duct gains for ductless systems
     elif duct_config == "ducted_crawl":
-        duct_loss_factor = 1.10  # Lower losses in conditioned crawl space
+        duct_heating_factor = 1.10  # 10% heating loss in conditioned crawl space
+        duct_cooling_factor = 1.05  # 5% cooling gain in conditioned crawl space
     else:  # ducted_attic
-        duct_loss_factor = 1.15  # Higher losses in unconditioned attic
+        duct_heating_factor = 1.15  # 15% heating loss in unconditioned attic
+        duct_cooling_factor = 1.10  # 10% cooling gain in unconditioned attic
     
-    total_heating *= duct_loss_factor
-    total_cooling *= duct_loss_factor
+    total_heating *= duct_heating_factor
+    total_cooling *= duct_cooling_factor
     
     # NO SAFETY FACTORS - Per ACCA Manual J best practices
     # Equipment should be sized to calculated loads only
@@ -1103,9 +1137,11 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
             "indoor_temp": indoor_temp,
             "duct_config": duct_config,
             "heating_fuel": heating_fuel,
-            "duct_loss_factor": duct_loss_factor,
+            "duct_heating_factor": duct_heating_factor,
+            "duct_cooling_factor": duct_cooling_factor,
             "safety_factor": 1.0,  # No safety factor per Manual J best practices
             "diversity_factor": diversity_factor,
+            "area_correction_factor": area_correction_factor,
             "construction_vintage": construction_vintage,
             "calculation_method": calculation_method,
             "include_ventilation": include_ventilation,
@@ -1713,8 +1749,10 @@ def _validate_calculation_results(result: Dict[str, Any], schema: BlueprintSchem
     
     # Check for system factors and diversity
     design_params = result.get('design_parameters', {})
-    expected_heating = total_zone_heating * design_params.get('duct_loss_factor', 1.0) * design_params.get('safety_factor', 1.0)
-    expected_cooling = total_zone_cooling * design_params.get('duct_loss_factor', 1.0) * design_params.get('safety_factor', 1.0) * design_params.get('diversity_factor', 1.0)
+    # Account for all applied factors
+    area_factor = design_params.get('area_correction_factor', 1.0)
+    expected_heating = total_zone_heating * area_factor * design_params.get('duct_heating_factor', design_params.get('duct_loss_factor', 1.0)) * design_params.get('safety_factor', 1.0)
+    expected_cooling = total_zone_cooling * area_factor * design_params.get('duct_cooling_factor', design_params.get('duct_loss_factor', 1.0)) * design_params.get('safety_factor', 1.0) * design_params.get('diversity_factor', 1.0)
     
     heating_diff_pct = abs(expected_heating - heating_total) / heating_total * 100 if heating_total > 0 else 0
     cooling_diff_pct = abs(expected_cooling - cooling_total) / cooling_total * 100 if cooling_total > 0 else 0
@@ -1803,8 +1841,8 @@ def _check_calculation_warnings(result: Dict[str, Any], schema: BlueprintSchema)
     
     # Check design parameters
     design_params = result.get('design_parameters', {})
-    if design_params.get('duct_loss_factor', 1.0) == 1.0:
-        warnings.append("No duct losses applied - verify duct configuration")
+    if design_params.get('duct_heating_factor', design_params.get('duct_loss_factor', 1.0)) == 1.0:
+        warnings.append("No duct losses/gains applied - verify duct configuration")
     
     return warnings
 
