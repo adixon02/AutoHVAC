@@ -9,6 +9,8 @@ from uuid import uuid4, UUID
 from datetime import datetime
 
 from .schema import BlueprintSchema, Room, RawGeometry, RawText, ParsingMetadata, ParsingStatus
+from .exceptions import RoomDetectionFailedError, LowConfidenceError
+from .polygon_detector import polygon_detector
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +79,49 @@ class GeometryFallbackParser:
         metadata.geometry_status = ParsingStatus.PARTIAL
         metadata.ai_status = ParsingStatus.FAILED
         
-        # Extract rooms from geometry
-        rooms = self._extract_rooms_from_geometry(raw_geo, raw_text)
+        # First try polygon detection from wall lines
+        rooms = []
+        if raw_geo and raw_geo.lines and len(raw_geo.lines) > 10:
+            logger.info("Attempting polygon-based room detection from wall lines")
+            try:
+                polygon_rooms = polygon_detector.detect_rooms(
+                    lines=raw_geo.lines,
+                    page_width=raw_geo.page_width,
+                    page_height=raw_geo.page_height,
+                    scale_factor=raw_geo.scale_factor
+                )
+                
+                if polygon_rooms:
+                    logger.info(f"Polygon detection found {len(polygon_rooms)} rooms")
+                    # Convert polygon rooms to Room objects
+                    for idx, poly_room in enumerate(polygon_rooms):
+                        room = Room(
+                            name=f"Room {idx + 1} (Polygon)",
+                            dimensions_ft=(poly_room['width_ft'], poly_room['height_ft']),
+                            floor=1,
+                            windows=2,  # Default estimate
+                            orientation="",
+                            area=poly_room['area_sqft'],
+                            room_type="unknown",
+                            confidence=poly_room['confidence'],
+                            center_position=poly_room['centroid'],
+                            label_found=False,
+                            dimensions_source="polygon_detection",
+                            source_elements={
+                                "detection_method": "polygon_from_walls",
+                                "vertex_count": poly_room['vertex_count'],
+                                "area_pixels": poly_room['area_pixels']
+                            }
+                        )
+                        rooms.append(room)
+                        
+            except Exception as e:
+                logger.error(f"Polygon detection failed: {e}")
+        
+        # If polygon detection didn't work, try rectangle extraction
+        if not rooms:
+            logger.info("Polygon detection failed or no walls found, trying rectangle extraction")
+            rooms = self._extract_rooms_from_geometry(raw_geo, raw_text)
         
         if not rooms:
             logger.warning("No valid rooms found in geometry - trying alternative approaches")
@@ -121,9 +164,13 @@ class GeometryFallbackParser:
             
             if not rooms:
                 logger.error("Still no rooms found after trying alternatives - likely parsing issue")
-                logger.warning("Creating minimal fallback as last resort")
-                rooms = self._create_minimal_fallback_rooms()
-                metadata.geometry_status = ParsingStatus.FAILED
+                # NEVER create fallback silently - require user intervention
+                walls_found = len(raw_geo.lines) if raw_geo and raw_geo.lines else 0
+                raise RoomDetectionFailedError(
+                    walls_found=walls_found,
+                    polygons_found=0,
+                    confidence=0.0
+                )
         
         # Calculate totals
         total_area = sum(room.area for room in rooms)
@@ -387,29 +434,14 @@ class GeometryFallbackParser:
             return 4
     
     def _create_minimal_fallback_rooms(self) -> List[Room]:
-        """Create minimal fallback rooms when geometry extraction fails"""
-        logger.error("Creating minimal fallback room layout")
-        
-        # Single generic room as last resort
-        return [
-            Room(
-                name="Main Space (Fallback)",
-                dimensions_ft=(30.0, 33.7),
-                floor=1,
-                windows=4,
-                orientation="",
-                area=1010.0,
-                room_type="other",
-                confidence=0.1,
-                center_position=(0.0, 0.0),
-                label_found=False,
-                dimensions_source="fallback",
-                source_elements={
-                    "error": "Complete parsing failure",
-                    "warning": "Using generic layout - results unreliable"
-                }
-            )
-        ]
+        """DEPRECATED - Never create fallback rooms silently"""
+        # This method should never be called anymore
+        # We always raise an exception requiring user intervention
+        raise RoomDetectionFailedError(
+            walls_found=0,
+            polygons_found=0,
+            confidence=0.0
+        )
     
     def _create_metadata(self) -> ParsingMetadata:
         """Create initial parsing metadata"""

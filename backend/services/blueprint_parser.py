@@ -21,6 +21,7 @@ from app.parser.text_parser import TextParser
 from app.parser.geometry_parser import GeometryParser
 from app.parser.ai_cleanup import cleanup, AICleanupError
 from app.parser.geometry_fallback import geometry_fallback_parser
+from app.parser.exceptions import UserInterventionRequired, RoomDetectionFailedError, LowConfidenceError
 from services.pdf_thread_manager import pdf_thread_manager, PDFDocumentClosedError, PDFProcessingTimeoutError
 from services.pdf_page_analyzer import PDFPageAnalyzer
 from services.blueprint_ai_parser import blueprint_ai_parser, BlueprintAIParsingError
@@ -493,12 +494,22 @@ class BlueprintParser:
                 logger.info(f"Geometry fallback created {len(fallback_blueprint.rooms)} rooms")
                 return fallback_blueprint.rooms
             
+        except RoomDetectionFailedError as e:
+            # Re-raise to be handled at higher level
+            logger.error(f"Room detection completely failed: {e.message}")
+            raise
         except Exception as e:
             logger.error(f"Geometry fallback parser failed: {e}")
+            # Raise room detection error instead of creating fallback
+            walls_found = len(geometry_obj.lines) if geometry_obj and geometry_obj.lines else 0
+            raise RoomDetectionFailedError(
+                walls_found=walls_found,
+                polygons_found=0,
+                confidence=0.0
+            )
         
-        # If geometry fallback also fails, create minimal rooms
-        logger.error("All parsing methods failed - creating minimal fallback rooms")
-        return geometry_fallback_parser._create_minimal_fallback_rooms()
+        # Should never reach here - always raise exception
+        raise RoomDetectionFailedError(walls_found=0, polygons_found=0, confidence=0.0)
     
     def _convert_raw_geometry_to_elements(self, raw_geometry) -> List[GeometricElement]:
         """Convert raw geometry to structured GeometricElement objects"""

@@ -39,6 +39,7 @@ from services.error_types import (
     ValidationError, categorize_exception, log_error_with_context
 )
 from services.blueprint_validator import BlueprintValidationError
+from app.parser.exceptions import UserInterventionRequired, RoomDetectionFailedError, LowConfidenceError
 from database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
@@ -302,6 +303,40 @@ def calculate_hvac_loads(
                 'validation_details': e.to_dict(),
                 'parsing_metadata': safe_dict(parsing_metadata) if parsing_metadata else None
             })
+        except UserInterventionRequired as e:
+            # User intervention needed - provide detailed feedback
+            error_msg = f"User intervention required: {e.message}"
+            logger.warning(f"User intervention required for {project_id}: {error_msg}")
+            
+            # Store the intervention requirement in the database
+            job_service.sync_update_project(project_id, {
+                'status': 'requires_user_input',
+                'user_intervention_required': True,
+                'intervention_details': e.details,
+                'parsing_confidence': e.details.get('confidence', 0.0)
+            })
+            
+            audit_data['errors_encountered'].append({
+                'stage': 'blueprint_parsing',
+                'error': error_msg,
+                'error_type': type(e).__name__,
+                'details': e.details,
+                'user_action_required': e.details.get('user_action_required', 'unknown')
+            })
+            
+            update_progress_sync("requires_user_input", 50, error_msg)
+            
+            # Return partial results with intervention requirement
+            return {
+                'project_id': project_id,
+                'status': 'requires_user_input',
+                'user_intervention_required': True,
+                'intervention_type': e.details.get('user_action_required'),
+                'message': e.message,
+                'details': e.details,
+                'partial_results': audit_data
+            }
+            
         except BlueprintParsingError as e:
             error_msg = f"Blueprint parsing failed: {str(e)}"
             logger.error(f"Blueprint parsing error for {project_id}: {error_msg}")
