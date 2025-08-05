@@ -60,7 +60,7 @@ class OCRExtractor:
                 )
                 logger.info("PaddleOCR initialized successfully - enhanced blueprint parsing enabled")
             except Exception as e:
-                logger.error(f"Failed to initialize PaddleOCR: {str(e)}")
+                logger.warning(f"PaddleOCR initialization failed (will use GPT-4V only): {str(e)}")
                 self.ocr = None
     
     def extract_all_text(self, image: np.ndarray) -> List[TextRegion]:
