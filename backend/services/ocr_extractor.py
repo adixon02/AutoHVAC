@@ -52,12 +52,11 @@ class OCRExtractor:
         
         if PADDLEOCR_AVAILABLE:
             try:
-                # Initialize PaddleOCR with English language
+                # Initialize PaddleOCR with minimal parameters
+                # Note: PaddleOCR 3.1.0 has changed API - use_gpu and show_log are no longer valid
                 self.ocr = PaddleOCR(
                     use_angle_cls=True,  # Enable text angle classification
-                    lang='en',
-                    use_gpu=use_gpu,
-                    show_log=False  # Reduce logging noise
+                    lang='en'
                 )
                 logger.info("PaddleOCR initialized successfully - enhanced blueprint parsing enabled")
             except Exception as e:
@@ -86,7 +85,7 @@ class OCRExtractor:
                 return []
             
             text_regions = []
-            min_confidence = 0.3  # Filter low confidence text
+            min_confidence = 0.5  # Filter low confidence text (increased for better quality)
             
             for line in result[0]:
                 bbox = line[0]

@@ -131,32 +131,41 @@ class BlueprintAIParser:
         logger.info("="*60)
         
         try:
+            import time
+            start_time = time.time()
+            
             # Step 1: Convert PDF to images
             logger.info("\n[STEP 1] Converting PDF to images...")
+            step_start = time.time()
             images = self._convert_pdf_to_images(pdf_path)
             parsing_metadata.pdf_page_count = len(images)
-            logger.info(f"Converted PDF to {len(images)} images")
+            logger.info(f"Converted PDF to {len(images)} images in {time.time() - step_start:.1f}s")
             
             # Step 2: Preprocess and classify pages
             logger.info("\n[STEP 2] Preprocessing and classifying pages...")
+            step_start = time.time()
             preprocessed_images = []
             page_classifications = []
             ocr_results = []
             
             if ENHANCED_PARSING:
                 for idx, img_bytes in enumerate(images):
+                    page_start = time.time()
                     # Preprocess with OpenCV
                     preprocessed = self._preprocess_image_opencv(img_bytes, idx + 1)
                     preprocessed_images.append(preprocessed)
+                    logger.info(f"Page {idx + 1} preprocessing: {time.time() - page_start:.1f}s")
                     
                     # Convert to numpy for classification and OCR
                     nparr = np.frombuffer(preprocessed, np.uint8)
                     img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                     
                     # Extract text with OCR
+                    ocr_start = time.time()
                     text_regions = ocr_extractor.extract_all_text(img_cv)
                     ocr_text = [region.text for region in text_regions]
                     ocr_results.append(text_regions)
+                    logger.info(f"Page {idx + 1} OCR extraction: {time.time() - ocr_start:.1f}s, found {len(text_regions)} regions")
                     
                     # Classify page
                     classification = page_classifier.classify_page(img_cv, ocr_text)
@@ -172,8 +181,11 @@ class BlueprintAIParser:
                 page_classifications = [None] * len(images)
                 ocr_results = [None] * len(images)
             
+            logger.info(f"[STEP 2] Complete in {time.time() - step_start:.1f}s")
+            
             # Step 3: Try different pages with GPT-4V (prioritize floor plans)
             logger.info("\n[STEP 3] Analyzing pages with GPT-4V...")
+            step_start = time.time()
             all_page_results = []
             successful_pages = []
             failed_pages = []
@@ -401,11 +413,11 @@ class BlueprintAIParser:
                     page_rect = page.rect
                     max_dimension = max(page_rect.width, page_rect.height)
                     
-                    # Calculate optimal zoom to target 1800px on longest side
-                    target_size = 1800
+                    # Calculate optimal zoom to target 1200px on longest side (faster GPT-4V processing)
+                    target_size = 1200
                     zoom_factor = target_size / max_dimension
-                    zoom_factor = min(zoom_factor, 3.0)  # Allow up to 3x zoom for clarity
-                    zoom_factor = max(zoom_factor, 1.0)  # Minimum 1x zoom for quality
+                    zoom_factor = min(zoom_factor, 2.0)  # Max 2x zoom to prevent large files
+                    zoom_factor = max(zoom_factor, 0.8)  # Allow slight downscale for speed
                     
                     mat = fitz.Matrix(zoom_factor, zoom_factor)
                     logger.info(f"Page {page_num + 1}: Using {zoom_factor:.2f}x zoom (target: {target_size}px)")
@@ -413,8 +425,8 @@ class BlueprintAIParser:
                     # Render page as pixmap
                     pix = page.get_pixmap(matrix=mat)
                     
-                    # Use JPEG with higher quality for better text readability
-                    img_bytes = pix.tobytes("jpeg", jpg_quality=95)
+                    # Use JPEG with good quality (85 is sufficient for blueprints)
+                    img_bytes = pix.tobytes("jpeg", jpg_quality=85)
                     logger.info(f"Page {page_num + 1}: JPEG format ({len(img_bytes) / 1024 / 1024:.1f}MB)")
                     
                     # If still too large, try PNG with compression
@@ -573,7 +585,7 @@ class BlueprintAIParser:
             return image_bytes  # Return original on failure
     
     def _preprocess_image_opencv(self, image_bytes: bytes, page_num: int) -> bytes:
-        """Preprocess image using OpenCV for better OCR and parsing"""
+        """Fast preprocessing for OCR and parsing - optimized for speed"""
         try:
             # Convert bytes to numpy array
             nparr = np.frombuffer(image_bytes, np.uint8)
@@ -584,47 +596,26 @@ class BlueprintAIParser:
                 return image_bytes
             
             orig_height, orig_width = img.shape[:2]
-            logger.info(f"Preprocessing page {page_num}: {orig_width}x{orig_height}")
+            logger.info(f"Processing page {page_num}: {orig_width}x{orig_height}")
             
-            # 1. Denoise the image
-            denoised = cv2.fastNlMeansDenoisingColored(img, None, 10, 10, 7, 21)
-            
-            # 2. Convert to LAB color space for better contrast enhancement
-            lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
-            l, a, b = cv2.split(lab)
-            
-            # 3. Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to L channel
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-            l_enhanced = clahe.apply(l)
-            
-            # 4. Merge channels back
-            enhanced = cv2.merge([l_enhanced, a, b])
-            enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
-            
-            # 5. Sharpen the image for better text clarity
-            kernel = np.array([[-1,-1,-1],
-                             [-1, 9,-1],
-                             [-1,-1,-1]])
-            sharpened = cv2.filter2D(enhanced, -1, kernel)
-            
-            # 6. Resize if needed (max 2500px on longest side for processing efficiency)
+            # Only resize if needed (max 2500px for OCR efficiency)
             max_dimension = max(orig_width, orig_height)
             if max_dimension > 2500:
                 scale = 2500 / max_dimension
                 new_width = int(orig_width * scale)
                 new_height = int(orig_height * scale)
-                sharpened = cv2.resize(sharpened, (new_width, new_height), interpolation=cv2.INTER_LANCZOS4)
+                img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
                 logger.info(f"Resized to {new_width}x{new_height} for processing")
             
-            # Convert back to bytes (high quality PNG)
-            _, encoded = cv2.imencode('.png', sharpened)
+            # Convert to PNG format (no enhancement needed for blueprints)
+            _, encoded = cv2.imencode('.png', img, [cv2.IMWRITE_PNG_COMPRESSION, 3])
             result = encoded.tobytes()
             
-            logger.info(f"Preprocessed page {page_num}: {len(result) / 1024 / 1024:.1f}MB")
+            logger.info(f"Processed page {page_num} in minimal time: {len(result) / 1024 / 1024:.1f}MB")
             return result
             
         except Exception as e:
-            logger.error(f"OpenCV preprocessing failed for page {page_num}: {str(e)}")
+            logger.error(f"Fast preprocessing failed for page {page_num}: {str(e)}")
             return image_bytes
     
     async def _extract_blueprint_data(self, image_bytes: bytes, retry_count: int = 0, ocr_data: Dict = None) -> Dict[str, Any]:
@@ -664,7 +655,7 @@ class BlueprintAIParser:
                     ],
                     max_tokens=2000,  # Increased for comprehensive room lists
                     temperature=0.1,  # Lower temperature for consistent JSON
-                    timeout=60  # 60 second timeout to prevent hanging
+                    timeout=30  # 30 second timeout for faster failure detection
                 )
                 logger.info("GPT-4V API call completed successfully")
                 
