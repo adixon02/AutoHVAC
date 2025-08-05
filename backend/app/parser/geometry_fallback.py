@@ -140,15 +140,15 @@ class GeometryFallbackParser:
             estimated_height_ft = 75.0   # Typical building depth on drawing
             
             # Calculate scale factors for width and height
-            scale_x = (estimated_width_ft * 12) / page_width  # Convert to inches then to page units
-            scale_y = (estimated_height_ft * 12) / page_height
+            scale_x = page_width / (estimated_width_ft * 12)  # pixels per inch
+            scale_y = page_height / (estimated_height_ft * 12)  # pixels per inch
             
             # Use the average, but prefer standard architectural scales
             avg_scale = (scale_x + scale_y) / 2
             
-            # Snap to nearest standard architectural scale
-            standard_scales = [48.0, 32.0, 24.0, 16.0, 96.0]  # 1/4", 3/8", 1/2", 3/4", 1/8"
-            scale_factor = min(standard_scales, key=lambda x: abs(x - avg_scale))
+            # Use the calculated scale directly - don't snap to architectural standards
+            # since we're working with pixels, not architectural drawing units
+            scale_factor = avg_scale
             
             logger.info(f"No scale detected, estimated scale factor: {scale_factor} (1/{12/scale_factor:.1f}\" = 1')")
         
@@ -173,8 +173,8 @@ class GeometryFallbackParser:
             
             # ALWAYS convert from page units to feet using scale factor
             # The geometry parser returns coordinates in page units (pixels/points)
-            width_ft = (width / scale_factor) * 12.0  # Convert to feet
-            height_ft = (height / scale_factor) * 12.0
+            width_ft = width / scale_factor / 12.0  # pixels / (pixels/inch) / 12 = feet
+            height_ft = height / scale_factor / 12.0
             area_ft = width_ft * height_ft
             
             # NOW check if the converted area is reasonable
