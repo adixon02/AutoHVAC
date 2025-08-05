@@ -20,21 +20,21 @@ class PolygonRoomDetector:
     
     def __init__(self):
         # Wall detection thresholds
-        self.MIN_WALL_LENGTH = 20  # pixels - minimum length to be considered a wall
-        self.MIN_WALL_THICKNESS = 1.5  # pixels - minimum thickness for walls
-        self.WALL_MERGE_DISTANCE = 10  # pixels - distance to merge parallel walls
+        self.MIN_WALL_LENGTH = 15  # pixels - reduced for better detection
+        self.MIN_WALL_THICKNESS = 1.0  # pixels - reduced for thin walls
+        self.WALL_MERGE_DISTANCE = 15  # pixels - increased for better merging
         
-        # Room polygon thresholds (now scale-aware)
-        self.MIN_ROOM_AREA_SQFT = 10  # Minimum room size in square feet
-        self.MAX_ROOM_AREA_SQFT = 1200  # Maximum room size in square feet
+        # Room polygon thresholds (adaptive and scale-aware)
+        self.MIN_ROOM_AREA_SQFT = 8  # Even smaller rooms like closets
+        self.MAX_ROOM_AREA_SQFT = 2000  # Larger rooms like great rooms
         
         # Legacy pixel-based thresholds (for when scale is unknown)
-        self.MIN_ROOM_AREA = 10  # square pixels (reduced from 100)
-        self.MAX_ROOM_AREA = 1000000  # square pixels (increased from 100000)
+        self.MIN_ROOM_AREA = 5  # square pixels (very lenient)
+        self.MAX_ROOM_AREA = 2000000  # square pixels (very lenient)
         
         # Connection tolerances
-        self.ENDPOINT_TOLERANCE = 15  # pixels - max distance to connect wall endpoints
-        self.ANGLE_TOLERANCE = 15  # degrees - max angle difference for parallel walls
+        self.ENDPOINT_TOLERANCE = 20  # pixels - increased for better connections
+        self.ANGLE_TOLERANCE = 20  # degrees - increased tolerance
         
     def detect_rooms(
         self,
@@ -275,19 +275,24 @@ class PolygonRoomDetector:
         scale_factor: Optional[float]
     ) -> List[Dict[str, Any]]:
         """
-        Filter polygons to identify valid rooms based on area and shape
+        Filter polygons to identify valid rooms with adaptive thresholds
         """
         rooms = []
+        all_areas = []  # Track all areas for adaptive filtering
         
         logger.info(f"Filtering {len(polygons)} polygons with scale factor: {scale_factor}")
         
+        # First pass: calculate all areas
+        polygon_data = []
         for idx, polygon in enumerate(polygons):
             if len(polygon) < 3:
                 continue
             
             # Calculate polygon area in pixels
             area_pixels = self.calculate_polygon_area(polygon)
-            
+            if area_pixels <= 0:
+                continue
+                
             # Calculate room properties
             centroid = self.calculate_centroid(polygon)
             bbox = self.calculate_bounding_box(polygon)
@@ -297,15 +302,64 @@ class PolygonRoomDetector:
                 area_sqft = area_pixels / (scale_factor ** 2)
                 width_ft = (bbox[2] - bbox[0]) / scale_factor
                 height_ft = (bbox[3] - bbox[1]) / scale_factor
-                
-                # Use scale-aware thresholds
-                min_area = self.MIN_ROOM_AREA_SQFT
-                max_area = self.MAX_ROOM_AREA_SQFT
-                
-                # Skip if area is outside reasonable room size range
-                if area_sqft < min_area or area_sqft > max_area:
-                    logger.debug(f"Polygon {idx} filtered: area {area_sqft:.1f} sq ft outside range {min_area}-{max_area} sq ft")
-                    continue
+            else:
+                # Estimate if no scale
+                area_sqft = area_pixels / 100  # Rough estimate
+                width_ft = (bbox[2] - bbox[0]) / 10
+                height_ft = (bbox[3] - bbox[1]) / 10
+            
+            polygon_data.append({
+                'idx': idx,
+                'polygon': polygon,
+                'area_pixels': area_pixels,
+                'area_sqft': area_sqft,
+                'centroid': centroid,
+                'bbox': bbox,
+                'width_ft': width_ft,
+                'height_ft': height_ft
+            })
+            all_areas.append(area_sqft)
+        
+        # Calculate adaptive thresholds based on detected areas
+        if all_areas:
+            median_area = np.median(all_areas)
+            # Adaptive thresholds based on distribution
+            if median_area < 50:  # Likely wrong scale, be very lenient
+                min_area = 2
+                max_area = 5000
+                logger.warning(f"Very small median area ({median_area:.1f} sqft), using lenient thresholds")
+            elif median_area > 1000:  # Likely commercial or wrong scale
+                min_area = 50
+                max_area = 10000
+                logger.warning(f"Very large median area ({median_area:.1f} sqft), adjusting thresholds")
+            else:
+                # Normal residential range
+                min_area = max(5, median_area * 0.05)  # 5% of median or 5 sqft minimum
+                max_area = min(3000, median_area * 20)  # 20x median or 3000 sqft max
+        else:
+            min_area = self.MIN_ROOM_AREA_SQFT
+            max_area = self.MAX_ROOM_AREA_SQFT
+        
+        logger.info(f"Adaptive thresholds: {min_area:.1f} - {max_area:.1f} sq ft (median: {np.median(all_areas) if all_areas else 0:.1f})")
+        
+        # Second pass: filter with adaptive thresholds
+        for data in polygon_data:
+            area_sqft = data['area_sqft']
+            
+            # Apply adaptive filtering
+            if area_sqft < min_area or area_sqft > max_area:
+                logger.debug(f"Polygon {data['idx']} filtered: area {area_sqft:.1f} sq ft outside adaptive range")
+                continue
+            
+            # Additional shape validation
+            width_ft = data['width_ft']
+            height_ft = data['height_ft']
+            aspect_ratio = max(width_ft, height_ft) / max(min(width_ft, height_ft), 0.1)
+            
+            # Very lenient aspect ratio (hallways can be long)
+            if aspect_ratio > 10:
+                logger.debug(f"Polygon {data['idx']} filtered: extreme aspect ratio {aspect_ratio:.1f}")
+                continue
                     
             else:
                 # No scale - use pixel-based filtering
@@ -318,18 +372,26 @@ class PolygonRoomDetector:
                 width_ft = (bbox[2] - bbox[0]) / 10
                 height_ft = (bbox[3] - bbox[1]) / 10
             
+            # Calculate confidence based on area and shape
+            confidence = self._calculate_room_confidence(area_sqft, aspect_ratio, len(data['polygon']))
+            
             rooms.append({
-                'polygon': polygon,
-                'area_pixels': area_pixels,
+                'polygon': data['polygon'],
+                'area_pixels': data['area_pixels'],
                 'area_sqft': area_sqft,
-                'centroid': centroid,
-                'bounding_box': bbox,
+                'centroid': data['centroid'],
+                'bounding_box': data['bbox'],
                 'width_ft': width_ft,
                 'height_ft': height_ft,
-                'vertex_count': len(polygon),
+                'vertex_count': len(data['polygon']),
                 'detection_method': 'polygon_from_walls',
-                'confidence': 0.8  # High confidence for wall-based detection
+                'confidence': confidence
             })
+        
+        # If we filtered out too many rooms, relax thresholds and try again
+        if len(rooms) < 3 and len(polygon_data) > 5:
+            logger.warning(f"Only {len(rooms)} rooms detected from {len(polygon_data)} polygons, trying with relaxed thresholds")
+            rooms = self._retry_with_relaxed_thresholds(polygon_data, scale_factor)
         
         return rooms
     
@@ -467,6 +529,79 @@ class PolygonRoomDetector:
             
         except Exception as e:
             logger.error(f"Failed to generate debug artifacts: {e}")
+    
+    def _calculate_room_confidence(self, area_sqft: float, aspect_ratio: float, vertex_count: int) -> float:
+        """
+        Calculate confidence score for a detected room
+        """
+        confidence = 0.5  # Base confidence
+        
+        # Area-based confidence
+        if 20 <= area_sqft <= 500:
+            confidence += 0.2  # Typical room size
+        elif 10 <= area_sqft < 20 or 500 < area_sqft <= 1000:
+            confidence += 0.1  # Less typical but possible
+        
+        # Shape-based confidence
+        if 1 <= aspect_ratio <= 3:
+            confidence += 0.2  # Good aspect ratio
+        elif 3 < aspect_ratio <= 5:
+            confidence += 0.1  # Acceptable aspect ratio
+        
+        # Vertex count confidence (4-8 vertices is typical for rooms)
+        if 4 <= vertex_count <= 8:
+            confidence += 0.1
+        
+        return min(0.95, confidence)
+    
+    def _retry_with_relaxed_thresholds(
+        self, 
+        polygon_data: List[Dict[str, Any]], 
+        scale_factor: Optional[float]
+    ) -> List[Dict[str, Any]]:
+        """
+        Retry room detection with more relaxed thresholds
+        """
+        rooms = []
+        
+        # Very relaxed thresholds for second pass
+        min_area = 5  # Very small rooms allowed
+        max_area = 5000  # Very large rooms allowed
+        max_aspect_ratio = 15  # Allow long hallways
+        
+        logger.info(f"Retrying with relaxed thresholds: {min_area}-{max_area} sq ft")
+        
+        for data in polygon_data:
+            area_sqft = data['area_sqft']
+            
+            if area_sqft < min_area or area_sqft > max_area:
+                continue
+            
+            width_ft = data['width_ft']
+            height_ft = data['height_ft']
+            aspect_ratio = max(width_ft, height_ft) / max(min(width_ft, height_ft), 0.1)
+            
+            if aspect_ratio > max_aspect_ratio:
+                continue
+            
+            # Lower confidence for relaxed detection
+            confidence = self._calculate_room_confidence(area_sqft, aspect_ratio, len(data['polygon'])) * 0.7
+            
+            rooms.append({
+                'polygon': data['polygon'],
+                'area_pixels': data['area_pixels'],
+                'area_sqft': area_sqft,
+                'centroid': data['centroid'],
+                'bounding_box': data['bbox'],
+                'width_ft': width_ft,
+                'height_ft': height_ft,
+                'vertex_count': len(data['polygon']),
+                'detection_method': 'polygon_relaxed',
+                'confidence': confidence
+            })
+        
+        logger.info(f"Relaxed detection found {len(rooms)} rooms")
+        return rooms
 
 
 # Global instance

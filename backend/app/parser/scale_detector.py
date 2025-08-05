@@ -87,62 +87,73 @@ class ScaleDetector:
         Main entry point for scale detection
         Combines multiple detection methods and returns best result with confidence
         """
-        logger.info("Starting multi-method scale detection")
+        logger.info("Starting multi-hypothesis scale detection")
         
-        results = []
+        all_hypotheses = []
         
         # Method 1: Direct text notation detection
         text_scale = self._detect_from_text_notation(text_elements)
         if text_scale:
-            results.append(text_scale)
-            logger.info(f"Text notation found scale: {text_scale[0]:.1f} px/ft (confidence: {text_scale[1]:.2f})")
+            all_hypotheses.append(text_scale)
+            logger.info(f"Text notation hypothesis: {text_scale[0]:.1f} px/ft (confidence: {text_scale[1]:.2f})")
         
         # Method 2: Dimension measurement verification
         dim_scale = None
         if dimensions:
             dim_scale = self._verify_from_dimensions(dimensions, lines)
             if dim_scale:
-                results.append(dim_scale)
-                logger.info(f"Dimension verification found scale: {dim_scale[0]:.1f} px/ft (confidence: {dim_scale[1]:.2f})")
+                all_hypotheses.append(dim_scale)
+                logger.info(f"Dimension verification hypothesis: {dim_scale[0]:.1f} px/ft (confidence: {dim_scale[1]:.2f})")
         
-        # Method 3: Room size validation approach
-        if not results:
-            # Try common scales and validate room sizes
-            validated_scales = self._test_scales_by_room_sizes(rectangles, text_elements)
-            results.extend(validated_scales)
-            if validated_scales:
-                logger.info(f"Room size validation found {len(validated_scales)} potential scales")
+        # Method 3: ALWAYS test common scales with room size validation
+        # This helps catch incorrect text notation (like 3/16" vs 1/4")
+        validated_scales = self._test_all_scales_thoroughly(rectangles, lines, text_elements)
+        all_hypotheses.extend(validated_scales)
+        if validated_scales:
+            logger.info(f"Room validation found {len(validated_scales)} hypotheses")
         
-        # Method 4: Page size heuristics
-        if not results:
-            page_scale = self._estimate_from_page_size(page_width, page_height)
-            if page_scale:
-                results.append(page_scale)
-                logger.info(f"Page size heuristics estimated scale: {page_scale[0]:.1f} px/ft (confidence: {page_scale[1]:.2f})")
+        # Method 4: Page size heuristics (low confidence fallback)
+        page_scale = self._estimate_from_page_size(page_width, page_height)
+        if page_scale:
+            all_hypotheses.append(page_scale)
+            logger.info(f"Page size hypothesis: {page_scale[0]:.1f} px/ft (confidence: {page_scale[1]:.2f})")
         
-        # Select best result
-        if results:
-            # Sort by confidence
-            results.sort(key=lambda x: x[1], reverse=True)
-            best_scale, best_confidence = results[0]
-            
-            # Validate the best scale
-            validation = self._validate_scale(best_scale, rectangles, text_elements)
-            
-            # Adjust confidence based on validation
-            if validation['rooms_reasonable']:
-                best_confidence = min(1.0, best_confidence * 1.2)
-            else:
-                best_confidence *= 0.7
+        # Select best hypothesis through validation
+        if all_hypotheses:
+            # Test each hypothesis thoroughly
+            validated_results = []
+            for scale, initial_conf in all_hypotheses:
+                validation = self._validate_scale_thoroughly(scale, rectangles, lines, text_elements)
                 
+                # Calculate final confidence based on validation
+                final_confidence = self._calculate_final_confidence(
+                    initial_conf, validation, scale, rectangles
+                )
+                
+                validated_results.append((scale, final_confidence, validation))
+                logger.debug(f"Scale {scale:.1f} px/ft: initial conf={initial_conf:.2f}, final conf={final_confidence:.2f}")
+            
+            # Sort by final confidence
+            validated_results.sort(key=lambda x: x[1], reverse=True)
+            best_scale, best_confidence, best_validation = validated_results[0]
+            
+            # Check if confidence is high enough
+            if best_confidence < 0.6:
+                logger.warning(f"Best scale confidence ({best_confidence:.2f}) below threshold")
+                # Try to improve by testing intermediate scales
+                improved = self._try_intermediate_scales(best_scale, rectangles, lines)
+                if improved and improved[1] > best_confidence:
+                    best_scale, best_confidence = improved
+                    best_validation = self._validate_scale_thoroughly(best_scale, rectangles, lines, text_elements)
+            
             method = self._determine_detection_method(best_scale, text_scale, dim_scale)
             
             return ScaleResult(
                 scale_factor=best_scale,
                 confidence=best_confidence,
                 detection_method=method,
-                validation_results=validation,
-                alternative_scales=results[:3]  # Top 3 alternatives
+                validation_results=best_validation,
+                alternative_scales=[(s, c) for s, c, _ in validated_results[:3]]  # Top 3 alternatives
             )
         
         # Fallback: Use most common scale with low confidence
@@ -249,32 +260,46 @@ class ScaleDetector:
         
         return None
     
-    def _test_scales_by_room_sizes(self, rectangles: List[Dict[str, Any]], text_elements: List[Dict[str, Any]]) -> List[Tuple[float, float]]:
+    def _test_all_scales_thoroughly(self, rectangles: List[Dict[str, Any]], lines: List[Dict[str, Any]], text_elements: List[Dict[str, Any]]) -> List[Tuple[float, float]]:
         """
-        Test different scales and score them based on resulting room sizes
+        Test all common scales thoroughly with multiple validation methods
         """
-        # Common scales to test (in pixels per foot)
-        # These are the actual pixel values used in typical PDF blueprints
+        # Comprehensive list of scales to test
         test_scales = [
             12.0,   # 1"=1' (rare, very large scale)
+            18.0,   # 3/4"=1'
             24.0,   # 1/2"=1'
-            36.0,   # 3/8"=1' or 3/16"=1'
-            48.0,   # 1/4"=1' (very common residential)
-            64.0,   # 3/16"=1' alternative
+            32.0,   # 3/8"=1'
+            36.0,   # Alternative 3/8"=1' 
+            48.0,   # 1/4"=1' (MOST COMMON residential)
+            64.0,   # 3/16"=1' 
+            72.0,   # Alternative scale
             96.0,   # 1/8"=1' (common for large buildings)
+            128.0,  # 3/32"=1' (very large buildings)
         ]
         
         # Extract room type hints from text
         room_types = self._extract_room_types(text_elements)
         
         results = []
+        best_score = 0.0
         
         for scale in test_scales:
-            score = self._score_scale_by_room_sizes(scale, rectangles, room_types)
-            if score > 0.3:  # Minimum threshold
-                confidence = score * 0.8  # Scale score to confidence
+            # Score by multiple criteria
+            rect_score = self._score_scale_by_room_sizes(scale, rectangles, room_types)
+            line_score = self._score_scale_by_wall_patterns(scale, lines) if lines else 0.0
+            text_score = self._score_scale_by_text_labels(scale, text_elements, rectangles) if text_elements else 0.0
+            
+            # Combined score with weights
+            combined_score = (rect_score * 0.5 + line_score * 0.3 + text_score * 0.2)
+            
+            if combined_score > 0.25:  # Lower threshold to catch more candidates
+                confidence = min(0.95, combined_score)
                 results.append((scale, confidence))
-                logger.debug(f"Scale {scale:.1f} px/ft scored {score:.2f}")
+                logger.debug(f"Scale {scale:.1f} px/ft: rect={rect_score:.2f}, line={line_score:.2f}, text={text_score:.2f}, combined={combined_score:.2f}")
+                
+                if combined_score > best_score:
+                    best_score = combined_score
         
         return results
     
@@ -429,3 +454,203 @@ class ScaleDetector:
             return "dimension_verification"
         else:
             return "room_size_validation"
+    
+    def _validate_scale_thoroughly(
+        self, 
+        scale: float, 
+        rectangles: List[Dict[str, Any]], 
+        lines: List[Dict[str, Any]],
+        text_elements: List[Dict[str, Any]]
+    ) -> Dict[str, bool]:
+        """
+        Thoroughly validate a scale hypothesis using multiple criteria
+        """
+        validation = {
+            'rooms_reasonable': False,
+            'total_area_reasonable': False,
+            'has_typical_rooms': False,
+            'dimensions_consistent': True,
+            'wall_patterns_valid': True,
+            'room_count_reasonable': False
+        }
+        
+        if not rectangles:
+            return validation
+        
+        # Calculate room areas with this scale
+        room_areas = []
+        for rect in rectangles[:100]:  # Limit for performance
+            width = rect.get('width', 0) / scale
+            height = rect.get('height', 0) / scale
+            area = width * height
+            
+            if 5 <= area <= 2000:  # Very broad range for initial filtering
+                room_areas.append(area)
+        
+        if room_areas:
+            # Check room size distribution
+            reasonable = sum(1 for a in room_areas if 15 <= a <= 600)
+            validation['rooms_reasonable'] = reasonable >= len(room_areas) * 0.4  # More lenient
+            
+            # Check total area
+            total_area = sum(room_areas)
+            validation['total_area_reasonable'] = 400 <= total_area <= 15000  # Wider range
+            
+            # Check for typical room size distribution
+            small = sum(1 for a in room_areas if 15 <= a < 100)
+            medium = sum(1 for a in room_areas if 100 <= a < 400)
+            large = sum(1 for a in room_areas if 400 <= a < 1000)
+            validation['has_typical_rooms'] = (small > 0 or medium > 0) and total_area > 500
+            
+            # Check room count
+            validation['room_count_reasonable'] = 3 <= len(room_areas) <= 50
+        
+        return validation
+    
+    def _calculate_final_confidence(
+        self,
+        initial_confidence: float,
+        validation: Dict[str, bool],
+        scale: float,
+        rectangles: List[Dict[str, Any]]
+    ) -> float:
+        """
+        Calculate final confidence score based on validation results
+        """
+        # Start with initial confidence
+        confidence = initial_confidence
+        
+        # Adjust based on validation
+        validation_score = sum(1 for v in validation.values() if v) / len(validation)
+        
+        # Weight validation heavily
+        confidence = confidence * 0.4 + validation_score * 0.6
+        
+        # Bonus for common residential scales
+        if 45 <= scale <= 50:  # 1/4" scale range
+            confidence *= 1.1
+        elif 94 <= scale <= 98:  # 1/8" scale range
+            confidence *= 1.05
+        
+        # Penalty for extreme scales
+        if scale < 15 or scale > 150:
+            confidence *= 0.8
+        
+        return min(0.95, confidence)
+    
+    def _try_intermediate_scales(
+        self,
+        base_scale: float,
+        rectangles: List[Dict[str, Any]],
+        lines: List[Dict[str, Any]]
+    ) -> Optional[Tuple[float, float]]:
+        """
+        Try scales near the base scale to find better fit
+        """
+        best_result = None
+        best_score = 0.0
+        
+        # Test scales within 20% of base
+        test_range = [
+            base_scale * 0.8,
+            base_scale * 0.9,
+            base_scale * 1.1,
+            base_scale * 1.2
+        ]
+        
+        room_types = []  # Could extract if needed
+        
+        for scale in test_range:
+            score = self._score_scale_by_room_sizes(scale, rectangles, room_types)
+            if score > best_score:
+                best_score = score
+                best_result = (scale, score * 0.7)  # Lower confidence for interpolated
+        
+        return best_result
+    
+    def _score_scale_by_wall_patterns(self, scale: float, lines: List[Dict[str, Any]]) -> float:
+        """
+        Score scale based on wall line patterns and spacing
+        """
+        if not lines or len(lines) < 10:
+            return 0.5  # Neutral score if insufficient data
+        
+        # Analyze wall spacing patterns
+        wall_lengths = []
+        for line in lines[:500]:  # Limit for performance
+            length = line.get('length', 0)
+            if length > 0:
+                length_ft = length / scale
+                # Typical wall lengths are 4-30 feet
+                if 2 <= length_ft <= 40:
+                    wall_lengths.append(length_ft)
+        
+        if not wall_lengths:
+            return 0.3
+        
+        # Score based on reasonable wall lengths
+        reasonable = sum(1 for l in wall_lengths if 4 <= l <= 30)
+        score = reasonable / len(wall_lengths) if wall_lengths else 0.0
+        
+        # Check for common modular dimensions (4, 8, 12, 16 feet)
+        modular = sum(1 for l in wall_lengths if any(
+            abs(l - m) < 0.5 for m in [4, 8, 10, 12, 14, 16, 20, 24]
+        ))
+        if modular > len(wall_lengths) * 0.2:
+            score += 0.2
+        
+        return min(1.0, score)
+    
+    def _score_scale_by_text_labels(
+        self,
+        scale: float,
+        text_elements: List[Dict[str, Any]],
+        rectangles: List[Dict[str, Any]]
+    ) -> float:
+        """
+        Score scale by checking if text labels align with room sizes
+        """
+        if not text_elements or not rectangles:
+            return 0.5
+        
+        # Extract room labels with expected sizes
+        room_expectations = {
+            'bedroom': (80, 300),
+            'master': (120, 400),
+            'bathroom': (20, 120),
+            'kitchen': (70, 300),
+            'living': (150, 500),
+            'dining': (100, 300),
+            'closet': (10, 80),
+            'garage': (200, 800)
+        }
+        
+        matches = 0
+        checks = 0
+        
+        for text_elem in text_elements:
+            text = text_elem.get('text', '').lower()
+            for room_type, (min_size, max_size) in room_expectations.items():
+                if room_type in text:
+                    checks += 1
+                    # Find nearest rectangle
+                    text_x = text_elem.get('x0', 0)
+                    text_y = text_elem.get('top', 0)
+                    
+                    for rect in rectangles:
+                        rect_x = (rect.get('x0', 0) + rect.get('x1', 0)) / 2
+                        rect_y = (rect.get('y0', 0) + rect.get('y1', 0)) / 2
+                        
+                        # Check if text is near this rectangle
+                        dist = ((text_x - rect_x)**2 + (text_y - rect_y)**2)**0.5
+                        if dist < 100:  # Within 100 pixels
+                            area = (rect.get('width', 0) / scale) * (rect.get('height', 0) / scale)
+                            if min_size <= area <= max_size:
+                                matches += 1
+                            break
+                    break
+        
+        if checks == 0:
+            return 0.5
+        
+        return matches / checks if checks > 0 else 0.5

@@ -4,14 +4,13 @@ Extracts room labels, dimensions, and notes using pdfplumber + OCR
 """
 
 import pdfplumber
-try:
-    import pytesseract
-    from PIL import Image
-    PYTESSERACT_AVAILABLE = True
-except ImportError:
-    PYTESSERACT_AVAILABLE = False
-    print("Warning: pytesseract not available, OCR functionality disabled")
 import fitz  # PyMuPDF for image extraction
+from PIL import Image
+import cv2
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from services.ocr_extractor import OCRExtractor
 import re
 import logging
 import traceback
@@ -30,6 +29,8 @@ class TextParser:
     """Elite text extraction for HVAC blueprints"""
     
     def __init__(self):
+        # Initialize OCR extractor
+        self.ocr_extractor = OCRExtractor(use_gpu=False)
         self.room_keywords = [
             'bedroom', 'living', 'kitchen', 'bathroom', 'dining', 'office',
             'family', 'master', 'guest', 'utility', 'laundry', 'closet',
@@ -192,15 +193,8 @@ class TextParser:
         logger.info(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
         logger.info(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
         
-        if not PYTESSERACT_AVAILABLE:
-            logger.info(f"[Thread {thread_name}:{thread_id}] OCR not available, skipping")
-            return []
-        
-        try:
-            # Check if tesseract is available
-            pytesseract.get_tesseract_version()
-        except (pytesseract.TesseractNotFoundError, FileNotFoundError) as e:
-            logger.warning(f"[Thread {thread_name}:{thread_id}] Tesseract OCR not found in PATH: {e}")
+        if not self.ocr_extractor or not self.ocr_extractor.ocr:
+            logger.info(f"[Thread {thread_name}:{thread_id}] PaddleOCR not available, skipping")
             return []
         
         def ocr_operation(doc):
@@ -220,28 +214,33 @@ class TextParser:
             pix = page.get_pixmap(matrix=mat)
             img_data = pix.tobytes("ppm")
             
-            # Convert to PIL Image
+            # Convert to numpy array for PaddleOCR
             img = Image.open(BytesIO(img_data))
-            logger.info(f"[Thread {thread_name}:{thread_id}] Running OCR on rendered page")
+            img_array = np.array(img)
+            # Convert RGB to BGR for OpenCV/PaddleOCR
+            if len(img_array.shape) == 3 and img_array.shape[2] == 3:
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
             
-            # OCR with bounding boxes
-            ocr_data = pytesseract.image_to_data(
-                img, 
-                output_type=pytesseract.Output.DICT,
-                config='--psm 6'  # Uniform block of text
-            )
+            logger.info(f"[Thread {thread_name}:{thread_id}] Running PaddleOCR on rendered page")
+            
+            # Use PaddleOCR to extract text
+            text_regions = self.ocr_extractor.extract_all_text(img_array)
             
             # Process OCR results
             words = []
-            for i, text in enumerate(ocr_data['text']):
-                if text.strip() and int(ocr_data['conf'][i]) > 30:  # Confidence threshold
-                    x = float(ocr_data['left'][i]) / 2  # Adjust for 2x zoom
-                    y = float(ocr_data['top'][i]) / 2
-                    w = float(ocr_data['width'][i]) / 2
-                    h = float(ocr_data['height'][i]) / 2
+            for region in text_regions:
+                if region.text.strip() and region.confidence > 0.3:  # Confidence threshold
+                    # Get bounding box corners
+                    bbox = region.bbox
+                    x = float(min(point[0] for point in bbox)) / 2  # Adjust for 2x zoom
+                    y = float(min(point[1] for point in bbox)) / 2
+                    
+                    # Calculate width and height from bounding box
+                    w = float(max(point[0] for point in bbox)) / 2 - x
+                    h = float(max(point[1] for point in bbox)) / 2 - y
                     
                     words.append({
-                        'text': text.strip(),
+                        'text': region.text.strip(),
                         'x0': x,
                         'top': y,
                         'x1': x + w,
@@ -249,9 +248,9 @@ class TextParser:
                         'width': w,
                         'height': h,
                         'size': h,  # Approximate font size
-                        'font': 'ocr',
-                        'confidence': int(ocr_data['conf'][i]),
-                        'source': 'ocr'
+                        'font': 'paddleocr',
+                        'confidence': region.confidence,
+                        'source': 'paddleocr'
                     })
             
             logger.info(f"[Thread {thread_name}:{thread_id}] OCR completed, found {len(words)} words")
