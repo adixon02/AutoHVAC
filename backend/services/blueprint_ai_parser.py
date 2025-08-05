@@ -164,11 +164,31 @@ class BlueprintAIParser:
             best_result = all_page_results[0]
             
             # Check if we need to combine results from multiple pages
+            # More aggressive combination strategy for completeness
+            total_area_all_pages = sum(result['total_area'] for result in all_page_results)
+            
+            # Combine pages if:
+            # 1. Best single page < 1500 sqft (likely incomplete)
+            # 2. Best page has < 70% of total area across all pages
+            # 3. Multiple pages have substantial content (> 500 sqft each)
+            should_combine = False
+            combine_reason = ""
+            
             if best_result['total_area'] < 1500 and len(all_page_results) > 1:
-                logger.info(f"Best single page only has {best_result['total_area']:.0f} sqft - attempting to combine pages")
+                should_combine = True
+                combine_reason = f"best page only {best_result['total_area']:.0f} sqft"
+            elif len(all_page_results) > 1 and best_result['total_area'] < 0.7 * total_area_all_pages:
+                should_combine = True
+                combine_reason = f"best page has only {best_result['total_area']/total_area_all_pages:.0%} of total area"
+            elif len([r for r in all_page_results if r['total_area'] > 500]) >= 2:
+                should_combine = True
+                combine_reason = "multiple pages have substantial room data"
+            
+            if should_combine:
+                logger.info(f"Combining pages ({combine_reason}): {best_result['total_area']:.0f} sqft best vs {total_area_all_pages:.0f} sqft total")
                 blueprint_data = self._combine_page_results(all_page_results)
                 parsing_metadata.selected_page = best_result['page']
-                parsing_metadata.warnings.append(f"Combined data from {len(all_page_results)} pages due to incomplete single-page parsing")
+                parsing_metadata.warnings.append(f"Combined {len(all_page_results)} pages ({combine_reason})")
             else:
                 blueprint_data = best_result['data']
                 parsing_metadata.selected_page = best_result['page']
@@ -231,16 +251,16 @@ class BlueprintAIParser:
                 try:
                     page = doc[page_num]
                     
-                    # Optimized resolution - start smaller and scale up if needed
-                    # Target ~1200px on longest side for optimal GPT-4V performance
+                    # Optimized resolution - target higher quality for better OCR
+                    # Target ~1600-2000px on longest side for optimal GPT-4V text reading
                     page_rect = page.rect
                     max_dimension = max(page_rect.width, page_rect.height)
                     
-                    # Calculate optimal zoom to target 1200px on longest side
-                    target_size = 1200
+                    # Calculate optimal zoom to target 1800px on longest side
+                    target_size = 1800
                     zoom_factor = target_size / max_dimension
-                    zoom_factor = min(zoom_factor, 2.0)  # Cap at 2x zoom
-                    zoom_factor = max(zoom_factor, 0.5)  # Minimum 0.5x zoom
+                    zoom_factor = min(zoom_factor, 3.0)  # Allow up to 3x zoom for clarity
+                    zoom_factor = max(zoom_factor, 1.0)  # Minimum 1x zoom for quality
                     
                     mat = fitz.Matrix(zoom_factor, zoom_factor)
                     logger.info(f"Page {page_num + 1}: Using {zoom_factor:.2f}x zoom (target: {target_size}px)")
@@ -248,8 +268,8 @@ class BlueprintAIParser:
                     # Render page as pixmap
                     pix = page.get_pixmap(matrix=mat)
                     
-                    # Use JPEG first for smaller file sizes (better for GPT-4V API limits)
-                    img_bytes = pix.tobytes("jpeg", jpg_quality=85)
+                    # Use JPEG with higher quality for better text readability
+                    img_bytes = pix.tobytes("jpeg", jpg_quality=95)
                     logger.info(f"Page {page_num + 1}: JPEG format ({len(img_bytes) / 1024 / 1024:.1f}MB)")
                     
                     # If still too large, try PNG with compression
@@ -411,10 +431,27 @@ class BlueprintAIParser:
             if not response_text or not response_text.strip():
                 raise BlueprintAIParsingError("GPT-4V returned empty response")
             
+            # Check for common error responses that indicate vision issues
+            if any(phrase in response_text.lower() for phrase in [
+                "i'm unable to analyze",
+                "cannot analyze",
+                "unable to identify", 
+                "cannot see",
+                "unable to read",
+                "cannot process"
+            ]):
+                logger.warning(f"GPT-4V indicated vision/analysis issues: {response_text[:100]}...")
+                raise BlueprintAIParsingError(f"GPT-4V unable to analyze image: {response_text[:200]}")
+            
             # Extract JSON from response (handle markdown code blocks)
             json_text = self._extract_json_from_response(response_text)
             logger.info(f"Extracted JSON preview: {repr(json_text[:200])}")
             blueprint_data = json.loads(json_text)
+            
+            # Check for error response in JSON
+            if blueprint_data.get('error'):
+                logger.warning(f"GPT-4V returned error: {blueprint_data['error']}")
+                raise BlueprintAIParsingError(f"GPT-4V error: {blueprint_data['error']}")
             
             # Validate response structure
             if not isinstance(blueprint_data, dict) or 'rooms' not in blueprint_data:
@@ -437,77 +474,70 @@ class BlueprintAIParser:
     def _create_blueprint_prompt(self) -> str:
         """Create optimized prompt for fast, accurate HVAC data extraction"""
         return """
-Analyze this floor plan COMPLETELY for HVAC load calculations. This is CRITICAL - missing rooms will cause incorrect HVAC sizing.
+You are analyzing a floor plan image for residential HVAC load calculations. Extract room dimensions and details systematically.
 
-IMPORTANT: You MUST identify EVERY room, including:
-- All bedrooms, bathrooms, kitchen, living areas
-- Hallways, corridors, foyers, entries
-- Closets (walk-in, reach-in, linen, pantry)
-- Utility rooms, laundry, mechanical rooms
-- Storage areas, bonus rooms, offices
-- Any other labeled or unlabeled spaces
+STEP 1 - IMAGE ANALYSIS:
+First, describe what you see in the image:
+- Is this a floor plan drawing? (walls, rooms, labels)
+- Can you identify room boundaries and labels?
+- Are there dimension lines or measurements?
+- Is there a scale notation visible?
 
-SYSTEMATIC APPROACH:
-1. Find scale notation (e.g., "1/4\"=1'-0\"") - check title block and drawing edges
-2. Scan the ENTIRE floor plan - trace every wall and space
-3. Look for room labels, door swings indicate rooms
-4. Check for spaces between labeled rooms - these are often hallways/closets
-5. Sum all room areas - should match total square footage if shown
+If you cannot see a floor plan, return: {"error": "Unable to identify floor plan in image", "rooms": []}
 
-RETURN COMPREHENSIVE JSON:
+STEP 2 - ROOM EXTRACTION:
+For each identifiable space (room, closet, hallway), extract:
+- Room name/label (or describe location if unlabeled)
+- Dimensions if shown (e.g., "15'-0\" x 12'-6\"")
+- Estimated area in square feet
+- Number of windows (count window symbols)
+- Number of exterior walls (walls on building perimeter)
+
+STEP 3 - SYSTEMATIC COVERAGE:
+Work through the floor plan methodically:
+1. Start at entry/front door
+2. Move clockwise through all rooms
+3. Include ALL spaces: bedrooms, bathrooms, kitchen, living areas, dining, hallways, closets, utility rooms, garage
+4. Don't skip small spaces - closets and hallways matter for HVAC
+
+RETURN JSON FORMAT:
 {
-  "scale_found": true,
-  "scale_notation": "1/4\" = 1'-0\"",
-  "scale_factor": 48,
-  "total_area": 2000.0,
-  "total_area_source": "measured",
+  "image_type": "floor_plan",
+  "can_read_text": true,
+  "scale_found": false,
+  "scale_notation": "not found",
+  "total_area": 0,
   "stories": 1,
-  "parsing_completeness": "high",
   "rooms": [
     {
-      "name": "Living Room",
-      "raw_dimensions": "20' x 15'",
-      "dimensions_ft": [20.0, 15.0],
-      "area": 300.0,
+      "name": "Master Bedroom",
+      "raw_dimensions": "16' x 14'",
+      "dimensions_ft": [16.0, 14.0],
+      "area": 224.0,
       "floor": 1,
       "windows": 2,
       "exterior_walls": 2,
-      "room_type": "living",
-      "confidence": 0.9,
-      "dimension_source": "measured"
+      "room_type": "bedroom",
+      "confidence": 0.8,
+      "location_description": "upper right corner"
     }
-  ],
-  "verification": {
-    "room_count": 15,
-    "total_area_calculated": 1980,
-    "missing_area": 20,
-    "likely_missing": "small closets or wall thickness"
-  }
+  ]
 }
 
-ROOM TYPES: bedroom, bathroom, kitchen, living, dining, hallway, closet, laundry, office, garage, utility, storage, entry, other
+ROOM TYPE OPTIONS: bedroom, bathroom, kitchen, living, dining, hallway, closet, laundry, office, garage, utility, storage, entry, other
 
-CRITICAL RULES:
-1. If total parsed area < 80% of typical home size, you're missing rooms
-2. Typical homes have 10-20+ distinct spaces including closets
-3. Every bedroom typically has a closet
-4. Look for unlabeled rectangles - they're often closets/storage
-5. Hallways connect rooms - trace the circulation paths
+DIMENSION PARSING:
+- "15'-6\" x 12'-0\"" → [15.5, 12.0]
+- "15x12" → [15.0, 12.0]
+- If no dimensions shown, estimate based on typical residential scale
 
-TYPICAL SIZES:
-- Master Bedroom: 200-350 sqft
-- Bedroom: 100-200 sqft
-- Bathroom: 40-100 sqft
-- Kitchen: 120-300 sqft
-- Living/Great Room: 200-500 sqft
-- Dining: 120-200 sqft
-- Hallway: 50-150 sqft total
-- Walk-in Closet: 25-100 sqft
-- Reach-in Closet: 10-25 sqft
-- Entry/Foyer: 40-100 sqft
+CONFIDENCE LEVELS:
+- 0.9-1.0: Dimensions clearly labeled
+- 0.7-0.8: Room identified, dimensions estimated
+- 0.5-0.6: Room assumed from layout
+- Below 0.5: Uncertain
 
-Include EVERY space you can identify. Missing rooms = incorrect HVAC calculations!
-"""
+Return valid JSON even if you can only partially read the floor plan. Include all rooms you can identify."""
     
     def _combine_page_results(self, page_results: List[Dict]) -> Dict[str, Any]:
         """Combine room data from multiple pages, removing duplicates"""
