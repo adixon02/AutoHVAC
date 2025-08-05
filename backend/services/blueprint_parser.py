@@ -19,6 +19,7 @@ from app.parser.schema import (
 from app.parser.text_parser import TextParser
 from app.parser.geometry_parser import GeometryParser
 from app.parser.ai_cleanup import cleanup, AICleanupError
+from app.parser.geometry_fallback import geometry_fallback_parser
 from services.pdf_thread_manager import pdf_thread_manager, PDFDocumentClosedError, PDFProcessingTimeoutError
 from services.pdf_page_analyzer import PDFPageAnalyzer
 from services.blueprint_ai_parser import blueprint_ai_parser, BlueprintAIParsingError
@@ -441,114 +442,39 @@ class BlueprintParser:
             return self._create_fallback_rooms(raw_geometry, raw_text)
     
     def _create_fallback_rooms(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any]) -> List[Room]:
-        """Create fallback rooms when AI analysis fails - following Manual J best practices"""
-        rooms = []
+        """Create fallback rooms when AI analysis fails using intelligent geometry analysis"""
         
-        # Log the parsing failure prominently
-        logger.error("=" * 60)
-        logger.error("BLUEPRINT PARSING FAILED - Creating fallback room structure")
-        logger.error("This will result in inaccurate HVAC calculations!")
-        logger.error("Please ensure:")
-        logger.error("1. OpenAI API key is configured in .env file")
-        logger.error("2. Blueprint PDF is readable and contains floor plans")
-        logger.error("3. Blueprint has clear room labels and dimensions")
-        logger.error("=" * 60)
+        # Convert dictionaries to schema objects for the fallback parser
+        from app.parser.schema import RawGeometry, RawText
         
-        # Try to create rooms from geometry rectangles if available
-        if raw_geometry and 'rectangles' in raw_geometry:
-            rectangles = raw_geometry['rectangles']
-            significant_rects = [r for r in rectangles if r.get('area', 0) > 50][:15]  # Up to 15 rooms
-            
-            if significant_rects:
-                # Attempt to estimate total area from all rectangles
-                total_rect_area = sum(r.get('area', 0) for r in significant_rects)
-                
-                # Create rooms with proportional sizing
-                for i, rect in enumerate(significant_rects):
-                    rect_proportion = rect.get('area', 0) / total_rect_area if total_rect_area > 0 else 0.1
-                    
-                    # Estimate room size based on typical residential sizes
-                    # Assume total house is 2000 sqft if we can't determine
-                    estimated_house_size = 2000
-                    room_area = max(80, min(400, estimated_house_size * rect_proportion))
-                    
-                    # Calculate dimensions maintaining aspect ratio if possible
-                    aspect_ratio = rect.get('width', 1) / rect.get('height', 1) if rect.get('height', 1) > 0 else 1.0
-                    width_ft = (room_area * aspect_ratio) ** 0.5
-                    height_ft = room_area / width_ft if width_ft > 0 else 10
-                    
-                    # Round to reasonable dimensions
-                    width_ft = round(width_ft * 2) / 2  # Round to nearest 0.5 ft
-                    height_ft = round(height_ft * 2) / 2
-                    area_sqft = width_ft * height_ft
-                    
-                    room = Room(
-                        name=f"Unidentified Room {i+1}",
-                        dimensions_ft=(width_ft, height_ft),
-                        floor=1,
-                        windows=2,  # Assume 2 windows per room as typical
-                        orientation="unknown",
-                        area=area_sqft,
-                        room_type="unknown",
-                        confidence=0.2,  # Very low confidence
-                        center_position=(rect.get('center_x', 0), rect.get('center_y', 0)),
-                        label_found=False,
-                        dimensions_source="geometry_estimate",
-                        source_elements={
-                            "error": "Parse failure - dimensions estimated",
-                            "proportion": rect_proportion,
-                            "raw_page_units": {
-                                "width": rect.get('width', 0),
-                                "height": rect.get('height', 0),
-                                "area": rect.get('area', 0)
-                            }
-                        }
-                    )
-                    rooms.append(room)
-                
-                logger.warning(f"Created {len(rooms)} estimated rooms from geometry. Total estimated area: {sum(r.area for r in rooms):.0f} sqft")
+        try:
+            geometry_obj = RawGeometry(**raw_geometry) if raw_geometry else None
+            text_obj = RawText(**raw_text) if raw_text else None
+        except Exception as e:
+            logger.error(f"Failed to convert raw data to schema objects: {e}")
+            geometry_obj = None
+            text_obj = None
         
-        # If no geometry rooms, create typical residential layout as last resort
-        if not rooms:
-            logger.error("No geometry found - creating typical residential room layout as fallback")
+        # Use the geometry fallback parser
+        try:
+            fallback_blueprint = geometry_fallback_parser.create_fallback_blueprint(
+                raw_geo=geometry_obj,
+                raw_text=text_obj,
+                zip_code="00000",  # Temporary zip code for fallback
+                error_msg="AI analysis failed"
+            )
             
-            # Create a typical 3-bedroom house layout following Manual J room categories
-            typical_rooms = [
-                ("Living Room", (20.0, 15.0), "living", 300),
-                ("Kitchen", (12.0, 14.0), "kitchen", 168),
-                ("Master Bedroom", (14.0, 12.0), "master_bedroom", 168),
-                ("Bedroom 2", (11.0, 11.0), "bedroom", 121),
-                ("Bedroom 3", (10.0, 11.0), "bedroom", 110),
-                ("Bathroom 1", (8.0, 6.0), "bathroom", 48),
-                ("Bathroom 2", (7.0, 5.0), "bathroom", 35),
-                ("Hallway", (15.0, 4.0), "hallway", 60),
-            ]
+            # Extract rooms from the fallback blueprint
+            if fallback_blueprint and fallback_blueprint.rooms:
+                logger.info(f"Geometry fallback created {len(fallback_blueprint.rooms)} rooms")
+                return fallback_blueprint.rooms
             
-            for name, (width, height), room_type, area in typical_rooms:
-                room = Room(
-                    name=f"{name} (Estimated)",
-                    dimensions_ft=(width, height),
-                    floor=1,
-                    windows=2 if "bedroom" in room_type.lower() or "living" in room_type.lower() else 1,
-                    orientation="unknown",
-                    area=area,
-                    room_type=room_type,
-                    confidence=0.0,  # Zero confidence - complete fallback
-                    center_position=(0.0, 0.0),
-                    label_found=False,
-                    dimensions_source="complete_fallback",
-                    source_elements={
-                        "critical_error": "Complete parsing failure - using typical house layout",
-                        "warning": "HVAC calculations will be estimates only"
-                    }
-                )
-                rooms.append(room)
-            
-            total_area = sum(r.area for r in rooms)
-            logger.error(f"Created typical {len(rooms)}-room layout with {total_area:.0f} sqft total area")
-            logger.error("This is a complete fallback - results will not match actual blueprint!")
+        except Exception as e:
+            logger.error(f"Geometry fallback parser failed: {e}")
         
-        return rooms
+        # If geometry fallback also fails, create minimal rooms
+        logger.error("All parsing methods failed - creating minimal fallback rooms")
+        return geometry_fallback_parser._create_minimal_fallback_rooms()
     
     def _convert_raw_geometry_to_elements(self, raw_geometry) -> List[GeometricElement]:
         """Convert raw geometry to structured GeometricElement objects"""

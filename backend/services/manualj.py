@@ -82,17 +82,17 @@ def _apply_thermal_bridging_factor(
     """
     # Thermal bridging factors (multiply base load)
     # These account for heat transfer through structural members
-    # REDUCED thermal bridging factors per HVAC expert analysis
-    # Previous factors were causing 25% heating and 49% cooling overestimation
+    # BALANCED thermal bridging factors for accurate loads
+    # Previous over-reduction caused cooling underestimation
     bridging_factors = {
-        ("wood_frame", "wall"): 1.03,      # Reduced from 1.05 to 1.03 (3% for wood studs)
-        ("wood_frame", "roof"): 1.05,      # Reduced from 1.07 to 1.05 (5% for roof trusses)
-        ("wood_frame", "floor"): 1.03,     # Reduced from 1.05 to 1.03 (3% for floor joists)
-        ("steel_frame", "wall"): 1.15,     # Reduced from 1.25 to 1.15 (15% for steel studs)
-        ("steel_frame", "roof"): 1.12,     # Reduced from 1.20 to 1.12 (12% for steel trusses)
-        ("steel_frame", "floor"): 1.10,    # Reduced from 1.15 to 1.10 (10% for steel joists)
-        ("masonry", "wall"): 1.08,         # Reduced from 1.10 to 1.08 (8% for masonry ties)
-        ("masonry", "roof"): 1.03,         # Reduced from 1.05 to 1.03 (3% for roof connections)
+        ("wood_frame", "wall"): 1.04,      # Balanced: 4% for wood studs (was 1.05→1.03, now 1.04)
+        ("wood_frame", "roof"): 1.06,      # Balanced: 6% for roof trusses (was 1.07→1.05, now 1.06)
+        ("wood_frame", "floor"): 1.04,     # Balanced: 4% for floor joists (was 1.05→1.03, now 1.04)
+        ("steel_frame", "wall"): 1.20,     # Balanced: 20% for steel studs (was 1.25→1.15, now 1.20)
+        ("steel_frame", "roof"): 1.16,     # Balanced: 16% for steel trusses (was 1.20→1.12, now 1.16)
+        ("steel_frame", "floor"): 1.12,    # Balanced: 12% for steel joists (was 1.15→1.10, now 1.12)
+        ("masonry", "wall"): 1.09,         # Balanced: 9% for masonry ties (was 1.10→1.08, now 1.09)
+        ("masonry", "roof"): 1.04,         # Balanced: 4% for roof connections (was 1.05→1.03, now 1.04)
         ("masonry", "floor"): 1.03,        # Reduced from 1.05 to 1.03 (3% for floor connections)
         ("concrete", "wall"): 1.12,        # Reduced from 1.15 to 1.12 (12% for concrete bridges)
         ("concrete", "roof"): 1.08,        # Reduced from 1.10 to 1.08 (8% for concrete roof)
@@ -359,14 +359,14 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
         
         # Calculate window area with size variation based on count
         if room.windows > 0:
-            # REDUCED window sizes per HVAC expert analysis  
-            # Previous sizes were contributing to 49% cooling overestimation
+            # BALANCED window sizes for accurate cooling loads
+            # Previous reduction was too aggressive, causing 33% cooling underestimation
             if room.windows == 1:
-                window_size = 12.0  # Reduced from 15.0 to 12.0 (3x4 ft instead of 3x5 ft)
+                window_size = 14.0  # Balanced: 3.5x4 ft (was 15→12, now 14)
             elif room.windows <= 3:
-                window_size = 10.0  # Reduced from 12.0 to 10.0 (2.5x4 ft instead of 3x4 ft)
+                window_size = 11.0  # Balanced: 2.75x4 ft (was 12→10, now 11)
             else:
-                window_size = 8.0   # Reduced from 9.0 to 8.0 (2.5x3.2 ft instead of 3x3 ft)
+                window_size = 9.0   # Balanced: 3x3 ft (was 9→8, now 9)
             
             window_area = room.windows * window_size
             wall_area -= window_area
@@ -486,20 +486,20 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     people_load = calculate_internal_load_clf(people_count * 250, 'people')  # 250 BTU/hr per person sensible
     cooling_load += people_load
     
-    # REDUCED lighting load per HVAC expert (modern LED lighting)
-    # Reduced from 2 W/sq ft to 1.5 W/sq ft to account for efficient lighting
-    lighting_load = calculate_internal_load_clf(room.area * 1.5 * 3.41, 'lighting')  # Convert W to BTU/hr
+    # BALANCED lighting load (modern mixed LED/conventional)
+    # Adjusted to 1.7 W/sq ft for realistic residential lighting mix
+    lighting_load = calculate_internal_load_clf(room.area * 1.7 * 3.41, 'lighting')  # Convert W to BTU/hr
     cooling_load += lighting_load
     
-    # REDUCED equipment loads per HVAC expert (modern efficient appliances)
-    # Previous loads were contributing to cooling overestimation
+    # BALANCED equipment loads for realistic residential usage
+    # Previous reduction was too aggressive, causing cooling underestimation
     equipment_loads = {
-        'kitchen': room.area * 4.0,  # Reduced from 5.0 to 4.0 (modern efficient appliances)
-        'office': room.area * 2.4,   # Reduced from 3.0 to 2.4 (efficient computers/monitors)
-        'living': room.area * 1.2,   # Reduced from 1.5 to 1.2 (efficient TVs/electronics)
-        'bedroom': room.area * 0.8,  # Reduced from 1.0 to 0.8 (minimal equipment)
-        'bathroom': room.area * 1.6, # Reduced from 2.0 to 1.6 (efficient fans/lighting)
-        'other': room.area * 0.8     # Reduced from 1.0 to 0.8
+        'kitchen': room.area * 4.5,  # Balanced: cooking, refrigerator, dishwasher (was 5→4, now 4.5)
+        'office': room.area * 2.8,   # Balanced: computers, monitors, printers (was 3→2.4, now 2.8)
+        'living': room.area * 1.4,   # Balanced: TV, game consoles, etc (was 1.5→1.2, now 1.4)
+        'bedroom': room.area * 1.0,  # Balanced: chargers, TV, fans (was 1→0.8, now 1.0)
+        'bathroom': room.area * 1.8, # Balanced: fans, hair dryers (was 2→1.6, now 1.8)
+        'other': room.area * 1.0     # Balanced: general loads (was 1→0.8, now 1.0)
     }
     equipment_heat = equipment_loads.get(room_type, equipment_loads['other'])
     equipment_load = calculate_internal_load_clf(equipment_heat, 'equipment')

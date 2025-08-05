@@ -103,13 +103,20 @@ class Room(BaseModel):
     
     # Enhanced room metadata
     room_type: str = Field("unknown", description="Classified room type (bedroom, bathroom, etc.)")
-    confidence: float = Field(..., description="Room identification confidence 0-1")
+    confidence: float = Field(0.5, description="Room identification confidence 0-1")
     source_elements: Dict[str, Any] = Field(default_factory=dict, description="Geometric/text elements used to identify room")
-    center_position: Tuple[float, float] = Field(..., description="Room center in page coordinates")
+    center_position: Optional[Tuple[float, float]] = Field(None, description="Room center in page coordinates")
     
     # Parsing details
     label_found: bool = Field(False, description="Whether a text label was found for this room")
     dimensions_source: str = Field("inferred", description="How dimensions were determined: measured, inferred, estimated")
+    
+    @validator('center_position', pre=True, always=True)
+    def set_default_center_position(cls, v):
+        """Set default center position if not provided"""
+        if v is None:
+            return (0.0, 0.0)
+        return v
 
     class Config:
         schema_extra = {

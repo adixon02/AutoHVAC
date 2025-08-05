@@ -180,6 +180,11 @@ def _generate_system_prompt() -> str:
       windows: int
       orientation: str
       area: float
+      room_type: str
+      confidence: float
+      center_position: Tuple[float, float]
+      label_found: bool
+      dimensions_source: str
 
     class BlueprintSchema(BaseModel):
       project_id: UUID
@@ -212,7 +217,12 @@ Return a JSON object matching this exact schema:
       "floor": "number (floor number, 1-based)",
       "windows": "number (estimated number of windows, 0-10)",
       "orientation": "string (N, S, E, W, NE, NW, SE, SW, or empty)",
-      "area": "number (room area in square feet)"
+      "area": "number (room area in square feet)",
+      "room_type": "string (bedroom, bathroom, kitchen, living, dining, hallway, closet, laundry, office, other)",
+      "confidence": "number (0.0-1.0, parsing confidence)",
+      "center_position": "[x_coordinate, y_coordinate] (room center on page)",
+      "label_found": "boolean (true if text label found, false if inferred)",
+      "dimensions_source": "string (measured, inferred, estimated)"
     }}
   ]
 }}
@@ -258,7 +268,14 @@ ANALYSIS GUIDELINES:
    - Look for stairs, elevators, or multiple floor indicators
    - If uncertain, assume 1 story
 
-6. VALIDATION:
+6. NEW REQUIRED FIELDS:
+   - room_type: Classify based on name/size (bedroom, bathroom, kitchen, living, dining, hallway, closet, laundry, office, other)
+   - confidence: Your confidence in room identification (0.9 = clear label+dims, 0.7 = clear label, 0.5 = unlabeled, 0.3 = uncertain)
+   - center_position: Calculate from room rectangle bounds as [(x0+x1)/2, (y0+y1)/2]
+   - label_found: true if text label exists near room, false if room type was inferred
+   - dimensions_source: "measured" if dimensions shown, "inferred" if calculated from geometry, "estimated" if guessed
+
+7. VALIDATION:
    - Ensure all rooms have positive area > 15 sqft (allows for small closets)
    - Total sqft should be reasonable for residential (500-5000 sqft typical)
    - Room count expectations:
