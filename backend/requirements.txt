@@ -37,9 +37,7 @@ pdf2image>=1.17.0
 boto3>=1.34.0
 
 # Enhanced blueprint parsing with open-source OCR
-# Note: These are optional dependencies for enhanced parsing
-# Uncomment if you need advanced OCR capabilities
-# paddlepaddle==2.5.2
-# paddleocr>=2.7.0.3
+paddlepaddle==2.5.2
+paddleocr>=2.7.0.3
 opencv-python>=4.8.0.74
 scipy>=1.11.0

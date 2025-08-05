@@ -34,6 +34,7 @@ try:
     from services.ocr_extractor import ocr_extractor, TextRegion
     from services.page_classifier import page_classifier
     ENHANCED_PARSING = True
+    logger.info("Enhanced parsing with PaddleOCR is available and will be used")
 except ImportError as e:
     logger.warning(f"Enhanced parsing modules not available: {e}")
     ENHANCED_PARSING = False

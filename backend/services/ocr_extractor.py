@@ -61,7 +61,7 @@ class OCRExtractor:
                     drop_score=0.3,  # Filter low confidence text
                     det_db_score_mode='slow'  # Better accuracy for technical drawings
                 )
-                logger.info("PaddleOCR initialized successfully")
+                logger.info("PaddleOCR initialized successfully - enhanced blueprint parsing enabled")
             except Exception as e:
                 logger.error(f"Failed to initialize PaddleOCR: {str(e)}")
                 self.ocr = None
