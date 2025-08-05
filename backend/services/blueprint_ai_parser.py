@@ -27,6 +27,8 @@ from app.parser.schema import (
     BlueprintSchema, Room, ParsingMetadata, ParsingStatus
 )
 
+logger = logging.getLogger(__name__)
+
 # Import new modules for enhanced parsing
 try:
     from services.ocr_extractor import ocr_extractor, TextRegion
@@ -35,8 +37,6 @@ try:
 except ImportError as e:
     logger.warning(f"Enhanced parsing modules not available: {e}")
     ENHANCED_PARSING = False
-
-logger = logging.getLogger(__name__)
 
 
 class BlueprintAIParsingError(Exception):
