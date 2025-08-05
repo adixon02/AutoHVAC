@@ -411,11 +411,11 @@ class BlueprintAIParser:
                     page_rect = page.rect
                     max_dimension = max(page_rect.width, page_rect.height)
                     
-                    # Calculate optimal zoom to target 1200px on longest side (faster GPT-4V processing)
-                    target_size = 1200
+                    # Calculate optimal zoom to target 2000px on longest side (better GPT-4V accuracy)
+                    target_size = 2000
                     zoom_factor = target_size / max_dimension
-                    zoom_factor = min(zoom_factor, 2.0)  # Max 2x zoom to prevent large files
-                    zoom_factor = max(zoom_factor, 0.8)  # Allow slight downscale for speed
+                    zoom_factor = min(zoom_factor, 3.0)  # Max 3x zoom for better detail
+                    zoom_factor = max(zoom_factor, 1.0)  # Don't downscale
                     
                     mat = fitz.Matrix(zoom_factor, zoom_factor)
                     logger.info(f"Page {page_num + 1}: Using {zoom_factor:.2f}x zoom (target: {target_size}px)")

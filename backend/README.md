@@ -7,6 +7,7 @@
 - Redis (optional, for background job processing)
 - OpenAI API key (required for AI blueprint parsing)
 - Pillow (included in requirements.txt)
+- PaddleOCR (optional, for enhanced text extraction)
 
 ### Setup & Run
 
@@ -22,6 +23,14 @@
    ```bash
    cp .env.example .env
    # Edit .env and add your OpenAI API key
+   ```
+   
+   **Important Production Settings:**
+   ```bash
+   # For production deployments, set these for optimal accuracy:
+   PARSING_MODE=traditional_first  # Use geometry/text extraction first, AI for enhancement
+   MIN_CONFIDENCE_THRESHOLD=0.5    # Lower threshold for validation gates
+   SCALE_OVERRIDE=48               # Force 1/4"=1' scale if known (48 px/ft)
    ```
 
 3. **Run the server:**
@@ -122,3 +131,18 @@ If you see "Blueprint is too complex to process":
 Files between 20-50MB will show a warning but are allowed:
 - "Large blueprint detected. AI processing may take 2-3 minutes."
 - Maximum file size: 50MB
+
+### PaddleOCR Installation (Optional but Recommended)
+For enhanced text extraction from blueprints:
+```bash
+# Install PaddleOCR for better OCR accuracy
+pip install paddlepaddle paddleocr
+
+# Note: On macOS with Apple Silicon (M1/M2), you may need:
+pip install paddlepaddle==2.5.1 -i https://mirror.baidu.com/pypi/simple
+
+# Verify installation:
+python -c "from paddleocr import PaddleOCR; print('PaddleOCR installed successfully')"
+```
+
+If PaddleOCR is not available, the system will fall back to basic text extraction.

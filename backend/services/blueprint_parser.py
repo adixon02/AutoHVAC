@@ -450,10 +450,12 @@ class BlueprintParser:
             
             if total_elements < 5:
                 logger.error(f"Insufficient geometric elements: {total_elements}")
+                logger.error(f"Blueprint may require manual scale override or PaddleOCR for better text extraction")
                 raise RoomDetectionFailedError(
                     walls_found=len(getattr(geometry_obj, 'lines', [])) if geometry_obj else 0,
                     polygons_found=len(getattr(geometry_obj, 'rectangles', [])) if geometry_obj else 0,
-                    confidence=0.2
+                    confidence=0.2,
+                    message="Insufficient data - consider SCALE_OVERRIDE env var or installing PaddleOCR"
                 )
             
             # Run AI cleanup with timeout
@@ -494,10 +496,12 @@ class BlueprintParser:
                     total_area = sum(room.area for room in enhanced_rooms)
                     if total_area < 500:
                         logger.error(f"Insufficient rooms detected: {len(enhanced_rooms)} rooms, {total_area:.0f} sqft")
+                        logger.error(f"Scale may be incorrect - consider setting SCALE_OVERRIDE=48 for 1/4\"=1' blueprints")
                         raise RoomDetectionFailedError(
                             walls_found=len(getattr(geometry_obj, 'lines', [])) if geometry_obj else 0,
                             polygons_found=len(enhanced_rooms),
-                            confidence=0.3
+                            confidence=0.3,
+                            message=f"Only {len(enhanced_rooms)} rooms found - check scale or use PARSING_MODE=traditional_first"
                         )
                 
                 # Validation Gate 5: Check overall confidence
