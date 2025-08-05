@@ -521,25 +521,26 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
         cooling_load += solar_load
     
     # 5. Internal loads with CLF
-    # People load (assume 1 person per 200 sq ft)
-    people_count = max(1, room.area / 200)
-    people_load = calculate_internal_load_clf(people_count * 250, 'people')  # 250 BTU/hr per person sensible
+    # People load (assume 1 person per 175 sq ft for modern homes)
+    # New construction often has higher occupancy density
+    people_count = max(1, room.area / 175)
+    people_load = calculate_internal_load_clf(people_count * 275, 'people')  # 275 BTU/hr per person sensible (increased activity)
     cooling_load += people_load
     
-    # BALANCED lighting load (modern mixed LED/conventional)
-    # Adjusted to 1.7 W/sq ft for realistic residential lighting mix
-    lighting_load = calculate_internal_load_clf(room.area * 1.7 * 3.41, 'lighting')  # Convert W to BTU/hr
+    # Modern lighting load (mix of LED and decorative lighting)
+    # Adjusted to 1.9 W/sq ft for new construction with more accent lighting
+    lighting_load = calculate_internal_load_clf(room.area * 1.9 * 3.41, 'lighting')  # Convert W to BTU/hr
     cooling_load += lighting_load
     
-    # BALANCED equipment loads for realistic residential usage
-    # Previous reduction was too aggressive, causing cooling underestimation
+    # Increased equipment loads for modern homes with more electronics
+    # New construction has more smart devices, chargers, and appliances
     equipment_loads = {
-        'kitchen': room.area * 4.5,  # Balanced: cooking, refrigerator, dishwasher (was 5→4, now 4.5)
-        'office': room.area * 2.8,   # Balanced: computers, monitors, printers (was 3→2.4, now 2.8)
-        'living': room.area * 1.4,   # Balanced: TV, game consoles, etc (was 1.5→1.2, now 1.4)
-        'bedroom': room.area * 1.0,  # Balanced: chargers, TV, fans (was 1→0.8, now 1.0)
-        'bathroom': room.area * 1.8, # Balanced: fans, hair dryers (was 2→1.6, now 1.8)
-        'other': room.area * 1.0     # Balanced: general loads (was 1→0.8, now 1.0)
+        'kitchen': room.area * 5.2,  # Modern appliances: induction cooking, smart fridge, dishwasher
+        'office': room.area * 3.5,   # Work-from-home: multiple monitors, computers, printers
+        'living': room.area * 1.8,   # Large TVs, gaming systems, streaming devices
+        'bedroom': room.area * 1.3,  # TVs, chargers, smart devices, fans
+        'bathroom': room.area * 2.2, # Hair dryers, heated floors, smart mirrors
+        'other': room.area * 1.2     # General smart home devices and chargers
     }
     equipment_heat = equipment_loads.get(room_type, equipment_loads['other'])
     equipment_load = calculate_internal_load_clf(equipment_heat, 'equipment')
@@ -702,8 +703,9 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
         infiltration_cfm = (room_volume * ach) / 60
     
     # Calculate infiltration heating load with seasonal adjustment
-    # Apply 15% reduction for heating season (building contraction, less wind)
-    heating_infiltration_cfm = infiltration_cfm * 0.85
+    # Apply 20% reduction for heating season (building contraction, less wind)
+    # New construction has better sealing that performs well in cold weather
+    heating_infiltration_cfm = infiltration_cfm * 0.80
     infiltration_loads = calculate_infiltration_loads(
         heating_infiltration_cfm, outdoor_heating_temp, indoor_temp
     )

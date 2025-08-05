@@ -278,7 +278,7 @@ def get_construction_vintage_values(vintage: str) -> Dict[str, float]:
             'floor_r_value': 30.0,    # R-30 (10" floor insulation)
             'window_u_factor': 0.30,  # High-performance windows
             'window_shgc': 0.25,      # High-performance coatings
-            'infiltration_ach': 0.25, # Tight construction
+            'infiltration_ach': 0.20, # Very tight construction (reduced from 0.25)
         }
     }
     
