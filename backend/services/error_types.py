@@ -174,7 +174,7 @@ def log_error_with_context(error: HVACCalculationError, context: Dict[str, Any])
     """
     log_data = {
         'error_type': type(error).__name__,
-        'message': error.message,
+        'error_message': error.message,  # Renamed from 'message' to avoid conflict
         'details': error.details,
         'context': context
     }

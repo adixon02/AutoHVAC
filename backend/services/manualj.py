@@ -334,9 +334,12 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     # Enhanced wall area calculation using GPT-4V exterior wall data
     exterior_walls_count = room.source_elements.get('exterior_walls', 1) if hasattr(room, 'source_elements') else 1
     
+    # Initialize variables to prevent UnboundLocalError
+    wall_area = 0
+    window_area = 0
+    
     if exterior_walls_count == 0:
         # Interior room - no exterior wall area
-        wall_area = 0
         logger.info(f"Room {room.name} is interior - no exterior wall loads")
     else:
         # Calculate room perimeter based on area
