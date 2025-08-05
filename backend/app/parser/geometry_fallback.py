@@ -81,9 +81,24 @@ class GeometryFallbackParser:
         rooms = self._extract_rooms_from_geometry(raw_geo, raw_text)
         
         if not rooms:
-            logger.warning("No valid rooms found in geometry - creating minimal fallback")
-            rooms = self._create_minimal_fallback_rooms()
-            metadata.geometry_status = ParsingStatus.FAILED
+            logger.warning("No valid rooms found in geometry - trying with relaxed thresholds")
+            # Try with relaxed thresholds before giving up
+            original_min = self.MIN_ROOM_AREA
+            original_max = self.MAX_ROOM_AREA
+            self.MIN_ROOM_AREA = 10  # Lower threshold for small rooms
+            self.MAX_ROOM_AREA = 1200  # Higher threshold for large rooms
+            
+            rooms = self._extract_rooms_from_geometry(raw_geo, raw_text)
+            
+            # Restore original thresholds
+            self.MIN_ROOM_AREA = original_min
+            self.MAX_ROOM_AREA = original_max
+            
+            if not rooms:
+                logger.error("Still no rooms found after relaxing thresholds - likely scale issue")
+                logger.warning("Creating minimal fallback as last resort")
+                rooms = self._create_minimal_fallback_rooms()
+                metadata.geometry_status = ParsingStatus.FAILED
         
         # Calculate totals
         total_area = sum(room.area for room in rooms)

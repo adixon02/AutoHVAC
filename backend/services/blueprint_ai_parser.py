@@ -380,8 +380,9 @@ class BlueprintAIParser:
             
             logger.error(f"GPT-4V parsing failed for {filename}: {type(e).__name__}: {str(e)}")
             
-            # Return minimal fallback blueprint
-            return self._create_fallback_blueprint(zip_code, project_id, parsing_metadata, str(e))
+            # CRITICAL FIX: Raise exception to trigger traditional geometry parsing
+            # Don't return generic fallback rooms - let the main parser handle fallback
+            raise BlueprintAIParsingError(f"GPT-4V parsing failed: {str(e)}")
     
     def _convert_pdf_to_images(self, pdf_path: str) -> List[bytes]:
         """Convert PDF pages to high-quality images using PyMuPDF (no poppler needed)"""
@@ -1212,12 +1213,17 @@ Return valid JSON even if you can only partially read the floor plan. Include al
         metadata: ParsingMetadata, 
         error: str
     ) -> BlueprintSchema:
-        """Create fallback blueprint when GPT-4V parsing fails"""
+        """
+        DEPRECATED: This method should not be used anymore.
+        When AI parsing fails, we should raise an exception to trigger
+        traditional geometry parsing, not create fake room layouts.
+        """
         logger.error("=" * 60)
-        logger.error("GPT-4V PARSING FAILED - Creating fallback room structure")
-        logger.error(f"Error: {error}")
-        logger.error("This will result in estimated HVAC calculations only!")
+        logger.error("DEPRECATED: _create_fallback_blueprint should not be called")
+        logger.error("AI failures should trigger geometry parsing instead")
         logger.error("=" * 60)
+        # Raise exception instead of creating fake rooms
+        raise BlueprintAIParsingError(f"AI parsing failed, use geometry parsing: {error}")
         
         # Create a typical residential layout as fallback
         # Target ~2329 sq ft typical home (conditioned space only)
