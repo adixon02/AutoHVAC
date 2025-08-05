@@ -1,31 +1,51 @@
 import os
-import stripe
-from dotenv import load_dotenv
 import logging
+from dotenv import load_dotenv
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Try to import stripe, but handle the case where it's not installed
+try:
+    import stripe
+    STRIPE_AVAILABLE = True
+except ImportError as e:
+    logger.error(f"Failed to import stripe module: {e}")
+    STRIPE_AVAILABLE = False
+    # Create a dummy stripe object to prevent AttributeError
+    class DummyStripe:
+        api_key = None
+        checkout = None
+        __version__ = "Not installed"
+        __file__ = "Not available"
+    stripe = DummyStripe()
 
 # Determine if we're using test mode or live mode
 # Set STRIPE_MODE=live in production, defaults to test
 STRIPE_MODE = os.getenv("STRIPE_MODE", "test").lower()
 
 # Use test keys by default, override with live keys if STRIPE_MODE=live
-if STRIPE_MODE == "live":
-    # Live mode - use live keys (without _LIVE suffix for backward compatibility)
-    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-    STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
-    STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
-    STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID")
-    logger.info("Stripe configured in LIVE mode")
+if STRIPE_AVAILABLE:
+    if STRIPE_MODE == "live":
+        # Live mode - use live keys (without _LIVE suffix for backward compatibility)
+        stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+        STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
+        STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+        STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID")
+        logger.info("Stripe configured in LIVE mode")
+    else:
+        # Test mode - use test keys explicitly
+        stripe.api_key = os.getenv("STRIPE_SECRET_KEY_TEST")
+        STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY_TEST")
+        STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET_TEST")
+        STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID_TEST")
+        logger.info("Stripe configured in TEST mode")
 else:
-    # Test mode - use test keys explicitly
-    stripe.api_key = os.getenv("STRIPE_SECRET_KEY_TEST")
-    STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY_TEST")
-    STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET_TEST")
-    STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID_TEST")
-    logger.info("Stripe configured in TEST mode")
+    STRIPE_PUBLISHABLE_KEY = None
+    STRIPE_WEBHOOK_SECRET = None
+    STRIPE_PRICE_ID = None
+    logger.error("Stripe module not available - payments will not work")
 
 # Log which keys are being used (masked for security)
 logger.info(f"Using Stripe keys - Mode: {STRIPE_MODE}, API Key: {stripe.api_key[:10] if stripe.api_key else 'None'}..., Price ID: {STRIPE_PRICE_ID[:10] if STRIPE_PRICE_ID else 'None'}...")
@@ -119,6 +139,9 @@ def validate_stripe_config():
 
 # Initialize stripe module when this module is imported
 try:
-    initialize_stripe()
+    if STRIPE_AVAILABLE:
+        stripe_result = initialize_stripe()
+    else:
+        logger.error("Skipping Stripe initialization - module not available")
 except Exception as e:
     logger.error(f"Failed to initialize Stripe module: {e}")

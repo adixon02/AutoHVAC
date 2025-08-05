@@ -338,21 +338,22 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     wall_area = 0
     window_area = 0
     
+    # Calculate room perimeter based on area (needed for all rooms, including interior)
+    # Use actual dimensions if available, otherwise estimate
+    if hasattr(room, 'dimensions_ft') and room.dimensions_ft and len(room.dimensions_ft) >= 2:
+        width = room.dimensions_ft[0]
+        length = room.dimensions_ft[1]
+        room_perimeter = 2 * (width + length)
+    else:
+        # Assume rectangular room with 1.5:1 aspect ratio (more realistic than square)
+        width = math.sqrt(room.area / 1.5)
+        length = width * 1.5
+        room_perimeter = 2 * (width + length)
+    
     if exterior_walls_count == 0:
         # Interior room - no exterior wall area
         logger.info(f"Room {room.name} is interior - no exterior wall loads")
     else:
-        # Calculate room perimeter based on area
-        # Use actual dimensions if available, otherwise estimate
-        if hasattr(room, 'dimensions_ft') and room.dimensions_ft and len(room.dimensions_ft) >= 2:
-            width = room.dimensions_ft[0]
-            length = room.dimensions_ft[1]
-            room_perimeter = 2 * (width + length)
-        else:
-            # Assume rectangular room with 1.5:1 aspect ratio (more realistic than square)
-            width = math.sqrt(room.area / 1.5)
-            length = width * 1.5
-            room_perimeter = 2 * (width + length)
         
         # Calculate exterior wall length based on actual number of exterior walls
         # This is more accurate than dividing by 4
