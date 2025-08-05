@@ -482,6 +482,7 @@ First, describe what you see in the image:
 - Can you identify room boundaries and labels?
 - Are there dimension lines or measurements?
 - Is there a scale notation visible?
+- Is there a north arrow or compass? Which way is north?
 
 If you cannot see a floor plan, return: {"error": "Unable to identify floor plan in image", "rooms": []}
 
@@ -492,6 +493,7 @@ For each identifiable space (room, closet, hallway), extract:
 - Estimated area in square feet
 - Number of windows (count window symbols)
 - Number of exterior walls (walls on building perimeter)
+- Orientation (N, S, E, W, NE, NW, SE, SW based on which direction windows/walls face)
 
 STEP 3 - SYSTEMATIC COVERAGE:
 Work through the floor plan methodically:
@@ -508,6 +510,8 @@ RETURN JSON FORMAT:
   "scale_notation": "not found",
   "total_area": 0,
   "stories": 1,
+  "north_arrow_found": false,
+  "building_orientation": "",
   "rooms": [
     {
       "name": "Master Bedroom",
@@ -517,6 +521,7 @@ RETURN JSON FORMAT:
       "floor": 1,
       "windows": 2,
       "exterior_walls": 2,
+      "orientation": "S",
       "room_type": "bedroom",
       "confidence": 0.8,
       "location_description": "upper right corner"
@@ -701,13 +706,21 @@ Return valid JSON even if you can only partially read the floor plan. Include al
             
             # Calculate totals and validate
             total_area_calculated = sum(room.area for room in rooms)
-            total_area_declared = blueprint_data.get('total_area', total_area_calculated)
-            total_area_source = blueprint_data.get('total_area_source', 'calculated')
+            total_area_declared = blueprint_data.get('total_area', 0)
+            
+            # Use calculated total if declared is 0 or missing
+            if total_area_declared == 0:
+                total_area_final = total_area_calculated
+                total_area_source = 'calculated'
+            else:
+                total_area_final = total_area_declared
+                total_area_source = blueprint_data.get('total_area_source', 'declared')
+            
             stories = blueprint_data.get('stories', 1)
             
             # Validate total area
-            if total_area_declared > 10000:
-                logger.warning(f"Suspicious total area: {total_area_declared} sq ft for residential building")
+            if total_area_final > 10000:
+                logger.warning(f"Suspicious total area: {total_area_final} sq ft for residential building")
                 if suspicious_rooms:
                     logger.warning(f"Suspicious rooms found: {', '.join(suspicious_rooms)}")
             
@@ -718,7 +731,7 @@ Return valid JSON even if you can only partially read the floor plan. Include al
             # Store building-level data in raw_geometry for Manual J calculations
             building_data = {
                 "building_orientation": blueprint_data.get('building_orientation', ''),
-                "total_conditioned_area": total_area_declared,
+                "total_conditioned_area": total_area_final,
                 "total_area_calculated": total_area_calculated,
                 "total_area_source": total_area_source,
                 "stories": stories,
@@ -745,7 +758,7 @@ Return valid JSON even if you can only partially read the floor plan. Include al
             return BlueprintSchema(
                 project_id=UUID(project_id) if isinstance(project_id, str) else project_id,
                 zip_code=zip_code,
-                sqft_total=total_area_declared,
+                sqft_total=total_area_final,
                 stories=stories,
                 rooms=rooms,
                 raw_geometry=building_data,  # Enhanced building data for HVAC calculations

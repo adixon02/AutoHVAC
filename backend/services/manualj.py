@@ -715,8 +715,11 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     # Add ventilation heating load
     heating_load += ventilation['heating']
     
-    # Add floor losses (only for ground floor rooms)
-    if room.floor == 1:
+    # Add floor losses (only for ground floor rooms with exterior walls)
+    # Interior rooms don't have slab edge losses
+    exterior_walls_count = room.source_elements.get('exterior_walls', 1) if hasattr(room, 'source_elements') else 1
+    
+    if room.floor == 1 and exterior_walls_count > 0:
         # Determine floor type from envelope data or use default
         floor_type = "slab"  # Default assumption
         if envelope_data:
@@ -735,7 +738,7 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
             outdoor_heating_temp,
             indoor_temp,
             climate_data['climate_zone'],
-            perimeter_length=room_perimeter  # Use the calculated room perimeter
+            perimeter_length=exterior_wall_length  # Use only exterior wall length for slab edge
         )
         
         heating_load += floor_losses['heating']
@@ -768,11 +771,11 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
             cooling_load *= 1.20  # 20% increase for corner rooms
             logger.info(f"Room {room.name}: Applied corner room factors (H:1.15x, C:1.20x)")
         
-        # Thermal exposure factor
+        # Thermal exposure factor - reduced to prevent overestimation
         thermal_exposure = room.source_elements.get('thermal_exposure', 'medium')
         exposure_factors = {
-            'high': {'heating': 1.2, 'cooling': 1.25},
-            'medium': {'heating': 1.1, 'cooling': 1.1},
+            'high': {'heating': 1.1, 'cooling': 1.15},    # Reduced from 1.2/1.25
+            'medium': {'heating': 1.05, 'cooling': 1.05},  # Reduced from 1.1/1.1
             'low': {'heating': 1.0, 'cooling': 1.0}
         }
         factors = exposure_factors.get(thermal_exposure, exposure_factors['medium'])
@@ -864,7 +867,7 @@ def _calculate_room_loads_simplified(room: Room, room_type: str, climate_data: D
     
     # Apply window factors - reduced for heating, cap at 3 windows
     window_factor_heating = 1.0 + (min(room.windows, 3) * 0.08)  # 8% per window, max 3
-    window_factor_cooling = 1.0 + (room.windows * 0.15) * 1.2    # Keep original for cooling
+    window_factor_cooling = 1.0 + (room.windows * 0.12)         # 12% per window (reduced from 18%)
     heating_mult *= window_factor_heating
     cooling_mult *= window_factor_cooling
     

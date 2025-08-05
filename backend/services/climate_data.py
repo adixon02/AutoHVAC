@@ -287,21 +287,21 @@ def get_construction_vintage_values(vintage: str) -> Dict[str, float]:
 
 # Climate zone heating and cooling factors (BTU/hr/sqft base loads)
 CLIMATE_ZONE_FACTORS = {
-    '1A': {'heating_factor': 15, 'cooling_factor': 35},  # Very Hot-Humid
-    '2A': {'heating_factor': 25, 'cooling_factor': 30},  # Hot-Humid
-    '2B': {'heating_factor': 25, 'cooling_factor': 32},  # Hot-Dry
-    '3A': {'heating_factor': 30, 'cooling_factor': 25},  # Warm-Humid
-    '3B': {'heating_factor': 30, 'cooling_factor': 27},  # Warm-Dry
-    '3C': {'heating_factor': 25, 'cooling_factor': 18},  # Warm-Marine
-    '4A': {'heating_factor': 40, 'cooling_factor': 22},  # Mixed-Humid
-    '4B': {'heating_factor': 40, 'cooling_factor': 24},  # Mixed-Dry
-    '4C': {'heating_factor': 35, 'cooling_factor': 15},  # Mixed-Marine
-    '5A': {'heating_factor': 40, 'cooling_factor': 20},  # Cool-Humid (reduced from 50)
-    '5B': {'heating_factor': 38, 'cooling_factor': 22},  # Cool-Dry (reduced from 50)
-    '6A': {'heating_factor': 45, 'cooling_factor': 18},  # Cold-Humid (reduced from 60)
-    '6B': {'heating_factor': 45, 'cooling_factor': 20},  # Cold-Dry (reduced from 60)
-    '7': {'heating_factor': 55, 'cooling_factor': 15},   # Very Cold (reduced from 70)
-    '8': {'heating_factor': 65, 'cooling_factor': 12},   # Subarctic (reduced from 85)
+    '1A': {'heating_factor': 14, 'cooling_factor': 35},  # Very Hot-Humid (reduced 7%)
+    '2A': {'heating_factor': 22, 'cooling_factor': 30},  # Hot-Humid (reduced 12%)
+    '2B': {'heating_factor': 22, 'cooling_factor': 32},  # Hot-Dry (reduced 12%)
+    '3A': {'heating_factor': 26, 'cooling_factor': 25},  # Warm-Humid (reduced 13%)
+    '3B': {'heating_factor': 26, 'cooling_factor': 27},  # Warm-Dry (reduced 13%)
+    '3C': {'heating_factor': 22, 'cooling_factor': 18},  # Warm-Marine (reduced 12%)
+    '4A': {'heating_factor': 34, 'cooling_factor': 22},  # Mixed-Humid (reduced 15%)
+    '4B': {'heating_factor': 34, 'cooling_factor': 24},  # Mixed-Dry (reduced 15%)
+    '4C': {'heating_factor': 30, 'cooling_factor': 15},  # Mixed-Marine (reduced 14%)
+    '5A': {'heating_factor': 32, 'cooling_factor': 20},  # Cool-Humid (reduced 20% from 40)
+    '5B': {'heating_factor': 30, 'cooling_factor': 22},  # Cool-Dry (reduced 21% from 38)
+    '6A': {'heating_factor': 36, 'cooling_factor': 18},  # Cold-Humid (reduced 20% from 45)
+    '6B': {'heating_factor': 36, 'cooling_factor': 20},  # Cold-Dry (reduced 20% from 45)
+    '7': {'heating_factor': 42, 'cooling_factor': 15},   # Very Cold (reduced 24% from 55)
+    '8': {'heating_factor': 49, 'cooling_factor': 12},   # Subarctic (reduced 25% from 65)
 }
 
 
