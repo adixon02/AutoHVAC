@@ -211,19 +211,19 @@ class BlueprintAIParser:
             
             # Special case: only one page succeeded but area is suspiciously low
             should_augment_with_fallback = False
-            if len(all_page_results) == 1 and best_result['total_area'] < 1500:
+            if len(all_page_results) == 1 and best_result['total_area'] < 1800:
                 logger.warning(f"⚠️  Only one page parsed with {best_result['total_area']:.0f} sqft - likely incomplete!")
                 parsing_metadata.warnings.append(f"Only partial floor plan detected ({best_result['total_area']:.0f} sqft) - augmenting with estimated rooms")
                 should_augment_with_fallback = True
                 blueprint_data = best_result['data']
                 parsing_metadata.selected_page = best_result['page']
-            elif best_result['total_area'] < 1500 and len(all_page_results) > 1:
+            elif best_result['total_area'] < 1800 and len(all_page_results) > 1:
                 should_combine = True
                 combine_reason = f"best page only {best_result['total_area']:.0f} sqft"
-            elif len(all_page_results) > 1 and best_result['total_area'] < 0.7 * total_area_all_pages:
+            elif len(all_page_results) > 1 and best_result['total_area'] < 0.8 * total_area_all_pages:
                 should_combine = True
                 combine_reason = f"best page has only {best_result['total_area']/total_area_all_pages:.0%} of total area"
-            elif len([r for r in all_page_results if r['total_area'] > 500]) >= 2:
+            elif len([r for r in all_page_results if r['total_area'] > 300]) >= 2:
                 should_combine = True
                 combine_reason = "multiple pages have substantial room data"
             
@@ -573,20 +573,28 @@ class BlueprintAIParser:
         return """
 You are analyzing a floor plan image for residential HVAC load calculations. Extract room dimensions and details systematically.
 
-CRITICAL: This may be a PARTIAL floor plan showing only one floor or section. Extract ALL visible rooms even if incomplete.
+CRITICAL: This image may show:
+- FIRST FLOOR ONLY (look for "First Floor", "1st Floor", "Level 1" labels)
+- SECOND FLOOR ONLY (look for "Second Floor", "2nd Floor", "Level 2" labels) 
+- BASEMENT/LOWER LEVEL (look for "Basement", "Lower Level" labels)
+- A SECTION/WING of a larger building
+- MULTIPLE FLOORS on one page (stacked or side-by-side)
+
+Extract ALL visible rooms regardless of which floor/section they're on!
 
 STEP 1 - IMAGE ANALYSIS:
 First, describe what you see in the image:
 - Is this a floor plan drawing? (walls, rooms, labels)
+- What floor/level is shown? (check for floor labels)
 - Can you identify room boundaries and labels?
 - Are there dimension lines or measurements?
 - Is there a scale notation visible?
 - Is there a north arrow or compass? Which way is north?
-- Does this appear to be a complete floor plan or just a section/floor?
+- Are there stairs shown? (indicates multi-story building)
 
-If you cannot see a floor plan AT ALL (e.g., title page, elevation, detail), return: {"error": "Unable to identify floor plan in image", "rooms": []}
+If you see NO floor plan elements AT ALL (only title page, elevation, section, or details), return: {"error": "Unable to identify floor plan in image", "rooms": []}
 
-IMPORTANT: If you see ANY rooms or floor plan elements, proceed with extraction even if partial.
+IMPORTANT: If you see ANY rooms, extract them ALL - even partial views!
 
 STEP 2 - ROOM EXTRACTION:
 For each identifiable space (room, closet, hallway), extract:
@@ -603,7 +611,8 @@ Work through the floor plan methodically:
 2. Move clockwise through all rooms
 3. Include ALL spaces: bedrooms, bathrooms, kitchen, living areas, dining, hallways, closets, utility rooms, garage
 4. Don't skip small spaces - closets and hallways matter for HVAC
-5. If this appears to be a second floor, note floor=2 for all rooms
+5. CRITICAL: Check floor labels and set floor=1 for first/main floor, floor=2 for second floor, floor=0 for basement
+6. If you see stairs, this indicates a multi-story building - extract all visible rooms
 
 RETURN JSON FORMAT:
 {
@@ -617,6 +626,9 @@ RETURN JSON FORMAT:
   "building_orientation": "",
   "partial_floor_plan": false,
   "floor_level": 1,
+  "floor_label": "First Floor",
+  "has_stairs": false,
+  "appears_complete": true,
   "rooms": [
     {
       "name": "Master Bedroom",
@@ -652,6 +664,13 @@ CONFIDENCE LEVELS:
 - 0.7-0.8: Room identified, dimensions estimated from scale
 - 0.5-0.6: Room assumed from layout
 - Below 0.5: Uncertain
+
+FLOOR DETECTION RULES:
+- If labeled "Second Floor", "2nd Floor", "Upper Level" → floor=2 for all rooms
+- If labeled "First Floor", "1st Floor", "Main Level" → floor=1 for all rooms  
+- If labeled "Basement", "Lower Level" → floor=0 for all rooms
+- If no floor label but has bedrooms → likely upper floor (floor=2)
+- If no floor label but has kitchen/living → likely main floor (floor=1)
 
 Return valid JSON even if you can only partially read the floor plan. Include all rooms you can identify."""
     
@@ -721,7 +740,7 @@ Return valid JSON even if you can only partially read the floor plan. Include al
         logger.warning(f"Augmenting partial blueprint data ({detected_area:.0f} sqft detected)")
         
         # Target typical home size of ~2000-2500 sqft
-        target_area = 2200  # Typical single-family home
+        target_area = 2400  # Typical single-family home (increased for better accuracy)
         missing_area = target_area - detected_area
         
         if missing_area <= 0:
@@ -740,7 +759,10 @@ Return valid JSON even if you can only partially read the floor plan. Include al
             {"name": "Bedroom 3", "dims": [11.0, 11.0], "area": 121, "type": "bedroom", "windows": 1},
             {"name": "Family Room", "dims": [16.0, 14.0], "area": 224, "type": "living", "windows": 2},
             {"name": "Bathroom 2", "dims": [8.0, 7.0], "area": 56, "type": "bathroom", "windows": 1},
+            {"name": "Bathroom 3", "dims": [7.0, 6.0], "area": 42, "type": "bathroom", "windows": 0},
             {"name": "Hallway", "dims": [20.0, 5.0], "area": 100, "type": "hallway", "windows": 0},
+            {"name": "Office", "dims": [11.0, 10.0], "area": 110, "type": "office", "windows": 1},
+            {"name": "Laundry", "dims": [8.0, 8.0], "area": 64, "type": "laundry", "windows": 1},
         ]
         
         # Check which rooms are already detected

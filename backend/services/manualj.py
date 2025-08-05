@@ -830,11 +830,11 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
             load_breakdown['heating']['multipliers_applied'].append(f'thermal_exposure_{thermal_exposure}: {factors.get("heating", 1.0)}x')
             load_breakdown['cooling']['multipliers_applied'].append(f'thermal_exposure_{thermal_exposure}: {factors.get("cooling", 1.0)}x')
     
-    # Apply interior room heating reduction (30% less heating load)
+    # Apply interior room heating reduction (15% less heating load)
     # Interior rooms are conditioned by adjacent spaces and have lower heating needs
     if exterior_walls_count == 0:
         original_heating = heating_load
-        heating_load *= 0.7  # 30% reduction for interior rooms
+        heating_load *= 0.85  # 15% reduction for interior rooms
         logger.info(f"Room {room.name}: Applied interior room heating reduction: {original_heating:.0f} → {heating_load:.0f} BTU/hr")
     
     return {
@@ -1100,6 +1100,13 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     outdoor_heating_temp = climate_data.get('heating_db_99', 10)
     indoor_temp = 75
     
+    # Apply extreme weather multiplier for very cold climates
+    extreme_weather_multiplier = 1.0
+    if outdoor_heating_temp < 0:
+        # Add 10% for every 10°F below 0°F
+        extreme_weather_multiplier = 1.0 + (abs(outdoor_heating_temp) / 100)
+        logger.info(f"Extreme cold weather detected ({outdoor_heating_temp}°F): applying {extreme_weather_multiplier:.2f}x multiplier")
+    
     zones = []
     total_heating = 0.0
     total_cooling = 0.0
@@ -1272,6 +1279,11 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     
     total_heating *= duct_heating_factor
     total_cooling *= duct_cooling_factor
+    
+    # Apply extreme weather multiplier to total heating
+    if extreme_weather_multiplier > 1.0:
+        total_heating *= extreme_weather_multiplier
+        logger.info(f"Applied extreme weather multiplier to total heating: {total_heating:.0f} BTU/hr")
     
     # NO SAFETY FACTORS - Per ACCA Manual J best practices
     # Equipment should be sized to calculated loads only
