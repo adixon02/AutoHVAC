@@ -712,7 +712,7 @@ Return valid JSON even if you can only partially read the floor plan. Include al
                     logger.warning(f"Suspicious rooms found: {', '.join(suspicious_rooms)}")
             
             # Check if calculated matches declared
-            if abs(total_area_calculated - total_area_declared) / total_area_declared > 0.2:
+            if total_area_declared > 0 and abs(total_area_calculated - total_area_declared) / total_area_declared > 0.2:
                 logger.warning(f"Total area mismatch: calculated={total_area_calculated}, declared={total_area_declared}")
             
             # Store building-level data in raw_geometry for Manual J calculations
@@ -807,7 +807,7 @@ Return valid JSON even if you can only partially read the floor plan. Include al
         logger.error("=" * 60)
         
         # Create a typical residential layout as fallback
-        # Target ~2500 sq ft typical home
+        # Target ~2329 sq ft typical home (conditioned space only)
         typical_rooms = [
             ("Living Room", (20.0, 18.0), "living", 360, 3),
             ("Kitchen", (15.0, 18.0), "kitchen", 270, 2),
@@ -824,7 +824,6 @@ Return valid JSON even if you can only partially read the floor plan. Include al
             ("Hallway", (30.0, 5.0), "hallway", 150, 0),
             ("Entry", (10.0, 8.0), "other", 80, 1),
             ("Closets", (10.0, 15.0), "closet", 150, 0),
-            ("Garage", (20.0, 20.0), "garage", 400, 2),
         ]
         
         rooms = []

@@ -655,7 +655,7 @@ class BlueprintParser:
     
     def _create_typical_fallback_rooms(self) -> List[Room]:
         """Create typical residential room layout when parsing fails"""
-        # Target ~2500 sq ft typical home
+        # Target ~2329 sq ft typical home (conditioned space only)
         typical_rooms = [
             ("Living Room", (20.0, 18.0), "living", 360, 3),
             ("Kitchen", (15.0, 18.0), "kitchen", 270, 2),

@@ -779,13 +779,10 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
         heating_load *= factors['heating']
         cooling_load *= factors['cooling']
         
-        # Apply confidence-based safety factors
+        # Log confidence but don't apply safety factors (per Manual J best practices)
         room_confidence = room.confidence if hasattr(room, 'confidence') else 0.8
         if room_confidence < 0.5:
-            # Low confidence - add safety margin
-            heating_load *= 1.1
-            cooling_load *= 1.1
-            logger.warning(f"Room {room.name}: Low confidence ({room_confidence}) - applied 10% safety factor")
+            logger.warning(f"Room {room.name}: Low confidence ({room_confidence}) - verify dimensions manually")
     
     # Create detailed load breakdown
     load_breakdown = {
