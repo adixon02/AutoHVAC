@@ -240,14 +240,14 @@ CLIMATE_ZONES = {
 
 # Room type multipliers
 ROOM_MULTIPLIERS = {
-    "living": {"heating": 1.2, "cooling": 1.3},  # High activity, large windows
-    "bedroom": {"heating": 0.9, "cooling": 1.0}, # Lower activity
-    "kitchen": {"heating": 1.1, "cooling": 1.4}, # Heat gain from appliances
-    "bathroom": {"heating": 1.3, "cooling": 1.1}, # High moisture, heating needs
-    "dining": {"heating": 1.0, "cooling": 1.1},
-    "office": {"heating": 0.9, "cooling": 1.2},   # Equipment heat gain
-    "utility": {"heating": 0.8, "cooling": 1.3},  # Equipment heat gain
-    "other": {"heating": 1.0, "cooling": 1.0}
+    "living": {"heating": 1.0, "cooling": 1.3},   # Reduced heating from 1.2
+    "bedroom": {"heating": 0.9, "cooling": 1.0},  # No change - already reasonable
+    "kitchen": {"heating": 1.0, "cooling": 1.4},  # Reduced heating from 1.1
+    "bathroom": {"heating": 1.1, "cooling": 1.1}, # Reduced heating from 1.3
+    "dining": {"heating": 0.95, "cooling": 1.1},  # Reduced heating from 1.0
+    "office": {"heating": 0.9, "cooling": 1.2},   # No change
+    "utility": {"heating": 0.8, "cooling": 1.3},  # No change
+    "other": {"heating": 0.95, "cooling": 1.0}    # Reduced heating from 1.0
 }
 
 # Orientation factors
@@ -846,10 +846,11 @@ def _calculate_room_loads_simplified(room: Room, room_type: str, climate_data: D
     heating_mult *= orientation_mult["heating"]
     cooling_mult *= orientation_mult["cooling"]
     
-    # Apply window factors
-    window_factor = 1.0 + (room.windows * 0.15)
-    heating_mult *= window_factor
-    cooling_mult *= window_factor * 1.2
+    # Apply window factors - reduced for heating, cap at 3 windows
+    window_factor_heating = 1.0 + (min(room.windows, 3) * 0.08)  # 8% per window, max 3
+    window_factor_cooling = 1.0 + (room.windows * 0.15) * 1.2    # Keep original for cooling
+    heating_mult *= window_factor_heating
+    cooling_mult *= window_factor_cooling
     
     # Calculate loads
     room_heating = room.area * base_heating * heating_mult

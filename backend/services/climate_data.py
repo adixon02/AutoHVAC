@@ -296,12 +296,12 @@ CLIMATE_ZONE_FACTORS = {
     '4A': {'heating_factor': 40, 'cooling_factor': 22},  # Mixed-Humid
     '4B': {'heating_factor': 40, 'cooling_factor': 24},  # Mixed-Dry
     '4C': {'heating_factor': 35, 'cooling_factor': 15},  # Mixed-Marine
-    '5A': {'heating_factor': 50, 'cooling_factor': 20},  # Cool-Humid
-    '5B': {'heating_factor': 50, 'cooling_factor': 22},  # Cool-Dry
-    '6A': {'heating_factor': 60, 'cooling_factor': 18},  # Cold-Humid
-    '6B': {'heating_factor': 60, 'cooling_factor': 20},  # Cold-Dry
-    '7': {'heating_factor': 70, 'cooling_factor': 15},   # Very Cold
-    '8': {'heating_factor': 85, 'cooling_factor': 12},   # Subarctic
+    '5A': {'heating_factor': 40, 'cooling_factor': 20},  # Cool-Humid (reduced from 50)
+    '5B': {'heating_factor': 38, 'cooling_factor': 22},  # Cool-Dry (reduced from 50)
+    '6A': {'heating_factor': 45, 'cooling_factor': 18},  # Cold-Humid (reduced from 60)
+    '6B': {'heating_factor': 45, 'cooling_factor': 20},  # Cold-Dry (reduced from 60)
+    '7': {'heating_factor': 55, 'cooling_factor': 15},   # Very Cold (reduced from 70)
+    '8': {'heating_factor': 65, 'cooling_factor': 12},   # Subarctic (reduced from 85)
 }
 
 
