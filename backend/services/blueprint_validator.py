@@ -31,6 +31,17 @@ class ValidationIssue:
     details: Dict[str, Any]
     suggested_fix: str
     affected_room: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary with enum serialization"""
+        return {
+            'severity': self.severity.value,  # Convert enum to string
+            'category': self.category,
+            'message': self.message,
+            'details': self.details,
+            'suggested_fix': self.suggested_fix,
+            'affected_room': self.affected_room
+        }
 
 
 @dataclass

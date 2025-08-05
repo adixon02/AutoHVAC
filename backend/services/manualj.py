@@ -243,7 +243,7 @@ ROOM_MULTIPLIERS = {
     "living": {"heating": 1.0, "cooling": 1.3},   # Reduced heating from 1.2
     "bedroom": {"heating": 0.9, "cooling": 1.0},  # No change - already reasonable
     "kitchen": {"heating": 1.0, "cooling": 1.4},  # Reduced heating from 1.1
-    "bathroom": {"heating": 1.1, "cooling": 1.1}, # Reduced heating from 1.3
+    "bathroom": {"heating": 1.0, "cooling": 1.1}, # Reduced heating from 1.1 to 1.0
     "dining": {"heating": 0.95, "cooling": 1.1},  # Reduced heating from 1.0
     "office": {"heating": 0.9, "cooling": 1.2},   # No change
     "utility": {"heating": 0.8, "cooling": 1.3},  # No change
@@ -337,6 +337,7 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     # Initialize variables to prevent UnboundLocalError
     wall_area = 0
     window_area = 0
+    room_perimeter = 0  # Initialize room_perimeter to prevent UnboundLocalError
     
     # Calculate room perimeter based on area (needed for all rooms, including interior)
     # Use actual dimensions if available, otherwise estimate
@@ -490,13 +491,13 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
         orientation_confidence = room.source_elements.get('orientation_confidence', 0.0) if hasattr(room, 'source_elements') else 0.0
         
         if room.orientation == 'unknown' or orientation_confidence < 0.3:
-            # Unknown orientation - use weighted worst-case approach based on solar physics
-            # South and West receive the most solar heat gain
+            # Unknown orientation - use balanced distribution for new construction residential
+            # Equal probability of each orientation is more accurate than worst-case assumptions
             orientation_weights = {
-                'S': 0.40,  # 40% - Maximum solar exposure
-                'W': 0.30,  # 30% - High afternoon heat gain
-                'E': 0.20,  # 20% - Morning heat gain
-                'N': 0.10   # 10% - Minimal solar exposure
+                'S': 0.25,  # 25% - Balanced approach
+                'W': 0.25,  # 25% - Balanced approach  
+                'E': 0.25,  # 25% - Balanced approach
+                'N': 0.25   # 25% - Balanced approach
             }
             
             weighted_solar = 0
@@ -507,7 +508,7 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
                 weighted_solar += solar_contribution * weight
             
             solar_load = weighted_solar
-            logger.info(f"Room {room.name}: Using weighted solar load (S:40%, W:30%, E:20%, N:10%) due to unknown orientation")
+            logger.info(f"Room {room.name}: Using balanced solar load (25% each direction) for unknown orientation")
         else:
             solar_load = calculate_window_solar_load(
                 window_area, window_shgc, room.orientation
@@ -821,6 +822,13 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
         if thermal_exposure != 'low':
             load_breakdown['heating']['multipliers_applied'].append(f'thermal_exposure_{thermal_exposure}: {factors.get("heating", 1.0)}x')
             load_breakdown['cooling']['multipliers_applied'].append(f'thermal_exposure_{thermal_exposure}: {factors.get("cooling", 1.0)}x')
+    
+    # Apply interior room heating reduction (30% less heating load)
+    # Interior rooms are conditioned by adjacent spaces and have lower heating needs
+    if exterior_walls_count == 0:
+        original_heating = heating_load
+        heating_load *= 0.7  # 30% reduction for interior rooms
+        logger.info(f"Room {room.name}: Applied interior room heating reduction: {original_heating:.0f} → {heating_load:.0f} BTU/hr")
     
     return {
         'heating': max(heating_load, 0),
@@ -1202,15 +1210,16 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
             logger.info(f"Small area discrepancy ({area_discrepancy_percent:.0f}%): Applying gentle correction {area_correction_factor:.2f}")
             
         elif area_discrepancy_percent < 50:
-            # Moderate discrepancy (20-50%): Apply graduated correction
+            # Moderate discrepancy (20-50%): Apply graduated correction with 1.2x cap
             # As discrepancy increases, apply more of the correction
             correction_strength = 0.5 + (area_discrepancy_percent - 20) / 30 * 0.3  # 50% to 80%
             area_correction_factor = 1.0 + (raw_correction - 1.0) * correction_strength
-            logger.warning(f"Moderate area discrepancy ({area_discrepancy_percent:.0f}%): Applying {correction_strength:.0%} correction = {area_correction_factor:.2f}")
+            area_correction_factor = min(area_correction_factor, 1.2)  # Cap at 1.2x for accuracy
+            logger.warning(f"Moderate area discrepancy ({area_discrepancy_percent:.0f}%): Applying {correction_strength:.0%} correction = {area_correction_factor:.2f} (capped at 1.2x)")
             
         else:
             # Large discrepancy (>50%): Cap correction factor and flag for review
-            area_correction_factor = min(raw_correction, 1.3)  # Cap at 1.3x
+            area_correction_factor = min(raw_correction, 1.2)  # Cap at 1.2x
             logger.error(f"Large area discrepancy ({area_discrepancy_percent:.0f}%): Capping correction at {area_correction_factor:.2f}")
             logger.error(f"Parsed: {total_room_area:.0f} sqft, Declared: {schema.sqft_total:.0f} sqft")
             logger.error("Manual review recommended - parsing may have missed significant areas")
