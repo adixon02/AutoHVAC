@@ -124,7 +124,33 @@ class GeometryFallbackParser:
         # Get page dimensions for scaling
         page_width = raw_geo.page_width or 792.0
         page_height = raw_geo.page_height or 612.0
-        scale_factor = raw_geo.scale_factor or 48.0  # Default 1/4" scale
+        scale_factor = raw_geo.scale_factor
+        
+        # If no scale factor detected, estimate based on typical architectural drawings
+        if not scale_factor:
+            # Estimate scale based on page size
+            # Standard architectural drawings are often at 1/4" = 1' scale (48:1)
+            # For a typical 2000 sq ft home on 24"x36" sheet:
+            # Home dimensions ~40'x50', sheet ~800x1200 pixels at 72dpi
+            # So scale factor = real_size / page_size * 12
+            
+            # Assume the page represents approximately 100' x 75' of real space
+            # This is typical for residential floor plans
+            estimated_width_ft = 100.0  # Typical building width on drawing
+            estimated_height_ft = 75.0   # Typical building depth on drawing
+            
+            # Calculate scale factors for width and height
+            scale_x = (estimated_width_ft * 12) / page_width  # Convert to inches then to page units
+            scale_y = (estimated_height_ft * 12) / page_height
+            
+            # Use the average, but prefer standard architectural scales
+            avg_scale = (scale_x + scale_y) / 2
+            
+            # Snap to nearest standard architectural scale
+            standard_scales = [48.0, 32.0, 24.0, 16.0, 96.0]  # 1/4", 3/8", 1/2", 3/4", 1/8"
+            scale_factor = min(standard_scales, key=lambda x: abs(x - avg_scale))
+            
+            logger.info(f"No scale detected, estimated scale factor: {scale_factor} (1/{12/scale_factor:.1f}\" = 1')")
         
         # Process rectangles as potential rooms
         rectangles = sorted(
@@ -137,12 +163,7 @@ class GeometryFallbackParser:
         used_labels = set()
         
         for idx, rect in enumerate(rectangles):
-            # Skip if too small or too large
-            rect_area = rect.get('area', 0)
-            if rect_area < self.MIN_ROOM_AREA or rect_area > self.MAX_ROOM_AREA:
-                continue
-            
-            # Calculate dimensions
+            # Calculate dimensions first
             width = rect.get('width', 0) or abs(rect.get('x1', 0) - rect.get('x0', 0))
             height = rect.get('height', 0) or abs(rect.get('y1', 0) - rect.get('y0', 0))
             
@@ -150,16 +171,16 @@ class GeometryFallbackParser:
             if width <= 0 or height <= 0:
                 continue
             
-            # Convert to feet if needed (assuming page units need scaling)
-            if scale_factor and width < 50 and height < 50:  # Likely in page units
-                width_ft = width * scale_factor / 12.0
-                height_ft = height * scale_factor / 12.0
-                area_ft = width_ft * height_ft
-            else:
-                # Already in reasonable feet dimensions
-                width_ft = width
-                height_ft = height
-                area_ft = rect_area
+            # ALWAYS convert from page units to feet using scale factor
+            # The geometry parser returns coordinates in page units (pixels/points)
+            width_ft = (width / scale_factor) * 12.0  # Convert to feet
+            height_ft = (height / scale_factor) * 12.0
+            area_ft = width_ft * height_ft
+            
+            # NOW check if the converted area is reasonable
+            if area_ft < self.MIN_ROOM_AREA or area_ft > self.MAX_ROOM_AREA:
+                logger.debug(f"Skipping rectangle {idx}: area {area_ft:.1f} sq ft outside range {self.MIN_ROOM_AREA}-{self.MAX_ROOM_AREA}")
+                continue
             
             # Find nearby text label
             center_x = rect.get('center_x', (rect.get('x0', 0) + rect.get('x1', 0)) / 2)
@@ -203,7 +224,9 @@ class GeometryFallbackParser:
                 dimensions_source="geometry",
                 source_elements={
                     "rectangle_index": idx,
-                    "original_area": rect_area,
+                    "original_width": width,
+                    "original_height": height,
+                    "scale_factor": scale_factor,
                     "room_probability": rect.get('room_probability', 0.5),
                     "parsing_method": "geometry_fallback"
                 }

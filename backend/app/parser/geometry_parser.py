@@ -23,9 +23,15 @@ class GeometryParser:
     
     def __init__(self):
         self.scale_patterns = [
+            # Standard architectural scales
+            r'1/(\d+)"?\s*=\s*1\'?-?0?"?',    # 1/4" = 1'-0" -> captures denominator
             r'1"?\s*=\s*(\d+)\'?-?(\d+)?"?',  # 1" = 20'-0"
             r'(\d+)\s*:\s*(\d+)',              # 1:240
+            r'SCALE\s*[:\-]\s*1/(\d+)',        # SCALE: 1/4
             r'SCALE\s*[:\-]\s*(.+)',           # SCALE: 1/4" = 1'-0"
+            # Common variations
+            r'(\d+)"\s*=\s*(\d+)\'',           # 1" = 8'
+            r'1\s*:\s*(\d+)',                  # 1:48
         ]
         
         # Defensive limits to prevent infinite processing
@@ -85,19 +91,40 @@ class GeometryParser:
                     words = page.extract_words()
                     text = ' '.join([w['text'] for w in words])
                     
-                    for pattern in self.scale_patterns:
+                    for i, pattern in enumerate(self.scale_patterns):
                         match = re.search(pattern, text, re.IGNORECASE)
                         if match:
                             try:
-                                # Parse scale ratio (simplified)
-                                if ':' in match.group():
-                                    parts = match.group().split(':')
-                                    scale_factor = float(parts[1]) / float(parts[0])
+                                groups = match.groups()
+                                
+                                # Handle different pattern types
+                                if i == 0:  # 1/4" = 1'-0" pattern
+                                    denominator = float(groups[0])
+                                    scale_factor = 12.0 * denominator  # e.g., 1/4" = 48
+                                elif i == 1:  # 1" = 20'-0" pattern
+                                    feet = float(groups[0])
+                                    inches = float(groups[1]) if len(groups) > 1 and groups[1] else 0
+                                    scale_factor = (feet * 12 + inches)
+                                elif i in [2, 6]:  # Ratio patterns like 1:48
+                                    if len(groups) >= 2:
+                                        scale_factor = float(groups[1]) / float(groups[0])
+                                    else:
+                                        scale_factor = float(groups[0])
+                                elif i == 3:  # SCALE: 1/4 pattern
+                                    denominator = float(groups[0])
+                                    scale_factor = 12.0 * denominator
+                                elif i == 5:  # 1" = 8' pattern
+                                    inch_val = float(groups[0]) if groups[0] else 1
+                                    feet_val = float(groups[1])
+                                    scale_factor = (feet_val * 12) / inch_val
                                 else:
-                                    # Parse architectural scale like 1/4" = 1'-0"
-                                    scale_factor = 48.0  # Default to 1/4" scale
+                                    # Default to 1/4" scale if we can't parse
+                                    scale_factor = 48.0
+                                
+                                logger.info(f"[Thread {thread_name}:{thread_id}] Detected scale from pattern {i}: {scale_factor} ({match.group()})")
                                 break
-                            except:
+                            except Exception as e:
+                                logger.debug(f"[Thread {thread_name}:{thread_id}] Failed to parse scale with pattern {i}: {e}")
                                 continue
                 except Exception as e:
                     logger.warning(f"[Thread {thread_name}:{thread_id}] Scale detection failed: {e}")
@@ -190,7 +217,10 @@ class GeometryParser:
                             area = width * height
                             
                             # Filter meaningful rectangles
-                            if area > 500:  # Minimum room size
+                            # Note: These are in page units, not square feet
+                            # Typical page is ~800x600 pixels, so max reasonable rectangle is ~400x300 = 120,000 page units²
+                            # Minimum meaningful size is ~20x20 = 400 page units²
+                            if area > 100 and area < 200000:  # Reasonable range in page units
                                 rectangles.append({
                                     'type': 'rect',
                                     'coords': [float(rect['x0']), float(rect['y0']), float(rect['x1']), float(rect['y1'])],

@@ -1149,6 +1149,29 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
             logger.info(f"Added generated space: {space_data['name']} ({space_data['area']:.0f} sqft)")
     
     for room in rooms_to_process:
+        # Validate and cap room area to prevent calculation errors
+        original_area = room.area
+        max_residential_room_area = 1000.0  # Maximum reasonable residential room area
+        
+        if room.area > max_residential_room_area:
+            logger.error(f"Room '{room.name}' has unrealistic area: {room.area:.0f} sq ft")
+            logger.error(f"This likely indicates a scale/parsing error. Capping at {max_residential_room_area} sq ft")
+            
+            # Cap the room area for calculation purposes
+            room.area = max_residential_room_area
+            
+            # Add validation warning
+            validation_warnings.append({
+                "severity": "ERROR",
+                "message": f"Room '{room.name}' area of {original_area:.0f} sq ft exceeds maximum residential limit",
+                "fix": "Check blueprint scale or parsing accuracy",
+                "details": {
+                    "original_area": original_area,
+                    "capped_area": max_residential_room_area,
+                    "likely_cause": "scale_detection_failure"
+                }
+            })
+        
         room_type = _classify_room_type(room.name)
         
         # Use enhanced CLF/CLTD calculations if construction vintage or envelope data is provided

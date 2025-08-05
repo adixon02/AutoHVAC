@@ -129,6 +129,12 @@ class BlueprintParser:
                     logger.error("AI blueprint parsing requires a valid OpenAI API key.")
                     logger.error("Please set OPENAI_API_KEY in your .env file")
                     logger.error("=" * 60)
+                elif "quota exceeded" in str(e).lower():
+                    logger.error("=" * 60)
+                    logger.error("CRITICAL: OpenAI API quota exceeded!")
+                    logger.error("Please add credits to your OpenAI account:")
+                    logger.error("https://platform.openai.com/account/billing")
+                    logger.error("=" * 60)
                 logger.warning(f"Falling back to traditional parsing. Results may be less accurate for complex blueprints.")
                 # Fall through to traditional parsing
             except Exception as e:

@@ -660,8 +660,28 @@ class BlueprintAIParser:
                 logger.info("GPT-4V API call completed successfully")
                 
             except Exception as api_error:
-                logger.error(f"GPT-4V API call failed: {type(api_error).__name__}: {str(api_error)}")
-                raise BlueprintAIParsingError(f"GPT-4V API call failed: {str(api_error)}")
+                error_str = str(api_error)
+                logger.error(f"GPT-4V API call failed: {type(api_error).__name__}: {error_str}")
+                
+                # Check for specific error types
+                if "insufficient_quota" in error_str or "exceeded your current quota" in error_str:
+                    logger.error("="*60)
+                    logger.error("OpenAI API QUOTA EXCEEDED!")
+                    logger.error("Please check your OpenAI account billing and add credits")
+                    logger.error("Visit: https://platform.openai.com/account/billing")
+                    logger.error("="*60)
+                    raise BlueprintAIParsingError(f"OpenAI API quota exceeded: {error_str}")
+                elif "invalid_api_key" in error_str or "Incorrect API key" in error_str:
+                    logger.error("="*60)
+                    logger.error("OpenAI API KEY INVALID!")
+                    logger.error("Please check your OPENAI_API_KEY environment variable")
+                    logger.error("="*60)
+                    raise BlueprintAIParsingError(f"Invalid OpenAI API key: {error_str}")
+                elif "rate_limit" in error_str or "429" in str(api_error):
+                    logger.warning(f"OpenAI API rate limit exceeded, will retry with fallback")
+                    raise BlueprintAIParsingError(f"OpenAI API rate limit exceeded: {error_str}")
+                else:
+                    raise BlueprintAIParsingError(f"GPT-4V API call failed: {error_str}")
             
             # Parse response
             response_text = response.choices[0].message.content
