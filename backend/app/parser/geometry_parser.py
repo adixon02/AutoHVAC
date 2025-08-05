@@ -17,6 +17,14 @@ from .scale_detector import ScaleDetector, ScaleResult
 from .exceptions import ScaleDetectionError
 from services.pdf_thread_manager import safe_pdfplumber_operation, safe_pymupdf_operation
 
+# Try to import OCR extractor for better text extraction
+try:
+    from services.ocr_extractor import OCRExtractor
+    PADDLEOCR_AVAILABLE = True
+except ImportError:
+    PADDLEOCR_AVAILABLE = False
+    logging.warning("PaddleOCR not available for scale detection - using basic text extraction")
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +34,8 @@ class GeometryParser:
     def __init__(self):
         # Initialize scale detector
         self.scale_detector = ScaleDetector(dpi=72.0)  # Standard PDF DPI
+        # Initialize OCR extractor if available
+        self.ocr_extractor = OCRExtractor(use_gpu=False) if PADDLEOCR_AVAILABLE else None
         
         # Keep legacy scale patterns for backward compatibility
         self.scale_patterns = [
@@ -97,19 +107,66 @@ class GeometryParser:
                 
                 try:
                     # Extract text elements for scale detection
-                    words = page.extract_words()
-                    text_elements = [{'text': w['text'], 'x0': w.get('x0', 0), 'top': w.get('top', 0)} for w in words]
+                    # Use PaddleOCR if available for better accuracy
+                    if self.ocr_extractor and PADDLEOCR_AVAILABLE:
+                        logger.info(f"[Thread {thread_name}:{thread_id}] Using PaddleOCR for text extraction")
+                        # Render page as image for OCR
+                        import fitz
+                        import numpy as np
+                        from PIL import Image
+                        from io import BytesIO
+                        import cv2
+                        
+                        # Convert page to image
+                        mat = fitz.Matrix(2, 2)  # 2x zoom for better OCR
+                        pix = page.page.get_pixmap(matrix=mat) if hasattr(page, 'page') else None
+                        if pix:
+                            img_data = pix.tobytes("ppm")
+                            img = Image.open(BytesIO(img_data))
+                            img_array = np.array(img)
+                            # Convert RGB to BGR for OpenCV/PaddleOCR
+                            if len(img_array.shape) == 3 and img_array.shape[2] == 3:
+                                img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+                            
+                            # Extract text with PaddleOCR
+                            text_regions = self.ocr_extractor.extract_all_text(img_array)
+                            
+                            # Convert to text elements format
+                            text_elements = []
+                            for region in text_regions:
+                                if region.text.strip() and region.confidence > 0.3:
+                                    bbox = region.bbox
+                                    x = float(min(point[0] for point in bbox)) / 2  # Adjust for 2x zoom
+                                    y = float(min(point[1] for point in bbox)) / 2
+                                    text_elements.append({
+                                        'text': region.text.strip(),
+                                        'x0': x,
+                                        'top': y,
+                                        'confidence': region.confidence,
+                                        'source': 'paddleocr'
+                                    })
+                            logger.info(f"[Thread {thread_name}:{thread_id}] PaddleOCR extracted {len(text_elements)} text elements")
+                        else:
+                            # Fallback to pdfplumber
+                            logger.warning(f"[Thread {thread_name}:{thread_id}] Failed to render page for OCR, using pdfplumber")
+                            words = page.extract_words()
+                            text_elements = [{'text': w['text'], 'x0': w.get('x0', 0), 'top': w.get('top', 0)} for w in words]
+                    else:
+                        # Use pdfplumber text extraction
+                        logger.info(f"[Thread {thread_name}:{thread_id}] Using pdfplumber for text extraction (PaddleOCR not available)")
+                        words = page.extract_words()
+                        text_elements = [{'text': w['text'], 'x0': w.get('x0', 0), 'top': w.get('top', 0)} for w in words]
                     
                     # Extract dimensions (look for patterns like "12'-0"")
                     dimensions = []
                     dimension_pattern = r"(\d+)['\s]*-?\s*(\d+)?[\"\s]*"
-                    for word in words:
-                        if re.search(dimension_pattern, word['text']):
+                    for element in text_elements:
+                        if re.search(dimension_pattern, element['text']):
                             dimensions.append({
-                                'dimension_text': word['text'],
-                                'x0': word.get('x0', 0),
-                                'top': word.get('top', 0),
-                                'parsed_dimensions': self._parse_dimension_text(word['text'])
+                                'dimension_text': element['text'],
+                                'x0': element.get('x0', 0),
+                                'top': element.get('top', 0),
+                                'parsed_dimensions': self._parse_dimension_text(element['text'])
                             })
                     
                     # We'll get rectangles and lines later, but pass empty for initial detection

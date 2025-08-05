@@ -79,10 +79,17 @@ class BlueprintParser:
         Raises:
             BlueprintParsingError: If parsing fails critically
         """
-        # Check if GPT-4V parsing is enabled (default: true for AI-first)
-        use_gpt4v = os.getenv("AI_PARSING_ENABLED", "true").lower() != "false"
+        # Check parsing mode from environment
+        parsing_mode = os.getenv("PARSING_MODE", "traditional_first").lower()
         
-        if use_gpt4v:
+        # Legacy support for AI_PARSING_ENABLED
+        if os.getenv("AI_PARSING_ENABLED", "").lower() == "false":
+            parsing_mode = "traditional_only"
+        
+        logger.info(f"Using parsing mode: {parsing_mode}")
+        
+        # AI-first mode: Try GPT-4V first, fall back to traditional
+        if parsing_mode == "ai_first":
             logger.info(f"[AI-FIRST] Using GPT-4V parsing for {filename}")
             try:
                 # Use async context to run the AI parser
@@ -158,8 +165,22 @@ class BlueprintParser:
                 logger.warning(f"AI parsing temporarily unavailable, using traditional parsing as backup.")
                 # Fall through to traditional parsing
         
-        # Traditional parsing pipeline (fallback when AI fails)
-        logger.info(f"Using traditional parsing for {filename} (AI {'disabled' if not use_gpt4v else 'failed'})")
+        # Traditional-first mode: Start with geometry/text, enhance with AI
+        elif parsing_mode == "traditional_first":
+            logger.info(f"[TRADITIONAL-FIRST] Starting with geometry/text extraction for {filename}")
+            # Will do traditional parsing below, then enhance with AI
+        
+        # Traditional-only mode: Skip AI entirely
+        elif parsing_mode == "traditional_only":
+            logger.info(f"[TRADITIONAL-ONLY] Using only geometry/text extraction for {filename}")
+            # Will do traditional parsing below without AI enhancement
+        
+        else:
+            logger.warning(f"Unknown parsing mode '{parsing_mode}', defaulting to traditional_first")
+            parsing_mode = "traditional_first"
+        
+        # Traditional parsing pipeline (fallback when AI fails or when in traditional mode)
+        logger.info(f"Using traditional parsing for {filename} (mode: {parsing_mode})")
         start_time = time.time()
         parsing_metadata = ParsingMetadata(
             parsing_timestamp=datetime.utcnow(),

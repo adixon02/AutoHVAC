@@ -252,8 +252,11 @@ class BlueprintAIParser:
                         continue
             
             # Second pass: retry failed pages with different image processing
-            if failed_pages and len(all_page_results) < 2:
+            # More aggressive retry when we suspect missing floors
+            total_area_so_far = sum(result['total_area'] for result in all_page_results)
+            if failed_pages and (len(all_page_results) < 2 or total_area_so_far < 1500):
                 logger.info(f"Retrying {len(failed_pages)} failed pages with enhanced processing...")
+                logger.info(f"Current total area: {total_area_so_far:.0f} sqft - likely missing floors")
                 for page_idx, failure_reason in failed_pages:
                     if "Unable to identify floor plan" in failure_reason:
                         try:
@@ -315,6 +318,7 @@ class BlueprintAIParser:
                 should_combine = True
                 combine_reason = f"total area only {total_area_all_pages:.0f} sqft (below residential minimum)"
                 logger.warning(f"⚠️  Total detected area {total_area_all_pages:.0f} sqft - forcing combination")
+                logger.warning(f"⚠️  This likely means we're missing an entire floor - check pages that failed")
             
             # Special case: only one page succeeded but area is suspiciously low
             elif len(all_page_results) == 1 and best_result['total_area'] < 1800:

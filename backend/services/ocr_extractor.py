@@ -73,7 +73,10 @@ class OCRExtractor:
             List of TextRegion objects
         """
         if not self.ocr:
-            logger.warning("OCR not available - returning empty results")
+            logger.error("PaddleOCR not initialized - OCR extraction disabled")
+            logger.error("To enable OCR: pip install paddlepaddle paddleocr")
+            logger.error("This significantly impacts blueprint parsing accuracy!")
+            logger.error("Without OCR: No scale detection from text, no room labels, no dimensions")
             return []
         
         try:

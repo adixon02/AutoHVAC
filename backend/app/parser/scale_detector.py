@@ -9,6 +9,14 @@ import numpy as np
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 
+# Import spatial matcher for better text-to-geometry matching
+try:
+    from .spatial_matcher import SpatialMatcher
+    SPATIAL_MATCHING_AVAILABLE = True
+except ImportError:
+    SPATIAL_MATCHING_AVAILABLE = False
+    logging.warning("Spatial matching not available - scale detection may be less accurate")
+
 logger = logging.getLogger(__name__)
 
 
