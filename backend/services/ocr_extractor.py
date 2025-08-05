@@ -57,9 +57,7 @@ class OCRExtractor:
                     use_angle_cls=True,  # Enable text angle classification
                     lang='en',
                     use_gpu=use_gpu,
-                    show_log=False,  # Reduce logging noise
-                    drop_score=0.3,  # Filter low confidence text
-                    det_db_score_mode='slow'  # Better accuracy for technical drawings
+                    show_log=False  # Reduce logging noise
                 )
                 logger.info("PaddleOCR initialized successfully - enhanced blueprint parsing enabled")
             except Exception as e:
@@ -88,10 +86,16 @@ class OCRExtractor:
                 return []
             
             text_regions = []
+            min_confidence = 0.3  # Filter low confidence text
+            
             for line in result[0]:
                 bbox = line[0]
                 text = line[1][0]
                 confidence = line[1][1]
+                
+                # Skip low confidence text
+                if confidence < min_confidence:
+                    continue
                 
                 # Classify the text region type
                 region_type = self._classify_text_region(text)

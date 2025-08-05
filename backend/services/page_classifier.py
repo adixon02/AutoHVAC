@@ -6,7 +6,7 @@ Identifies floor plan pages vs elevation/detail/schedule pages
 import cv2
 import numpy as np
 import logging
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
