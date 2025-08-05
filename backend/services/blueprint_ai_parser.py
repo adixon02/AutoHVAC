@@ -21,7 +21,7 @@ except ImportError:
     PDF2IMAGE_AVAILABLE = False
     
 from openai import AsyncOpenAI
-from app.parser.schema import (
+from backend.app.parser.schema import (
     BlueprintSchema, Room, ParsingMetadata, ParsingStatus
 )
 
@@ -48,7 +48,7 @@ class BlueprintAIParser:
         # Set default configuration values first
         self.max_image_size = 5 * 1024 * 1024   # 5MB max - much smaller for speed
         self.target_image_size = 2 * 1024 * 1024  # Target 2MB for optimal balance
-        self.max_pages = 5  # Reduced to speed up processing
+        self.max_pages = 10  # Increased to ensure complete parsing
         self.min_resolution = 1024  # Increased minimum for better OCR
         self.max_resolution = 2048  # Cap maximum resolution to control size
         
@@ -121,33 +121,63 @@ class BlueprintAIParser:
             parsing_metadata.pdf_page_count = len(images)
             logger.info(f"Converted PDF to {len(images)} images")
             
-            # Step 2: Try different pages until one works
+            # Step 2: Try different pages and potentially combine results
             logger.info("Trying different pages for GPT-4V analysis...")
-            blueprint_data = None
-            successful_page = None
+            all_page_results = []
+            successful_pages = []
             
             # Try pages in order: 2, 1, 3, 4 (skip title pages, try floor plans first)
-            page_order = [1, 0, 2, 3] if len(images) > 1 else [0]
+            page_order = [1, 0, 2, 3, 4, 5] if len(images) > 1 else [0]
             
+            # First pass: try each page individually
             for page_idx in page_order:
                 if page_idx < len(images):
                     try:
                         logger.info(f"Trying page {page_idx + 1} ({len(images[page_idx])} bytes)")
-                        blueprint_data = await self._extract_blueprint_data(images[page_idx])
-                        successful_page = page_idx
-                        parsing_metadata.selected_page = page_idx + 1
-                        logger.info(f"✅ Successfully extracted from page {page_idx + 1}")
-                        break
+                        page_data = await self._extract_blueprint_data(images[page_idx])
+                        
+                        # Check if this page has substantial content
+                        if page_data and 'rooms' in page_data and len(page_data['rooms']) > 0:
+                            total_area_parsed = sum(r.get('area', 0) for r in page_data['rooms'])
+                            logger.info(f"✅ Page {page_idx + 1}: Found {len(page_data['rooms'])} rooms, {total_area_parsed:.0f} sqft")
+                            
+                            all_page_results.append({
+                                'page': page_idx + 1,
+                                'data': page_data,
+                                'room_count': len(page_data['rooms']),
+                                'total_area': total_area_parsed
+                            })
+                            successful_pages.append(page_idx)
+                        else:
+                            logger.warning(f"❌ Page {page_idx + 1}: No rooms found")
+                            
                     except BlueprintAIParsingError as e:
                         logger.warning(f"❌ Page {page_idx + 1} failed: {str(e)}")
                         continue
             
-            if blueprint_data is None:
+            if not all_page_results:
                 raise BlueprintAIParsingError("Failed to extract data from any page")
+            
+            # Select best result or combine if needed
+            # Sort by total area parsed (descending)
+            all_page_results.sort(key=lambda x: x['total_area'], reverse=True)
+            best_result = all_page_results[0]
+            
+            # Check if we need to combine results from multiple pages
+            if best_result['total_area'] < 1500 and len(all_page_results) > 1:
+                logger.info(f"Best single page only has {best_result['total_area']:.0f} sqft - attempting to combine pages")
+                blueprint_data = self._combine_page_results(all_page_results)
+                parsing_metadata.selected_page = best_result['page']
+                parsing_metadata.warnings.append(f"Combined data from {len(all_page_results)} pages due to incomplete single-page parsing")
+            else:
+                blueprint_data = best_result['data']
+                parsing_metadata.selected_page = best_result['page']
+                logger.info(f"Using page {best_result['page']} with {best_result['room_count']} rooms, {best_result['total_area']:.0f} sqft")
             
             parsing_metadata.ai_status = ParsingStatus.SUCCESS
             parsing_metadata.overall_confidence = 0.85
-            logger.info(f"Successfully extracted {len(blueprint_data.get('rooms', []))} rooms from page {successful_page + 1}")
+            total_rooms = len(blueprint_data.get('rooms', []))
+            logger.info(f"Successfully extracted {total_rooms} rooms")
             
             # Step 4: Create BlueprintSchema
             blueprint_schema = self._create_blueprint_schema(
@@ -390,6 +420,13 @@ class BlueprintAIParser:
             if not isinstance(blueprint_data, dict) or 'rooms' not in blueprint_data:
                 raise BlueprintAIParsingError("Invalid response structure from GPT-4V")
             
+            # Log verification data if present
+            if 'verification' in blueprint_data:
+                v = blueprint_data['verification']
+                logger.info(f"GPT-4V parsing verification: {v.get('room_count', 0)} rooms, "
+                           f"{v.get('total_area_calculated', 0):.0f} sqft calculated, "
+                           f"{v.get('missing_area', 0):.0f} sqft unaccounted")
+            
             return blueprint_data
             
         except json.JSONDecodeError as e:
@@ -400,20 +437,32 @@ class BlueprintAIParser:
     def _create_blueprint_prompt(self) -> str:
         """Create optimized prompt for fast, accurate HVAC data extraction"""
         return """
-Analyze this floor plan for HVAC calculations. Extract room data systematically.
+Analyze this floor plan COMPLETELY for HVAC load calculations. This is CRITICAL - missing rooms will cause incorrect HVAC sizing.
 
-STEPS:
-1. Find scale notation (e.g., "1/4\"=1'-0\", "1:48") - usually in title block
-2. Identify ALL rooms with labels and dimensions
-3. Estimate missing data using typical residential sizes
+IMPORTANT: You MUST identify EVERY room, including:
+- All bedrooms, bathrooms, kitchen, living areas
+- Hallways, corridors, foyers, entries
+- Closets (walk-in, reach-in, linen, pantry)
+- Utility rooms, laundry, mechanical rooms
+- Storage areas, bonus rooms, offices
+- Any other labeled or unlabeled spaces
 
-RETURN THIS JSON STRUCTURE:
+SYSTEMATIC APPROACH:
+1. Find scale notation (e.g., "1/4\"=1'-0\"") - check title block and drawing edges
+2. Scan the ENTIRE floor plan - trace every wall and space
+3. Look for room labels, door swings indicate rooms
+4. Check for spaces between labeled rooms - these are often hallways/closets
+5. Sum all room areas - should match total square footage if shown
+
+RETURN COMPREHENSIVE JSON:
 {
   "scale_found": true,
   "scale_notation": "1/4\" = 1'-0\"",
   "scale_factor": 48,
   "total_area": 2000.0,
+  "total_area_source": "measured",
   "stories": 1,
+  "parsing_completeness": "high",
   "rooms": [
     {
       "name": "Living Room",
@@ -422,28 +471,104 @@ RETURN THIS JSON STRUCTURE:
       "area": 300.0,
       "floor": 1,
       "windows": 2,
+      "exterior_walls": 2,
       "room_type": "living",
-      "confidence": 0.8,
+      "confidence": 0.9,
       "dimension_source": "measured"
     }
-  ]
+  ],
+  "verification": {
+    "room_count": 15,
+    "total_area_calculated": 1980,
+    "missing_area": 20,
+    "likely_missing": "small closets or wall thickness"
+  }
 }
 
-ROOM TYPES: bedroom, bathroom, kitchen, living, dining, hallway, closet, laundry, office, other
-DIMENSION SOURCES: measured (shown on plan), estimated (typical size), scaled (from scale bar)
-CONFIDENCE: 0.9 (clear label+dims), 0.7 (clear label), 0.5 (unlabeled), 0.3 (uncertain)
+ROOM TYPES: bedroom, bathroom, kitchen, living, dining, hallway, closet, laundry, office, garage, utility, storage, entry, other
 
-TYPICAL SIZES (use if dimensions unclear):
-- Bedroom: 120-180 sqft
-- Master: 200-300 sqft  
-- Bathroom: 40-80 sqft
-- Kitchen: 150-250 sqft
-- Living: 250-350 sqft
+CRITICAL RULES:
+1. If total parsed area < 80% of typical home size, you're missing rooms
+2. Typical homes have 10-20+ distinct spaces including closets
+3. Every bedroom typically has a closet
+4. Look for unlabeled rectangles - they're often closets/storage
+5. Hallways connect rooms - trace the circulation paths
+
+TYPICAL SIZES:
+- Master Bedroom: 200-350 sqft
+- Bedroom: 100-200 sqft
+- Bathroom: 40-100 sqft
+- Kitchen: 120-300 sqft
+- Living/Great Room: 200-500 sqft
 - Dining: 120-200 sqft
-- Closet: 15-40 sqft
+- Hallway: 50-150 sqft total
+- Walk-in Closet: 25-100 sqft
+- Reach-in Closet: 10-25 sqft
+- Entry/Foyer: 40-100 sqft
 
-If scale not found, estimate dimensions. Report dimensions in FEET only. Include ALL visible rooms.
+Include EVERY space you can identify. Missing rooms = incorrect HVAC calculations!
 """
+    
+    def _combine_page_results(self, page_results: List[Dict]) -> Dict[str, Any]:
+        """Combine room data from multiple pages, removing duplicates"""
+        combined_data = {
+            'scale_found': False,
+            'scale_notation': 'unknown',
+            'scale_factor': 48,
+            'total_area': 0,
+            'stories': 1,
+            'rooms': [],
+            'parsing_completeness': 'multi-page',
+            'verification': {
+                'pages_combined': len(page_results),
+                'original_room_count': 0,
+                'deduplicated_room_count': 0
+            }
+        }
+        
+        # Collect all rooms from all pages
+        all_rooms = []
+        seen_rooms = set()  # Track room names to avoid duplicates
+        
+        for result in page_results:
+            data = result['data']
+            
+            # Update scale information if found
+            if data.get('scale_found', False):
+                combined_data['scale_found'] = True
+                combined_data['scale_notation'] = data.get('scale_notation', 'unknown')
+                combined_data['scale_factor'] = data.get('scale_factor', 48)
+            
+            # Update stories if higher
+            combined_data['stories'] = max(combined_data['stories'], data.get('stories', 1))
+            
+            # Add rooms, checking for duplicates
+            for room in data.get('rooms', []):
+                room_key = f"{room['name']}_{room.get('floor', 1)}"
+                
+                # Skip if we've seen this room (by name and floor)
+                if room_key not in seen_rooms:
+                    seen_rooms.add(room_key)
+                    all_rooms.append(room)
+                else:
+                    # Check if this is a better version of the same room
+                    existing_idx = next((i for i, r in enumerate(all_rooms) 
+                                       if f"{r['name']}_{r.get('floor', 1)}" == room_key), None)
+                    if existing_idx is not None:
+                        # Keep the one with higher confidence
+                        if room.get('confidence', 0) > all_rooms[existing_idx].get('confidence', 0):
+                            all_rooms[existing_idx] = room
+        
+        combined_data['rooms'] = all_rooms
+        combined_data['total_area'] = sum(r.get('area', 0) for r in all_rooms)
+        combined_data['verification']['original_room_count'] = sum(result['room_count'] for result in page_results)
+        combined_data['verification']['deduplicated_room_count'] = len(all_rooms)
+        
+        logger.info(f"Combined {len(page_results)} pages: {combined_data['verification']['original_room_count']} → "
+                   f"{combined_data['verification']['deduplicated_room_count']} unique rooms, "
+                   f"{combined_data['total_area']:.0f} sqft total")
+        
+        return combined_data
     
     def _extract_json_from_response(self, response_text: str) -> str:
         """Extract JSON from GPT response, handling markdown code blocks"""

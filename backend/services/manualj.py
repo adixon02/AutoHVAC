@@ -975,6 +975,51 @@ def calculate_manualj_with_audit(schema: BlueprintSchema, duct_config: str = "du
     return result
 
 
+def _generate_missing_common_spaces(parsed_area: float, declared_area: float, existing_rooms: List[Room]) -> List[Dict[str, Any]]:
+    """Generate typical missing common spaces when parsing misses significant area"""
+    missing_area = declared_area - parsed_area
+    generated_rooms = []
+    
+    # Check what room types we already have
+    existing_types = set(room.room_type if hasattr(room, 'room_type') else _classify_room_type(room.name) 
+                        for room in existing_rooms)
+    
+    # Common spaces often missed in parsing
+    common_spaces = [
+        ("Hallways", 0.08, "hallway"),      # ~8% of home
+        ("Entry/Foyer", 0.04, "other"),     # ~4% of home
+        ("Closets", 0.06, "closet"),       # ~6% of home
+        ("Pantry", 0.02, "closet"),        # ~2% of home
+        ("Utility/Mechanical", 0.03, "utility"), # ~3% of home
+    ]
+    
+    # Add missing common spaces proportionally
+    for space_name, typical_percent, room_type in common_spaces:
+        if room_type not in existing_types or room_type == "closet":  # Always add closets
+            space_area = declared_area * typical_percent
+            if space_area <= missing_area * 0.5:  # Don't overcompensate
+                generated_rooms.append({
+                    "name": f"{space_name} (Generated)",
+                    "area": space_area,
+                    "room_type": room_type,
+                    "generated": True,
+                    "confidence": 0.3
+                })
+                missing_area -= space_area
+    
+    # If still significant missing area, add as "Unaccounted Space"
+    if missing_area > 100:
+        generated_rooms.append({
+            "name": "Unaccounted Space (Generated)",
+            "area": missing_area,
+            "room_type": "other",
+            "generated": True,
+            "confidence": 0.1
+        })
+    
+    return generated_rooms
+
+
 def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic", heating_fuel: str = "gas", construction_vintage: Optional[str] = None, include_ventilation: bool = True, envelope_data: Optional[EnvelopeExtraction] = None, create_audit: bool = True, user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Calculate ACCA Manual J heating and cooling loads
@@ -1040,7 +1085,44 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     total_heating = 0.0
     total_cooling = 0.0
     
-    for room in schema.rooms:
+    # Check if we need to generate missing common spaces
+    total_room_area = sum(room.area for room in schema.rooms)
+    area_discrepancy_percent = abs(total_room_area - schema.sqft_total) / schema.sqft_total * 100 if schema.sqft_total > 0 else 0
+    
+    rooms_to_process = list(schema.rooms)  # Create a copy to avoid modifying original
+    
+    # If significant area is missing and we have few rooms, generate common spaces
+    if area_discrepancy_percent > 30 and len(schema.rooms) < 10:
+        logger.warning(f"Significant area missing ({area_discrepancy_percent:.0f}%) and only {len(schema.rooms)} rooms found")
+        logger.warning("Generating typical missing common spaces for more accurate load calculations")
+        
+        generated_spaces = _generate_missing_common_spaces(total_room_area, schema.sqft_total, schema.rooms)
+        
+        # Convert generated spaces to Room objects
+        for space_data in generated_spaces:
+            # Estimate dimensions based on area
+            width = math.sqrt(space_data['area'] / 1.5)  # Assume 1.5:1 aspect ratio
+            length = width * 1.5
+            
+            generated_room = Room(
+                name=space_data['name'],
+                dimensions_ft=(width, length),
+                floor=1,  # Assume first floor
+                windows=0 if space_data['room_type'] in ['closet', 'hallway'] else 1,
+                orientation='unknown',
+                area=space_data['area'],
+                room_type=space_data['room_type'],
+                confidence=space_data['confidence'],
+                center_position=(0.0, 0.0),
+                label_found=False,
+                dimensions_source='generated',
+                source_elements={'generated': True, 'reason': 'missing_area_compensation'}
+            )
+            rooms_to_process.append(generated_room)
+            
+            logger.info(f"Added generated space: {space_data['name']} ({space_data['area']:.0f} sqft)")
+    
+    for room in rooms_to_process:
         room_type = _classify_room_type(room.name)
         
         # Use enhanced CLF/CLTD calculations if construction vintage or envelope data is provided
@@ -1098,16 +1180,48 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
         total_heating += room_heating
         total_cooling += room_cooling
     
-    # Apply area correction factor if room areas don't match declared total
+    # Apply intelligent area correction factor if room areas don't match declared total
     # This accounts for spaces that may not have been detected (hallways, closets, etc.)
-    total_room_area = sum(room.area for room in schema.rooms)
+    # Recalculate total area after potentially adding generated rooms
+    total_room_area = sum(zone['area'] for zone in zones)
     area_correction_factor = 1.0
+    area_discrepancy_percent = abs(total_room_area - schema.sqft_total) / schema.sqft_total * 100 if schema.sqft_total > 0 else 0
     
-    if total_room_area > 0 and abs(total_room_area - schema.sqft_total) > schema.sqft_total * 0.1:
-        # If room areas differ from declared total by more than 10%, apply scaling
-        area_correction_factor = schema.sqft_total / total_room_area
-        logger.info(f"Applying area correction factor: {area_correction_factor:.2f} "
-                   f"(parsed: {total_room_area:.0f} sqft, declared: {schema.sqft_total:.0f} sqft)")
+    if total_room_area > 0 and area_discrepancy_percent > 10:
+        # Calculate raw correction factor
+        raw_correction = schema.sqft_total / total_room_area
+        
+        # Apply graduated correction based on discrepancy magnitude
+        if area_discrepancy_percent < 20:
+            # Small discrepancy (10-20%): Apply gentle correction
+            area_correction_factor = 1.0 + (raw_correction - 1.0) * 0.5  # 50% of the difference
+            logger.info(f"Small area discrepancy ({area_discrepancy_percent:.0f}%): Applying gentle correction {area_correction_factor:.2f}")
+            
+        elif area_discrepancy_percent < 50:
+            # Moderate discrepancy (20-50%): Apply graduated correction
+            # As discrepancy increases, apply more of the correction
+            correction_strength = 0.5 + (area_discrepancy_percent - 20) / 30 * 0.3  # 50% to 80%
+            area_correction_factor = 1.0 + (raw_correction - 1.0) * correction_strength
+            logger.warning(f"Moderate area discrepancy ({area_discrepancy_percent:.0f}%): Applying {correction_strength:.0%} correction = {area_correction_factor:.2f}")
+            
+        else:
+            # Large discrepancy (>50%): Cap correction factor and flag for review
+            area_correction_factor = min(raw_correction, 1.3)  # Cap at 1.3x
+            logger.error(f"Large area discrepancy ({area_discrepancy_percent:.0f}%): Capping correction at {area_correction_factor:.2f}")
+            logger.error(f"Parsed: {total_room_area:.0f} sqft, Declared: {schema.sqft_total:.0f} sqft")
+            logger.error("Manual review recommended - parsing may have missed significant areas")
+            
+            # Add warning to validation results
+            if 'validation' not in locals():
+                validation_warnings.append({
+                    "severity": "ERROR",
+                    "message": f"Severe area mismatch: Only {total_room_area:.0f} sqft parsed vs {schema.sqft_total:.0f} sqft declared",
+                    "fix": "Review blueprint parsing or verify declared square footage",
+                    "details": {"discrepancy_percent": area_discrepancy_percent, "correction_capped": True}
+                })
+        
+        logger.info(f"Area correction: {total_room_area:.0f} sqft parsed → {schema.sqft_total:.0f} sqft declared "
+                   f"(factor: {area_correction_factor:.2f})")
         
         # Apply correction to both heating and cooling loads
         total_heating *= area_correction_factor
@@ -1117,6 +1231,7 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
         for zone in zones:
             zone['heating_btu'] = int(zone['heating_btu'] * area_correction_factor)
             zone['cooling_btu'] = int(zone['cooling_btu'] * area_correction_factor)
+            zone['area_corrected'] = True
     
     # Apply Manual J diversity factor to prevent oversizing
     diversity_factor = get_diversity_factor(len(schema.rooms))
