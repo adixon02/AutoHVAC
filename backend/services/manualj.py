@@ -454,11 +454,11 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     # COOLING LOAD CALCULATIONS using CLF/CLTD
     cooling_load = 0.0
     
+    # Extract climate zone for CLTD adjustments (needed for multiple calculations)
+    climate_zone = climate_data.get('zone', '4A')
+    
     # 1. Wall conduction load
     if wall_area > 0:
-        # Extract climate zone for CLTD adjustments
-        climate_zone = climate_data.get('zone', '4A')
-        
         wall_load = calculate_wall_load_cltd(
             wall_area, wall_u_factor, wall_type, room.orientation,
             outdoor_cooling_temp, indoor_temp, climate_zone

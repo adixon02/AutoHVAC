@@ -11,6 +11,7 @@ import asyncio
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from uuid import uuid4
+from dataclasses import asdict
 
 from app.parser.schema import (
     BlueprintSchema, ParsingMetadata, ParsingStatus, PageAnalysisResult,
@@ -101,7 +102,7 @@ class BlueprintParser:
                         quality_score = calculate_data_quality_score(result, validation_result.issues)
                         
                         # Add validation data to result
-                        result.parsing_metadata.validation_warnings = [w.dict() for w in validation_result.issues]
+                        result.parsing_metadata.validation_warnings = [asdict(w) for w in validation_result.issues]
                         result.parsing_metadata.data_quality_score = quality_score
                         
                         logger.info(f"[VALIDATION] Quality score: {quality_score:.0f}, Warnings: {len(validation_result.issues)}")
@@ -214,7 +215,7 @@ class BlueprintParser:
                 quality_score = calculate_data_quality_score(blueprint_schema, validation_result.issues)
                 
                 # Add validation data to metadata
-                parsing_metadata.validation_warnings = [w.dict() for w in validation_result.issues]
+                parsing_metadata.validation_warnings = [asdict(w) for w in validation_result.issues]
                 parsing_metadata.data_quality_score = quality_score
                 
                 logger.info(f"[VALIDATION] Quality score: {quality_score:.0f}, Warnings: {len(validation_result.issues)}")
