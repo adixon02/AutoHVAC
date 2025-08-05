@@ -131,9 +131,6 @@ class BlueprintAIParser:
         logger.info("="*60)
         
         try:
-            import time
-            start_time = time.time()
-            
             # Step 1: Convert PDF to images
             logger.info("\n[STEP 1] Converting PDF to images...")
             step_start = time.time()

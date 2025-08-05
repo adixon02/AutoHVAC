@@ -140,17 +140,23 @@ class GeometryFallbackParser:
             estimated_height_ft = 75.0   # Typical building depth on drawing
             
             # Calculate scale factors for width and height
-            scale_x = page_width / (estimated_width_ft * 12)  # pixels per inch
-            scale_y = page_height / (estimated_height_ft * 12)  # pixels per inch
+            # Using pixels per foot for consistency with geometry_parser.py
+            scale_x = page_width / estimated_width_ft  # pixels per foot
+            scale_y = page_height / estimated_height_ft  # pixels per foot
             
             # Use the average, but prefer standard architectural scales
             avg_scale = (scale_x + scale_y) / 2
             
-            # Use the calculated scale directly - don't snap to architectural standards
-            # since we're working with pixels, not architectural drawing units
+            # Use the calculated scale directly
             scale_factor = avg_scale
             
-            logger.info(f"No scale detected, estimated scale factor: {scale_factor} (1/{12/scale_factor:.1f}\" = 1')")
+            # Validate the calculated scale is reasonable
+            # Typical architectural PDFs at 72 DPI have 6-12 pixels per foot
+            if scale_factor < 4 or scale_factor > 20:
+                logger.warning(f"Unusual scale {scale_factor:.1f} px/ft, using default 8 px/ft")
+                scale_factor = 8.0  # Conservative default for residential blueprints
+            
+            logger.info(f"No scale detected, estimated scale factor: {scale_factor:.1f} pixels/foot")
         
         # Process rectangles as potential rooms
         rectangles = sorted(
@@ -173,8 +179,8 @@ class GeometryFallbackParser:
             
             # ALWAYS convert from page units to feet using scale factor
             # The geometry parser returns coordinates in page units (pixels/points)
-            width_ft = width / scale_factor / 12.0  # pixels / (pixels/inch) / 12 = feet
-            height_ft = height / scale_factor / 12.0
+            width_ft = width / scale_factor  # pixels / (pixels/foot) = feet
+            height_ft = height / scale_factor
             area_ft = width_ft * height_ft
             
             # NOW check if the converted area is reasonable
