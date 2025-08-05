@@ -21,7 +21,7 @@ except ImportError:
     PDF2IMAGE_AVAILABLE = False
     
 from openai import AsyncOpenAI
-from backend.app.parser.schema import (
+from app.parser.schema import (
     BlueprintSchema, Room, ParsingMetadata, ParsingStatus
 )
 
