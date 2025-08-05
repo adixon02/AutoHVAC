@@ -201,6 +201,28 @@ class GeometryParser:
                         logger.warning(f"[Thread {thread_name}:{thread_id}] Too many rectangles ({len(raw_rects)}), limiting to {self.MAX_RECTANGLES}")
                         raw_rects = raw_rects[:self.MAX_RECTANGLES]
                     
+                    # Calculate scale-aware thresholds for rectangle filtering
+                    if scale_factor and scale_factor > 0:
+                        # Convert room size limits from square feet to page units
+                        # Using the detected scale factor
+                        min_room_sqft = 10  # Minimum room size in square feet (smaller for closets)
+                        max_room_sqft = 1200  # Maximum room size in square feet (larger for open spaces)
+                        
+                        # Convert to page units: area_page = area_sqft * (scale_px_per_ft)^2
+                        min_area_page_units = min_room_sqft * (scale_factor ** 2)
+                        max_area_page_units = max_room_sqft * (scale_factor ** 2)
+                        
+                        logger.info(f"[Thread {thread_name}:{thread_id}] Using scale-aware rectangle filtering:")
+                        logger.info(f"[Thread {thread_name}:{thread_id}]   Scale factor: {scale_factor:.1f} px/ft")
+                        logger.info(f"[Thread {thread_name}:{thread_id}]   Min area: {min_area_page_units:.0f} page units ({min_room_sqft} sq ft)")
+                        logger.info(f"[Thread {thread_name}:{thread_id}]   Max area: {max_area_page_units:.0f} page units ({max_room_sqft} sq ft)")
+                    else:
+                        # Use conservative defaults when no scale is detected
+                        # These work for typical low-resolution PDFs
+                        min_area_page_units = 100
+                        max_area_page_units = 500000  # Increased from 200000 to handle more cases
+                        logger.info(f"[Thread {thread_name}:{thread_id}] No scale detected, using default rectangle filtering")
+                    
                     for i, rect in enumerate(raw_rects):
                         try:
                             # Validate coordinates
@@ -216,11 +238,11 @@ class GeometryParser:
                             
                             area = width * height
                             
-                            # Filter meaningful rectangles
-                            # Note: These are in page units, not square feet
-                            # Typical page is ~800x600 pixels, so max reasonable rectangle is ~400x300 = 120,000 page units²
-                            # Minimum meaningful size is ~20x20 = 400 page units²
-                            if area > 100 and area < 200000:  # Reasonable range in page units
+                            # Filter meaningful rectangles using scale-aware thresholds
+                            if area > min_area_page_units and area < max_area_page_units:
+                                # Calculate estimated square footage for logging
+                                est_sqft = area / (scale_factor ** 2) if scale_factor else 0
+                                
                                 rectangles.append({
                                     'type': 'rect',
                                     'coords': [float(rect['x0']), float(rect['y0']), float(rect['x1']), float(rect['y1'])],
@@ -234,8 +256,16 @@ class GeometryParser:
                                     'center_x': float(rect['x0'] + width / 2),
                                     'center_y': float(rect['y0'] + height / 2),
                                     'aspect_ratio': width / height if height > 0 else 0,
-                                    'room_probability': 0.5  # Simplified
+                                    'room_probability': 0.5,  # Simplified
+                                    'estimated_sqft': est_sqft  # Add for debugging
                                 })
+                            elif area > 0:  # Log why rectangles are filtered out
+                                if scale_factor:
+                                    est_sqft = area / (scale_factor ** 2)
+                                    if est_sqft > max_room_sqft:
+                                        logger.debug(f"[Thread {thread_name}:{thread_id}] Rectangle {i} filtered: too large ({est_sqft:.0f} sq ft > {max_room_sqft} sq ft)")
+                                    elif est_sqft < min_room_sqft:
+                                        logger.debug(f"[Thread {thread_name}:{thread_id}] Rectangle {i} filtered: too small ({est_sqft:.0f} sq ft < {min_room_sqft} sq ft)")
                             
                         except Exception as e:
                             logger.debug(f"[Thread {thread_name}:{thread_id}] Error processing rectangle {i}: {e}")
@@ -418,8 +448,10 @@ class GeometryParser:
                     
                     area = width * height
                     
-                    # Filter meaningful rectangles
-                    if area > 500:  # Minimum room size
+                    # Filter meaningful rectangles - using more permissive threshold
+                    # This method doesn't have scale_factor, so use conservative filtering
+                    # The actual room size validation happens in geometry_fallback.py
+                    if area > 100:  # Very minimal filtering - let downstream handle it
                         rectangles.append({
                             'type': 'rect',
                             'coords': [float(rect['x0']), float(rect['y0']), float(rect['x1']), float(rect['y1'])],

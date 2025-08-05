@@ -81,8 +81,9 @@ class GeometryFallbackParser:
         rooms = self._extract_rooms_from_geometry(raw_geo, raw_text)
         
         if not rooms:
-            logger.warning("No valid rooms found in geometry - trying with relaxed thresholds")
-            # Try with relaxed thresholds before giving up
+            logger.warning("No valid rooms found in geometry - trying alternative approaches")
+            
+            # First try: Relax thresholds
             original_min = self.MIN_ROOM_AREA
             original_max = self.MAX_ROOM_AREA
             self.MIN_ROOM_AREA = 10  # Lower threshold for small rooms
@@ -94,8 +95,32 @@ class GeometryFallbackParser:
             self.MIN_ROOM_AREA = original_min
             self.MAX_ROOM_AREA = original_max
             
+            # Second try: If still no rooms and scale seems wrong, try different scales
+            if not rooms and raw_geo.scale_factor:
+                original_scale = raw_geo.scale_factor
+                
+                # Try common architectural scales if current scale seems wrong
+                alternative_scales = []
+                if original_scale > 80:  # Might be 1/8" scale incorrectly detected
+                    alternative_scales = [48.0, 24.0, 12.0]  # Try 1/4", 1/2", 1" scales
+                elif original_scale < 20:  # Might be too small
+                    alternative_scales = [48.0, 96.0]  # Try 1/4", 1/8" scales
+                
+                for alt_scale in alternative_scales:
+                    logger.info(f"Trying alternative scale factor: {alt_scale:.1f} px/ft (original: {original_scale:.1f})")
+                    raw_geo.scale_factor = alt_scale
+                    rooms = self._extract_rooms_from_geometry(raw_geo, raw_text)
+                    if rooms:
+                        logger.info(f"Success with alternative scale {alt_scale:.1f} - found {len(rooms)} rooms")
+                        metadata.warnings.append(f"Used alternative scale {alt_scale:.1f} instead of detected {original_scale:.1f}")
+                        break
+                
+                # Restore original scale if nothing worked
+                if not rooms:
+                    raw_geo.scale_factor = original_scale
+            
             if not rooms:
-                logger.error("Still no rooms found after relaxing thresholds - likely scale issue")
+                logger.error("Still no rooms found after trying alternatives - likely parsing issue")
                 logger.warning("Creating minimal fallback as last resort")
                 rooms = self._create_minimal_fallback_rooms()
                 metadata.geometry_status = ParsingStatus.FAILED
@@ -141,6 +166,11 @@ class GeometryFallbackParser:
         page_height = raw_geo.page_height or 612.0
         scale_factor = raw_geo.scale_factor
         
+        logger.info(f"Starting room extraction from geometry:")
+        logger.info(f"  Page dimensions: {page_width:.0f} x {page_height:.0f} pixels")
+        logger.info(f"  Scale factor from parser: {scale_factor}")
+        logger.info(f"  Total rectangles to process: {len(raw_geo.rectangles)}")
+        
         # If no scale factor detected, estimate based on typical architectural drawings
         if not scale_factor:
             # Estimate scale based on page size
@@ -173,6 +203,16 @@ class GeometryFallbackParser:
             
             logger.info(f"No scale detected, estimated scale factor: {scale_factor:.1f} pixels/foot")
         
+        # Validate detected scale factor
+        # Common architectural scales result in these pixel/foot ratios:
+        # 1/8" = 1' → 96 px/ft (at 72 DPI)
+        # 1/4" = 1' → 48 px/ft
+        # 1/2" = 1' → 24 px/ft
+        # 1" = 1' → 12 px/ft
+        if scale_factor > 150 or scale_factor < 4:
+            logger.warning(f"Scale factor {scale_factor:.1f} seems incorrect (outside 4-150 px/ft range)")
+            logger.warning(f"This may indicate a parsing error or unusual drawing scale")
+        
         # Process rectangles as potential rooms
         rectangles = sorted(
             raw_geo.rectangles,
@@ -180,8 +220,11 @@ class GeometryFallbackParser:
             reverse=True
         )
         
+        logger.info(f"Processing {len(rectangles)} rectangles as potential rooms")
+        
         # Track used labels to avoid duplicates
         used_labels = set()
+        filtered_count = 0
         
         for idx, rect in enumerate(rectangles):
             # Calculate dimensions first
@@ -190,6 +233,7 @@ class GeometryFallbackParser:
             
             # Skip if dimensions invalid
             if width <= 0 or height <= 0:
+                logger.debug(f"Rectangle {idx}: Skipped - invalid dimensions ({width} x {height})")
                 continue
             
             # ALWAYS convert from page units to feet using scale factor
@@ -198,9 +242,15 @@ class GeometryFallbackParser:
             height_ft = height / scale_factor
             area_ft = width_ft * height_ft
             
+            # Log the conversion for debugging
+            if idx < 5 or area_ft > 50:  # Log first 5 or significant rectangles
+                logger.debug(f"Rectangle {idx}: page_units=({width:.0f}x{height:.0f}), "
+                           f"feet=({width_ft:.1f}x{height_ft:.1f}), area={area_ft:.1f} sq ft")
+            
             # NOW check if the converted area is reasonable
             if area_ft < self.MIN_ROOM_AREA or area_ft > self.MAX_ROOM_AREA:
-                logger.debug(f"Skipping rectangle {idx}: area {area_ft:.1f} sq ft outside range {self.MIN_ROOM_AREA}-{self.MAX_ROOM_AREA}")
+                logger.debug(f"Rectangle {idx}: Filtered - area {area_ft:.1f} sq ft outside range {self.MIN_ROOM_AREA}-{self.MAX_ROOM_AREA}")
+                filtered_count += 1
                 continue
             
             # Find nearby text label
@@ -257,7 +307,16 @@ class GeometryFallbackParser:
             
             # Stop if we have enough rooms
             if len(rooms) >= 20:
+                logger.info(f"Reached maximum of 20 rooms, stopping extraction")
                 break
+        
+        logger.info(f"Room extraction completed:")
+        logger.info(f"  Rectangles processed: {len(rectangles)}")
+        logger.info(f"  Rectangles filtered: {filtered_count}")
+        logger.info(f"  Rooms extracted: {len(rooms)}")
+        if rooms:
+            total_area = sum(room.area for room in rooms)
+            logger.info(f"  Total area: {total_area:.0f} sq ft")
         
         return rooms
     
