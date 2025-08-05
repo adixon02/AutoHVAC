@@ -13,6 +13,8 @@ from datetime import datetime
 from uuid import uuid4, UUID
 from io import BytesIO
 from PIL import Image
+import cv2
+import numpy as np
 
 try:
     from pdf2image import convert_from_path
@@ -24,6 +26,15 @@ from openai import AsyncOpenAI
 from app.parser.schema import (
     BlueprintSchema, Room, ParsingMetadata, ParsingStatus
 )
+
+# Import new modules for enhanced parsing
+try:
+    from services.ocr_extractor import ocr_extractor, TextRegion
+    from services.page_classifier import page_classifier
+    ENHANCED_PARSING = True
+except ImportError as e:
+    logger.warning(f"Enhanced parsing modules not available: {e}")
+    ENHANCED_PARSING = False
 
 logger = logging.getLogger(__name__)
 
@@ -125,21 +136,89 @@ class BlueprintAIParser:
             parsing_metadata.pdf_page_count = len(images)
             logger.info(f"Converted PDF to {len(images)} images")
             
-            # Step 2: Try different pages and potentially combine results
-            logger.info("\n[STEP 2] Analyzing pages with GPT-4V...")
+            # Step 2: Preprocess and classify pages
+            logger.info("\n[STEP 2] Preprocessing and classifying pages...")
+            preprocessed_images = []
+            page_classifications = []
+            ocr_results = []
+            
+            if ENHANCED_PARSING:
+                for idx, img_bytes in enumerate(images):
+                    # Preprocess with OpenCV
+                    preprocessed = self._preprocess_image_opencv(img_bytes, idx + 1)
+                    preprocessed_images.append(preprocessed)
+                    
+                    # Convert to numpy for classification and OCR
+                    nparr = np.frombuffer(preprocessed, np.uint8)
+                    img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    
+                    # Extract text with OCR
+                    text_regions = ocr_extractor.extract_all_text(img_cv)
+                    ocr_text = [region.text for region in text_regions]
+                    ocr_results.append(text_regions)
+                    
+                    # Classify page
+                    classification = page_classifier.classify_page(img_cv, ocr_text)
+                    page_classifications.append(classification)
+                    logger.info(f"Page {idx + 1}: {classification.page_type} (confidence: {classification.confidence:.2f})")
+                    
+                    # Log floor level if detected
+                    if classification.floor_level:
+                        logger.info(f"Page {idx + 1}: Detected floor level - {classification.floor_level}")
+            else:
+                # Fallback to original images if enhanced parsing not available
+                preprocessed_images = images
+                page_classifications = [None] * len(images)
+                ocr_results = [None] * len(images)
+            
+            # Step 3: Try different pages with GPT-4V (prioritize floor plans)
+            logger.info("\n[STEP 3] Analyzing pages with GPT-4V...")
             all_page_results = []
             successful_pages = []
             failed_pages = []
             
-            # Try pages in order: 2, 1, 3, 4 (skip title pages, try floor plans first)
-            page_order = [1, 0, 2, 3, 4, 5] if len(images) > 1 else [0]
+            # Prioritize floor plan pages based on classification
+            if ENHANCED_PARSING and page_classifications:
+                # Sort pages by floor plan confidence
+                floor_plan_pages = [(idx, cls.confidence) for idx, cls in enumerate(page_classifications) 
+                                  if cls.page_type == 'floor_plan']
+                floor_plan_pages.sort(key=lambda x: x[1], reverse=True)
+                
+                other_pages = [idx for idx in range(len(images)) 
+                             if idx not in [p[0] for p in floor_plan_pages]]
+                
+                # Try floor plans first, then others
+                page_order = [p[0] for p in floor_plan_pages] + other_pages
+                logger.info(f"Page processing order: {page_order} (floor plans first)")
+            else:
+                # Original order if no classification available
+                page_order = [1, 0, 2, 3, 4, 5] if len(images) > 1 else [0]
             
             # First pass: try each page individually
             for page_idx in page_order:
                 if page_idx < len(images):
                     try:
-                        logger.info(f"Trying page {page_idx + 1} ({len(images[page_idx])} bytes)")
-                        page_data = await self._extract_blueprint_data(images[page_idx])
+                        # Skip non-floor-plan pages if classification available
+                        if ENHANCED_PARSING and page_idx < len(page_classifications):
+                            if page_classifications[page_idx].page_type != 'floor_plan' and page_classifications[page_idx].confidence > 0.7:
+                                logger.info(f"Skipping page {page_idx + 1} - classified as {page_classifications[page_idx].page_type}")
+                                continue
+                        
+                        logger.info(f"Trying page {page_idx + 1} ({len(preprocessed_images[page_idx])} bytes)")
+                        
+                        # Pass OCR results to GPT-4V if available
+                        ocr_data = None
+                        if ENHANCED_PARSING and page_idx < len(ocr_results) and ocr_results[page_idx]:
+                            # Extract dimensions from OCR
+                            dimensions = ocr_extractor.extract_dimensions_from_regions(ocr_results[page_idx])
+                            room_labels = [r for r in ocr_results[page_idx] if r.region_type == 'room_label']
+                            ocr_data = {
+                                'dimensions': dimensions,
+                                'room_labels': room_labels,
+                                'floor_level': page_classifications[page_idx].floor_level if page_idx < len(page_classifications) else None
+                            }
+                        
+                        page_data = await self._extract_blueprint_data(preprocessed_images[page_idx], ocr_data=ocr_data)
                         
                         # Check if this page has substantial content
                         if page_data and 'rooms' in page_data and len(page_data['rooms']) > 0:
@@ -209,15 +288,32 @@ class BlueprintAIParser:
             should_combine = False
             combine_reason = ""
             
-            # Special case: only one page succeeded but area is suspiciously low
+            # Enhanced combination logic for better area detection
             should_augment_with_fallback = False
-            if len(all_page_results) == 1 and best_result['total_area'] < 1800:
+            
+            # Check if we have floor level information from OCR
+            floors_detected = set()
+            if ENHANCED_PARSING and page_classifications:
+                for idx, result in enumerate(all_page_results):
+                    page_idx = result['page'] - 1
+                    if page_idx < len(page_classifications) and page_classifications[page_idx].floor_level:
+                        floors_detected.add(page_classifications[page_idx].floor_level)
+                        result['floor_level'] = page_classifications[page_idx].floor_level
+            
+            # Force combination if total area < 2000 sqft (typical minimum for residential)
+            if total_area_all_pages < 2000:
+                should_combine = True
+                combine_reason = f"total area only {total_area_all_pages:.0f} sqft (below residential minimum)"
+                logger.warning(f"⚠️  Total detected area {total_area_all_pages:.0f} sqft - forcing combination")
+            
+            # Special case: only one page succeeded but area is suspiciously low
+            elif len(all_page_results) == 1 and best_result['total_area'] < 1800:
                 logger.warning(f"⚠️  Only one page parsed with {best_result['total_area']:.0f} sqft - likely incomplete!")
                 parsing_metadata.warnings.append(f"Only partial floor plan detected ({best_result['total_area']:.0f} sqft) - augmenting with estimated rooms")
                 should_augment_with_fallback = True
                 blueprint_data = best_result['data']
                 parsing_metadata.selected_page = best_result['page']
-            elif best_result['total_area'] < 1800 and len(all_page_results) > 1:
+            elif best_result['total_area'] < 2000 and len(all_page_results) > 1:
                 should_combine = True
                 combine_reason = f"best page only {best_result['total_area']:.0f} sqft"
             elif len(all_page_results) > 1 and best_result['total_area'] < 0.8 * total_area_all_pages:
@@ -475,8 +571,63 @@ class BlueprintAIParser:
             logger.error(f"Failed to enhance image for page {page_num}: {str(e)}")
             return image_bytes  # Return original on failure
     
-    async def _extract_blueprint_data(self, image_bytes: bytes, retry_count: int = 0) -> Dict[str, Any]:
-        """Extract blueprint data using GPT-4V with retry logic"""
+    def _preprocess_image_opencv(self, image_bytes: bytes, page_num: int) -> bytes:
+        """Preprocess image using OpenCV for better OCR and parsing"""
+        try:
+            # Convert bytes to numpy array
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if img is None:
+                logger.error(f"Failed to decode image for page {page_num}")
+                return image_bytes
+            
+            orig_height, orig_width = img.shape[:2]
+            logger.info(f"Preprocessing page {page_num}: {orig_width}x{orig_height}")
+            
+            # 1. Denoise the image
+            denoised = cv2.fastNlMeansDenoisingColored(img, None, 10, 10, 7, 21)
+            
+            # 2. Convert to LAB color space for better contrast enhancement
+            lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            
+            # 3. Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to L channel
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            l_enhanced = clahe.apply(l)
+            
+            # 4. Merge channels back
+            enhanced = cv2.merge([l_enhanced, a, b])
+            enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+            
+            # 5. Sharpen the image for better text clarity
+            kernel = np.array([[-1,-1,-1],
+                             [-1, 9,-1],
+                             [-1,-1,-1]])
+            sharpened = cv2.filter2D(enhanced, -1, kernel)
+            
+            # 6. Resize if needed (max 2500px on longest side for processing efficiency)
+            max_dimension = max(orig_width, orig_height)
+            if max_dimension > 2500:
+                scale = 2500 / max_dimension
+                new_width = int(orig_width * scale)
+                new_height = int(orig_height * scale)
+                sharpened = cv2.resize(sharpened, (new_width, new_height), interpolation=cv2.INTER_LANCZOS4)
+                logger.info(f"Resized to {new_width}x{new_height} for processing")
+            
+            # Convert back to bytes (high quality PNG)
+            _, encoded = cv2.imencode('.png', sharpened)
+            result = encoded.tobytes()
+            
+            logger.info(f"Preprocessed page {page_num}: {len(result) / 1024 / 1024:.1f}MB")
+            return result
+            
+        except Exception as e:
+            logger.error(f"OpenCV preprocessing failed for page {page_num}: {str(e)}")
+            return image_bytes
+    
+    async def _extract_blueprint_data(self, image_bytes: bytes, retry_count: int = 0, ocr_data: Dict = None) -> Dict[str, Any]:
+        """Extract blueprint data using GPT-4V with retry logic and OCR assistance"""
         # Check if API key is valid before attempting call
         if not self.api_key_valid or not self.client:
             raise BlueprintAIParsingError("OpenAI API key not configured - cannot use GPT-4V parsing")
@@ -739,8 +890,13 @@ Return valid JSON even if you can only partially read the floor plan. Include al
         """Augment incomplete blueprint data with estimated rooms to reach typical home size"""
         logger.warning(f"Augmenting partial blueprint data ({detected_area:.0f} sqft detected)")
         
-        # Target typical home size of ~2000-2500 sqft
-        target_area = 2400  # Typical single-family home (increased for better accuracy)
+        # Target typical home size based on detected floors
+        # Multi-story homes are typically larger
+        floors_count = blueprint_data.get('stories', 1)
+        if floors_count > 1:
+            target_area = 2800  # Multi-story home
+        else:
+            target_area = 2400  # Single-story home
         missing_area = target_area - detected_area
         
         if missing_area <= 0:
@@ -782,7 +938,7 @@ Return valid JSON even if you can only partially read the floor plan. Include al
                 continue
             
             # Skip if we've added enough area
-            if added_area >= missing_area * 0.9:  # 90% of missing area
+            if added_area >= missing_area * 0.85:  # 85% of missing area
                 break
             
             # Create augmented room

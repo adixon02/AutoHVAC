@@ -87,20 +87,20 @@ def _apply_thermal_bridging_factor(
     # Different factors for heating vs cooling - thermal bridging less significant in heating
     
     if load_type == "heating":
-        # REDUCED factors for heating to address overestimation
+        # BALANCED factors for heating accuracy
         bridging_factors = {
-            ("wood_frame", "wall"): 1.02,      # Reduced: 2% for wood studs (was 1.04)
-            ("wood_frame", "roof"): 1.04,      # Reduced: 4% for roof trusses (was 1.06)
-            ("wood_frame", "floor"): 1.02,     # Reduced: 2% for floor joists (was 1.04)
-            ("steel_frame", "wall"): 1.15,     # Reduced: 15% for steel studs (was 1.20)
-            ("steel_frame", "roof"): 1.12,     # Reduced: 12% for steel trusses (was 1.16)
-            ("steel_frame", "floor"): 1.10,    # Reduced: 10% for steel joists (was 1.12)
-            ("masonry", "wall"): 1.06,         # Reduced: 6% for masonry ties (was 1.09)
-            ("masonry", "roof"): 1.02,         # Reduced: 2% for roof connections (was 1.04)
-            ("masonry", "floor"): 1.02,        # Reduced: 2% for floor connections (was 1.03)
-            ("concrete", "wall"): 1.08,        # Reduced: 8% for concrete bridges (was 1.12)
-            ("concrete", "roof"): 1.05,        # Reduced: 5% for concrete roof (was 1.08)
-            ("concrete", "floor"): 1.05,       # Reduced: 5% for concrete floor (was 1.08)
+            ("wood_frame", "wall"): 1.05,      # Balanced: 5% for wood studs
+            ("wood_frame", "roof"): 1.06,      # Balanced: 6% for roof trusses
+            ("wood_frame", "floor"): 1.04,     # Balanced: 4% for floor joists
+            ("steel_frame", "wall"): 1.18,     # Balanced: 18% for steel studs
+            ("steel_frame", "roof"): 1.14,     # Balanced: 14% for steel trusses
+            ("steel_frame", "floor"): 1.11,    # Balanced: 11% for steel joists
+            ("masonry", "wall"): 1.08,         # Balanced: 8% for masonry ties
+            ("masonry", "roof"): 1.04,         # Balanced: 4% for roof connections
+            ("masonry", "floor"): 1.03,        # Balanced: 3% for floor connections
+            ("concrete", "wall"): 1.10,        # Balanced: 10% for concrete bridges
+            ("concrete", "roof"): 1.07,        # Balanced: 7% for concrete roof
+            ("concrete", "floor"): 1.06,       # Balanced: 6% for concrete floor
         }
     else:
         # MAINTAIN cooling factors for accuracy
