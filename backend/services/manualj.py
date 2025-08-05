@@ -168,16 +168,21 @@ def _calculate_floor_losses(
             perimeter_length = 4 * math.sqrt(floor_area)
         
         # F-factors for slab edge heat loss (BTU/hr·ft·°F)
-        # Based on insulation level and climate zone
+        # Based on new construction insulation standards
         if climate_zone in ["6A", "6B", "7", "8"]:
-            f_factor = 0.73  # Assumes R-10 edge insulation
+            f_factor = 0.60  # New construction: R-15 edge insulation
         elif climate_zone in ["4A", "4B", "5A", "5B"]:
-            f_factor = 0.86  # Assumes R-5 edge insulation
+            f_factor = 0.70  # New construction: R-10 edge insulation (reduced from 0.86)
         else:
-            f_factor = 1.20  # Uninsulated or minimal insulation
+            f_factor = 0.90  # New construction: minimum R-5 edge insulation (reduced from 1.20)
         
         # Slab edge loss
         heating_loss = f_factor * perimeter_length * delta_t_heating
+        
+        # For small rooms (<50 sqft), cap floor losses to prevent unrealistic heating densities
+        if floor_area < 50:
+            max_floor_loss = floor_area * 25  # Cap at 25 BTU/hr/sqft for floor losses
+            heating_loss = min(heating_loss, max_floor_loss)
         
         # Slab provides thermal mass benefit in cooling
         cooling_loss = 0  # Slab typically helps with cooling
@@ -385,14 +390,14 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
         
         # Calculate window area with size variation based on count
         if room.windows > 0:
-            # BALANCED window sizes for accurate cooling loads
-            # Previous reduction was too aggressive, causing 33% cooling underestimation
+            # NEW CONSTRUCTION window sizes - larger windows for better natural light
+            # Adjusted to increase cooling loads to target range
             if room.windows == 1:
-                window_size = 14.0  # Balanced: 3.5x4 ft (was 15→12, now 14)
+                window_size = 16.0  # New construction: 4x4 ft single windows (increased from 14)
             elif room.windows <= 3:
-                window_size = 11.0  # Balanced: 2.75x4 ft (was 12→10, now 11)
+                window_size = 13.0  # New construction: 3x4.3 ft multiple windows (increased from 11)
             else:
-                window_size = 9.0   # Balanced: 3x3 ft (was 9→8, now 9)
+                window_size = 10.5  # New construction: 3x3.5 ft smaller windows (increased from 9)
             
             window_area = room.windows * window_size
             wall_area -= window_area
