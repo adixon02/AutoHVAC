@@ -1,14 +1,14 @@
 """
 Smart drawing extraction with progressive degradation
-Never blocks - always returns the best possible extraction
+Works in Celery daemon context - no multiprocessing
 """
 
 import logging
 import time
 import os
-import multiprocessing
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import fitz  # PyMuPDF
 
 logger = logging.getLogger(__name__)
@@ -27,14 +27,14 @@ class ExtractionResult:
 
 class SmartDrawingExtractor:
     """
-    Intelligent drawing extraction that never fails
-    Uses progressive degradation to always return results
+    Intelligent drawing extraction that works in Celery
+    Uses threading (not multiprocessing) for timeouts
     """
     
     def __init__(self):
         self.full_timeout = 5.0  # seconds for full extraction
-        self.sample_timeout = 3.0  # seconds for sampling
-        self.bbox_timeout = 1.0  # seconds for bbox fallback
+        self.max_full_elements = 5000  # Limit for full extraction
+        self.max_sample_elements = 1000  # Limit for sampled extraction
         
     def extract_drawings(
         self,
@@ -43,7 +43,7 @@ class SmartDrawingExtractor:
     ) -> ExtractionResult:
         """
         Extract drawings with progressive degradation
-        Never blocks or fails - always returns something
+        Works in Celery daemon context
         
         Args:
             pdf_path: Path to PDF file
@@ -54,101 +54,182 @@ class SmartDrawingExtractor:
         """
         start_time = time.time()
         
-        # Try full extraction first
-        logger.info(f"Attempting full drawing extraction for page {page_num + 1}")
-        result = self._try_full_extraction(pdf_path, page_num)
-        if result:
-            result.processing_time = time.time() - start_time
-            logger.info(f"Full extraction successful: {result.element_count} elements in {result.processing_time:.2f}s")
-            return result
+        # Check file exists
+        if not os.path.exists(pdf_path):
+            logger.warning(f"PDF file not found: {pdf_path}")
+            return self._create_empty_result()
+        
+        # Try full extraction with threading (works in Celery)
+        logger.info(f"Attempting drawing extraction for page {page_num + 1}")
+        
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(self._extract_with_limits, pdf_path, page_num, self.max_full_elements)
+                
+                try:
+                    drawings, polylines, method = future.result(timeout=self.full_timeout)
+                    
+                    if drawings or polylines:
+                        quality = 1.0 if method == "full" else 0.7
+                        return ExtractionResult(
+                            drawings=drawings,
+                            polylines=polylines,
+                            quality_factor=quality,
+                            extraction_method=method,
+                            processing_time=time.time() - start_time,
+                            element_count=len(drawings) + len(polylines)
+                        )
+                        
+                except FutureTimeoutError:
+                    logger.warning(f"Extraction timed out after {self.full_timeout}s, trying reduced extraction")
+                    
+        except Exception as e:
+            logger.error(f"Threaded extraction failed: {e}")
+        
+        # Fallback: Direct extraction with strict limits
+        logger.info("Using direct extraction with strict limits")
+        try:
+            drawings, polylines = self._extract_limited_direct(pdf_path, page_num, self.max_sample_elements)
             
-        # Fall back to sampling
-        logger.warning("Full extraction timed out, trying sampling approach")
-        result = self._try_sampled_extraction(pdf_path, page_num)
-        if result:
-            result.processing_time = time.time() - start_time
-            logger.info(f"Sampled extraction successful: {result.element_count} elements in {result.processing_time:.2f}s")
-            return result
-            
-        # Last resort - bounding boxes only
-        logger.warning("Sampling timed out, using bounding box fallback")
+            if drawings or polylines:
+                return ExtractionResult(
+                    drawings=drawings,
+                    polylines=polylines,
+                    quality_factor=0.5,
+                    extraction_method="limited",
+                    processing_time=time.time() - start_time,
+                    element_count=len(drawings) + len(polylines)
+                )
+                
+        except Exception as e:
+            logger.error(f"Limited extraction failed: {e}")
+        
+        # Last resort: Bounding boxes only
+        logger.warning("Using bounding box fallback")
         result = self._extract_bounding_boxes(pdf_path, page_num)
         result.processing_time = time.time() - start_time
-        logger.info(f"Bbox extraction completed: {result.element_count} elements in {result.processing_time:.2f}s")
         return result
     
-    def _try_full_extraction(self, pdf_path: str, page_num: int) -> Optional[ExtractionResult]:
+    def _extract_with_limits(
+        self,
+        pdf_path: str,
+        page_num: int,
+        max_elements: int
+    ) -> Tuple[List, List, str]:
         """
-        Try full drawing extraction with timeout
+        Extract drawings with element count limits
+        Runs in thread for timeout capability
         """
+        drawings = []
+        polylines = []
+        
         try:
-            # Check if file exists first
-            if not os.path.exists(pdf_path):
-                logger.warning(f"PDF file not found: {pdf_path}")
-                return None
+            doc = fitz.open(pdf_path)
+            if page_num >= len(doc):
+                doc.close()
+                return [], [], "error"
                 
-            # Use multiprocessing for true timeout capability
-            with multiprocessing.Pool(1) as pool:
-                async_result = pool.apply_async(
-                    _extract_drawings_worker,
-                    (pdf_path, page_num, "full")
-                )
+            page = doc[page_num]
+            
+            # Get drawings with iteration limit
+            page_drawings = page.get_drawings()
+            total_count = 0
+            
+            for i, drawing in enumerate(page_drawings):
+                if i >= max_elements:
+                    logger.info(f"Reached element limit {max_elements}")
+                    doc.close()
+                    return drawings, polylines, "limited"
                 
-                try:
-                    drawings, polylines = async_result.get(timeout=self.full_timeout)
-                    
-                    return ExtractionResult(
-                        drawings=drawings,
-                        polylines=polylines,
-                        quality_factor=1.0,
-                        extraction_method="full",
-                        processing_time=0.0,  # Will be set by caller
-                        element_count=len(drawings) + len(polylines)
-                    )
-                except multiprocessing.TimeoutError:
-                    logger.warning(f"Full extraction timed out after {self.full_timeout}s")
-                    pool.terminate()
-                    return None
-                    
+                # Process drawing
+                if 'items' in drawing:
+                    for item in drawing['items'][:20]:  # Limit items per drawing
+                        if item[0] == 'l':  # Line
+                            polylines.append([item[1], item[2]])
+                        elif item[0] == 'c':  # Curve
+                            polylines.append([item[1], item[4]])
+                        total_count += 1
+                        
+                        if total_count >= max_elements * 2:  # Polyline limit
+                            break
+                
+                drawings.append({
+                    'type': 'drawing',
+                    'rect': drawing.get('rect'),
+                    'fill': drawing.get('fill'),
+                    'color': drawing.get('color')
+                })
+                
+            doc.close()
+            return drawings, polylines, "full"
+            
         except Exception as e:
-            logger.error(f"Full extraction failed: {e}")
-            return None
+            logger.error(f"Drawing extraction error: {e}")
+            return [], [], "error"
     
-    def _try_sampled_extraction(self, pdf_path: str, page_num: int) -> Optional[ExtractionResult]:
+    def _extract_limited_direct(
+        self,
+        pdf_path: str,
+        page_num: int,
+        max_elements: int
+    ) -> Tuple[List, List]:
         """
-        Try sampled extraction (every Nth element) with timeout
+        Direct extraction with very strict limits
+        No threading, minimal processing
         """
+        drawings = []
+        polylines = []
+        
         try:
-            with multiprocessing.Pool(1) as pool:
-                async_result = pool.apply_async(
-                    _extract_drawings_worker,
-                    (pdf_path, page_num, "sampled")
-                )
+            doc = fitz.open(pdf_path)
+            if page_num >= len(doc):
+                doc.close()
+                return [], []
                 
-                try:
-                    drawings, polylines = async_result.get(timeout=self.sample_timeout)
+            page = doc[page_num]
+            
+            # Try to get just basic drawings
+            try:
+                # Use get_cdrawings if available (faster)
+                if hasattr(page, 'get_cdrawings'):
+                    page_drawings = page.get_cdrawings()
+                else:
+                    page_drawings = page.get_drawings()
                     
-                    return ExtractionResult(
-                        drawings=drawings,
-                        polylines=polylines,
-                        quality_factor=0.5,
-                        extraction_method="sampled",
-                        processing_time=0.0,
-                        element_count=len(drawings) + len(polylines)
-                    )
-                except multiprocessing.TimeoutError:
-                    logger.warning(f"Sampled extraction timed out after {self.sample_timeout}s")
-                    pool.terminate()
-                    return None
+                for i, drawing in enumerate(page_drawings):
+                    if i >= max_elements:
+                        break
+                        
+                    drawings.append({
+                        'type': 'drawing_limited',
+                        'rect': drawing.get('rect', [0, 0, 0, 0])
+                    })
                     
+            except Exception as e:
+                logger.warning(f"Could not get drawings: {e}")
+            
+            # At least get text blocks as rectangles
+            if not drawings:
+                text_blocks = page.get_text_blocks()
+                for i, block in enumerate(text_blocks):
+                    if i >= 100:
+                        break
+                    x0, y0, x1, y1 = block[:4]
+                    drawings.append({
+                        'type': 'text_block',
+                        'rect': [x0, y0, x1, y1]
+                    })
+            
+            doc.close()
+            
         except Exception as e:
-            logger.error(f"Sampled extraction failed: {e}")
-            return None
+            logger.error(f"Direct extraction error: {e}")
+            
+        return drawings, polylines
     
     def _extract_bounding_boxes(self, pdf_path: str, page_num: int) -> ExtractionResult:
         """
         Fast bounding box extraction as last resort
-        This should never fail
         """
         drawings = []
         polylines = []
@@ -158,10 +239,8 @@ class SmartDrawingExtractor:
             if page_num < len(doc):
                 page = doc[page_num]
                 
-                # Just get page dimensions and basic rectangles
+                # Get page bounds
                 rect = page.rect
-                
-                # Create a simple bounding box representation
                 drawings.append({
                     'type': 'page_bounds',
                     'bbox': [rect.x0, rect.y0, rect.x1, rect.y1],
@@ -169,22 +248,24 @@ class SmartDrawingExtractor:
                     'height': rect.height
                 })
                 
-                # Try to at least get text bounding boxes for room detection
-                text_blocks = page.get_text_blocks()
-                for block in text_blocks[:100]:  # Limit to first 100
-                    x0, y0, x1, y1 = block[:4]
-                    drawings.append({
-                        'type': 'text_bbox',
-                        'bbox': [x0, y0, x1, y1],
-                        'width': x1 - x0,
-                        'height': y1 - y0
-                    })
+                # Get text bounding boxes
+                try:
+                    text_blocks = page.get_text_blocks()
+                    for i, block in enumerate(text_blocks[:100]):
+                        x0, y0, x1, y1 = block[:4]
+                        drawings.append({
+                            'type': 'text_bbox',
+                            'bbox': [x0, y0, x1, y1],
+                            'width': x1 - x0,
+                            'height': y1 - y0
+                        })
+                except:
+                    pass
                 
             doc.close()
             
         except Exception as e:
-            logger.error(f"Even bbox extraction had issues: {e}")
-            # Return minimal data
+            logger.error(f"Bbox extraction error: {e}")
             drawings = [{'type': 'error', 'message': str(e)}]
         
         return ExtractionResult(
@@ -195,68 +276,17 @@ class SmartDrawingExtractor:
             processing_time=0.0,
             element_count=len(drawings)
         )
-
-
-def _extract_drawings_worker(pdf_path: str, page_num: int, mode: str) -> Tuple[List, List]:
-    """
-    Worker function for multiprocessing
-    Runs in separate process for true timeout capability
-    """
-    drawings = []
-    polylines = []
     
-    try:
-        doc = fitz.open(pdf_path)
-        if page_num < len(doc):
-            page = doc[page_num]
-            
-            if mode == "full":
-                # Full extraction
-                page_drawings = page.get_drawings()
-                
-                for drawing in page_drawings:
-                    # Process all drawings
-                    if 'items' in drawing:
-                        for item in drawing['items']:
-                            if item[0] == 'l':  # Line
-                                polylines.append([item[1], item[2]])
-                            elif item[0] == 'c':  # Curve
-                                # Approximate curve with line segments
-                                polylines.append([item[1], item[4]])
-                    
-                    drawings.append({
-                        'type': 'drawing',
-                        'rect': drawing.get('rect'),
-                        'fill': drawing.get('fill'),
-                        'color': drawing.get('color'),
-                        'width': drawing.get('width', 1)
-                    })
-                    
-            elif mode == "sampled":
-                # Sampled extraction - every 2nd element
-                page_drawings = page.get_drawings()
-                
-                for i, drawing in enumerate(page_drawings):
-                    if i % 2 == 0:  # Sample every other element
-                        if 'items' in drawing:
-                            for item in drawing['items'][:10]:  # Limit items per drawing
-                                if item[0] == 'l':
-                                    polylines.append([item[1], item[2]])
-                        
-                        drawings.append({
-                            'type': 'drawing_sampled',
-                            'rect': drawing.get('rect')
-                        })
-                        
-                    if len(drawings) > 1000:  # Cap at 1000 for sampled mode
-                        break
-        
-        doc.close()
-        
-    except Exception as e:
-        logger.error(f"Worker extraction failed: {e}")
-    
-    return drawings, polylines
+    def _create_empty_result(self) -> ExtractionResult:
+        """Create empty result when file not found"""
+        return ExtractionResult(
+            drawings=[],
+            polylines=[],
+            quality_factor=0.0,
+            extraction_method="empty",
+            processing_time=0.0,
+            element_count=0
+        )
 
 
 # Global instance

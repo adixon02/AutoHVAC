@@ -282,10 +282,10 @@ class GeometryParser:
                     
                     # Calculate scale-aware thresholds for rectangle filtering
                     if scale_factor and scale_factor > 0:
-                        # Convert room size limits from square feet to page units
-                        # Using the detected scale factor
-                        min_room_sqft = 10  # Minimum room size in square feet (smaller for closets)
-                        max_room_sqft = 1200  # Maximum room size in square feet (larger for open spaces)
+                        # Be more permissive with filtering - let geometry_fallback handle validation
+                        # Many blueprint elements are smaller than actual rooms
+                        min_room_sqft = 0.5  # Very small minimum to catch all elements
+                        max_room_sqft = 5000  # Very large maximum
                         
                         # Convert to page units: area_page = area_sqft * (scale_px_per_ft)^2
                         min_area_page_units = min_room_sqft * (scale_factor ** 2)
