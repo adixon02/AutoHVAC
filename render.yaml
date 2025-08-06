@@ -61,7 +61,7 @@ services:
     buildCommand: |
       apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng libpoppler-utils poppler-utils libgl1-mesa-glx libglib2.0-0 libmupdf-dev mupdf-tools fonts-liberation fonts-dejavu-core file psmisc
       cd backend && pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
-    startCommand: cd backend && celery -A tasks worker --loglevel=info --concurrency=2 --max-tasks-per-child=50 --max-memory-per-child=512000 --time-limit=1800 --soft-time-limit=1740 --without-gossip --without-mingle --without-heartbeat
+    startCommand: cd backend && chmod +x start_worker.sh && ./start_worker.sh
     # IMPORTANT: You must manually attach the shared-storage disk to this worker
     # in the Render dashboard with mount path: /var/data
     envVars:

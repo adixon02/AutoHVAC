@@ -1,15 +1,21 @@
 """
 Smart drawing extraction with progressive degradation
 Works in Celery daemon context - no multiprocessing
+Includes memory monitoring to prevent OOM kills
 """
 
 import logging
 import time
 import os
+import sys
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import fitz  # PyMuPDF
+
+# Add parent directories to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from utils.memory_monitor import MemoryMonitor, check_memory_available
 
 logger = logging.getLogger(__name__)
 
@@ -117,9 +123,14 @@ class SmartDrawingExtractor:
         max_elements: int
     ) -> Tuple[List, List, str]:
         """
-        Extract drawings with element count limits
+        Extract drawings with element count limits and memory monitoring
         Runs in thread for timeout capability
         """
+        # Initialize memory monitor
+        memory_monitor = MemoryMonitor()
+        initial_memory = memory_monitor.get_memory_usage_mb()
+        logger.info(f"Starting drawing extraction, memory: {initial_memory:.1f}MB")
+        
         drawings = []
         polylines = []
         
@@ -133,17 +144,37 @@ class SmartDrawingExtractor:
             
             # Get drawings with iteration limit
             page_drawings = page.get_drawings()
+            total_drawings = len(page_drawings) if hasattr(page_drawings, '__len__') else 0
+            
+            # Decide extraction strategy based on drawing count
+            if total_drawings > 20000:
+                logger.warning(f"Page has {total_drawings} drawings - using minimal extraction")
+                doc.close()
+                return [], [], "skip_complex"
+            elif total_drawings > 10000:
+                logger.info(f"Page has {total_drawings} drawings - using aggressive sampling")
+                max_elements = min(max_elements, 1000)
+            
             total_count = 0
+            memory_check_interval = 100  # Check memory every N elements
             
             for i, drawing in enumerate(page_drawings):
+                # Check memory periodically
+                if i % memory_check_interval == 0 and i > 0:
+                    if not memory_monitor.check_memory_circuit_breaker():
+                        logger.warning(f"Memory limit approaching at drawing {i}/{total_drawings}")
+                        doc.close()
+                        return drawings, polylines, "memory_limited"
+                
                 if i >= max_elements:
                     logger.info(f"Reached element limit {max_elements}")
                     doc.close()
                     return drawings, polylines, "limited"
                 
-                # Process drawing
+                # Process drawing with limits
                 if 'items' in drawing:
-                    for item in drawing['items'][:20]:  # Limit items per drawing
+                    items_to_process = min(20, len(drawing['items']))  # Limit items per drawing
+                    for item in drawing['items'][:items_to_process]:
                         if item[0] == 'l':  # Line
                             polylines.append([item[1], item[2]])
                         elif item[0] == 'c':  # Curve
@@ -159,6 +190,11 @@ class SmartDrawingExtractor:
                     'fill': drawing.get('fill'),
                     'color': drawing.get('color')
                 })
+            
+            # Log final memory usage
+            final_memory = memory_monitor.get_memory_usage_mb()
+            memory_increase = final_memory - initial_memory
+            logger.info(f"Drawing extraction completed, memory: {initial_memory:.1f}MB -> {final_memory:.1f}MB (increase: {memory_increase:.1f}MB)")
                 
             doc.close()
             return drawings, polylines, "full"

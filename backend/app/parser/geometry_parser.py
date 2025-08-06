@@ -250,10 +250,16 @@ class GeometryParser:
                     raw_lines = page.lines
                     logger.info(f"[Thread {thread_name}:{thread_id}] Found {len(raw_lines)} raw lines to process")
                     
-                    # Apply defensive limit
-                    if len(raw_lines) > self.MAX_LINES:
-                        logger.warning(f"[Thread {thread_name}:{thread_id}] Too many lines ({len(raw_lines)}), limiting to {self.MAX_LINES}")
-                        raw_lines = raw_lines[:self.MAX_LINES]
+                    # Apply smart limits based on line count
+                    if len(raw_lines) > 20000:
+                        logger.warning(f"[Thread {thread_name}:{thread_id}] Excessive lines ({len(raw_lines)}), skipping line extraction for performance")
+                        raw_lines = []  # Skip lines entirely for very complex drawings
+                    elif len(raw_lines) > 10000:
+                        logger.warning(f"[Thread {thread_name}:{thread_id}] Many lines ({len(raw_lines)}), sampling every 3rd line")
+                        raw_lines = raw_lines[::3]  # Sample every 3rd line
+                    elif len(raw_lines) > 5000:
+                        logger.info(f"[Thread {thread_name}:{thread_id}] Moderate lines ({len(raw_lines)}), sampling every 2nd line")
+                        raw_lines = raw_lines[::2]  # Sample every 2nd line
                     
                     for i, line in enumerate(raw_lines):
                         try:
