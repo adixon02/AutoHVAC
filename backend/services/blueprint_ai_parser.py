@@ -58,8 +58,8 @@ class BlueprintAIParser:
     
     def __init__(self):
         # Set default configuration values first
-        self.max_image_size = 5 * 1024 * 1024   # 5MB max - much smaller for speed
-        self.target_image_size = 2 * 1024 * 1024  # Target 2MB for optimal balance
+        self.max_image_size = 3 * 1024 * 1024   # 3MB max - optimized for speed
+        self.target_image_size = 1.5 * 1024 * 1024  # Target 1.5MB for faster uploads
         self.max_pages = 10  # Increased to ensure complete parsing
         self.min_resolution = 1024  # Increased minimum for better OCR
         self.max_resolution = 2048  # Cap maximum resolution to control size
@@ -415,10 +415,10 @@ class BlueprintAIParser:
                     page_rect = page.rect
                     max_dimension = max(page_rect.width, page_rect.height)
                     
-                    # Calculate optimal zoom to target 2000px on longest side (better GPT-4V accuracy)
-                    target_size = 2000
+                    # Calculate optimal zoom to target 1500px on longest side (balance speed/accuracy)
+                    target_size = 1500  # Reduced for faster processing
                     zoom_factor = target_size / max_dimension
-                    zoom_factor = min(zoom_factor, 3.0)  # Max 3x zoom for better detail
+                    zoom_factor = min(zoom_factor, 2.5)  # Max 2.5x zoom (reduced from 3.0)
                     zoom_factor = max(zoom_factor, 1.0)  # Don't downscale
                     
                     mat = fitz.Matrix(zoom_factor, zoom_factor)
@@ -427,8 +427,8 @@ class BlueprintAIParser:
                     # Render page as pixmap
                     pix = page.get_pixmap(matrix=mat)
                     
-                    # Use JPEG with good quality (85 is sufficient for blueprints)
-                    img_bytes = pix.tobytes("jpeg", jpg_quality=85)
+                    # Use JPEG with optimized quality (75 for faster upload)
+                    img_bytes = pix.tobytes("jpeg", jpg_quality=75)
                     logger.info(f"Page {page_num + 1}: JPEG format ({len(img_bytes) / 1024 / 1024:.1f}MB)")
                     
                     # If still too large, try PNG with compression
@@ -639,7 +639,7 @@ class BlueprintAIParser:
             
             try:
                 response = await self.client.chat.completions.create(
-                    model="gpt-4o",
+                    model="gpt-4o-mini",  # Use mini model for faster response
                     messages=[
                         {
                             "role": "user",
@@ -649,7 +649,7 @@ class BlueprintAIParser:
                                     "type": "image_url",
                                     "image_url": {
                                         "url": f"data:image/jpeg;base64,{image_base64}",
-                                        "detail": "high"  # Use high detail for accurate room detection
+                                        "detail": "high"  # Still use high detail for accuracy
                                     }
                                 }
                             ]
@@ -657,7 +657,7 @@ class BlueprintAIParser:
                     ],
                     max_tokens=2000,  # Increased for comprehensive room lists
                     temperature=0.1,  # Lower temperature for consistent JSON
-                    timeout=30  # 30 second timeout for faster failure detection
+                    timeout=25  # 25 second timeout for faster failure detection
                 )
                 logger.info("GPT-4V API call completed successfully")
                 
