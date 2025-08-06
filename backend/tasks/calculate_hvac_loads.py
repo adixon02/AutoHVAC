@@ -534,10 +534,10 @@ def calculate_hvac_loads(
         try:
             from core.email import email_service
             from services.user_service import user_service
-            from database import SessionLocal
+            from database import SyncSessionLocal
             
             # Check if this is the user's first report
-            with SessionLocal() as session:
+            with SyncSessionLocal() as session:
                 is_first_report = user_service.sync_check_is_first_report(email, session)
             
             # Generate report view URL

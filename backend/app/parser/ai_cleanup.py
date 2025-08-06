@@ -16,13 +16,15 @@ class AICleanupError(Exception):
     pass
 
 
-async def cleanup(raw_geo: RawGeometry, raw_text: RawText) -> BlueprintSchema:
+async def cleanup(raw_geo: RawGeometry, raw_text: RawText, zip_code: str = "90210", project_id: Optional[str] = None) -> BlueprintSchema:
     """
     Use OpenAI GPT-4 to convert raw geometry and text into structured blueprint
     
     Args:
         raw_geo: Raw geometry data from GeometryParser
-        raw_text: Raw text data from TextParser  
+        raw_text: Raw text data from TextParser
+        zip_code: Project zip code
+        project_id: Optional project ID
         
     Returns:
         BlueprintSchema with structured room data
@@ -30,6 +32,13 @@ async def cleanup(raw_geo: RawGeometry, raw_text: RawText) -> BlueprintSchema:
     Raises:
         AICleanupError: If AI processing fails
     """
+    from datetime import datetime
+    from .schema import ParsingMetadata, ParsingStatus
+    from uuid import uuid4, UUID
+    import time
+    
+    start_time = time.time()
+    
     client = AsyncOpenAI(
         api_key=os.getenv("OPENAI_API_KEY")
     )
@@ -38,7 +47,7 @@ async def cleanup(raw_geo: RawGeometry, raw_text: RawText) -> BlueprintSchema:
         raise AICleanupError("OPENAI_API_KEY environment variable not set")
     
     # Prepare context for AI
-    context = _prepare_context(raw_geo, raw_text, "90210")
+    context = _prepare_context(raw_geo, raw_text, zip_code)
     
     # Generate system prompt
     system_prompt = _generate_system_prompt()
@@ -59,6 +68,36 @@ async def cleanup(raw_geo: RawGeometry, raw_text: RawText) -> BlueprintSchema:
         # Parse response
         result_text = response.choices[0].message.content
         result_json = json.loads(result_text)
+        
+        # Add the required parsing_metadata field that AI doesn't provide
+        processing_time = time.time() - start_time
+        
+        # Create metadata for the AI parsing
+        parsing_metadata = ParsingMetadata(
+            parsing_timestamp=datetime.utcnow(),
+            processing_time_seconds=processing_time,
+            pdf_filename=raw_text.pdf_filename if hasattr(raw_text, 'pdf_filename') else "unknown.pdf",
+            pdf_page_count=raw_text.pdf_page_count if hasattr(raw_text, 'pdf_page_count') else 1,
+            selected_page=raw_text.selected_page if hasattr(raw_text, 'selected_page') else 1,
+            geometry_status=ParsingStatus.SUCCESS if raw_geo else ParsingStatus.FAILED,
+            text_status=ParsingStatus.SUCCESS if raw_text else ParsingStatus.FAILED,
+            ai_status=ParsingStatus.SUCCESS,
+            overall_confidence=0.7,  # AI-based parsing has moderate confidence
+            geometry_confidence=0.8 if raw_geo and raw_geo.scale_factor else 0.4,
+            text_confidence=0.8 if raw_text and raw_text.room_labels else 0.4,
+            errors_encountered=[],
+            warnings=["Blueprint parsed using AI analysis"]
+        )
+        
+        # Ensure project_id is set
+        if 'project_id' not in result_json or not result_json['project_id']:
+            result_json['project_id'] = project_id or str(uuid4())
+        
+        # Ensure zip_code matches what was provided
+        result_json['zip_code'] = zip_code
+        
+        # Add the metadata to the result
+        result_json['parsing_metadata'] = parsing_metadata
         
         # Validate and create BlueprintSchema
         blueprint = BlueprintSchema(**result_json)
@@ -330,9 +369,9 @@ async def test_ai_cleanup():
 
 
 # Backward compatibility alias
-async def cleanup_with_ai(raw_geo: RawGeometry, raw_text: RawText, zip_code: str = "90210") -> BlueprintSchema:
+async def cleanup_with_ai(raw_geo: RawGeometry, raw_text: RawText, zip_code: str = "90210", project_id: Optional[str] = None) -> BlueprintSchema:
     """Backward compatibility wrapper"""
-    return await cleanup(raw_geo, raw_text)
+    return await cleanup(raw_geo, raw_text, zip_code, project_id)
 
 
 if __name__ == "__main__":

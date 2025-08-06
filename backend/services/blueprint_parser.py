@@ -764,31 +764,96 @@ class BlueprintParser:
             parsing_metadata=parsing_metadata
         )
     
-    def _create_typical_fallback_rooms(self) -> List[Room]:
-        """Create typical residential room layout when parsing fails"""
-        # Target ~2329 sq ft typical home (conditioned space only)
-        typical_rooms = [
-            ("Living Room", (20.0, 18.0), "living", 360, 3),
-            ("Kitchen", (15.0, 18.0), "kitchen", 270, 2),
-            ("Dining Room", (14.0, 12.0), "dining", 168, 2),
-            ("Master Bedroom", (16.0, 14.0), "bedroom", 224, 2),
-            ("Master Bathroom", (10.0, 8.0), "bathroom", 80, 1),
-            ("Bedroom 2", (12.0, 12.0), "bedroom", 144, 2),
-            ("Bedroom 3", (12.0, 11.0), "bedroom", 132, 2),
-            ("Bedroom 4", (11.0, 11.0), "bedroom", 121, 2),
-            ("Bathroom 2", (8.0, 7.0), "bathroom", 56, 1),
-            ("Bathroom 3", (7.0, 6.0), "bathroom", 42, 0),
-            ("Family Room", (18.0, 16.0), "living", 288, 3),
-            ("Laundry", (8.0, 8.0), "laundry", 64, 1),
-            ("Hallway", (30.0, 5.0), "hallway", 150, 0),
-            ("Entry", (10.0, 8.0), "other", 80, 1),
-            ("Closets", (10.0, 15.0), "closet", 150, 0),
+    def _create_typical_fallback_rooms(self, target_sqft: Optional[float] = None) -> List[Room]:
+        """Create typical residential room layout when parsing fails
+        
+        Args:
+            target_sqft: Target square footage for the home (if None, uses 2329 sqft default)
+        """
+        import random
+        
+        # Use target square footage or default
+        if target_sqft is None:
+            target_sqft = 2329.0
+        
+        # Scale factor based on target square footage (baseline is 2329 sqft)
+        scale_factor = (target_sqft / 2329.0) ** 0.5  # Square root for dimensional scaling
+        
+        # Add some variance to prevent identical results (±5%)
+        variance = 1.0 + (random.random() - 0.5) * 0.1  # 0.95 to 1.05
+        
+        # Base room definitions with percentages of total area
+        # Format: (name, base_width, base_height, room_type, area_percentage, window_count)
+        base_rooms = [
+            ("Living Room", 20.0, 18.0, "living", 0.155, 3),  # 15.5% of total
+            ("Kitchen", 15.0, 18.0, "kitchen", 0.116, 2),      # 11.6%
+            ("Dining Room", 14.0, 12.0, "dining", 0.072, 2),   # 7.2%
+            ("Master Bedroom", 16.0, 14.0, "bedroom", 0.096, 2), # 9.6%
+            ("Master Bathroom", 10.0, 8.0, "bathroom", 0.034, 1), # 3.4%
+            ("Family Room", 18.0, 16.0, "living", 0.124, 3),   # 12.4%
         ]
         
+        # Determine number of bedrooms based on square footage
+        if target_sqft < 1200:
+            # Small home: 2 bedrooms
+            additional_bedrooms = [
+                ("Bedroom 2", 11.0, 11.0, "bedroom", 0.062, 2),
+            ]
+            additional_bathrooms = [("Bathroom 2", 7.0, 6.0, "bathroom", 0.024, 1)]
+        elif target_sqft < 2000:
+            # Medium home: 3 bedrooms
+            additional_bedrooms = [
+                ("Bedroom 2", 12.0, 11.0, "bedroom", 0.062, 2),
+                ("Bedroom 3", 11.0, 11.0, "bedroom", 0.057, 2),
+            ]
+            additional_bathrooms = [("Bathroom 2", 8.0, 7.0, "bathroom", 0.024, 1)]
+        else:
+            # Large home: 4+ bedrooms
+            additional_bedrooms = [
+                ("Bedroom 2", 12.0, 12.0, "bedroom", 0.062, 2),
+                ("Bedroom 3", 12.0, 11.0, "bedroom", 0.057, 2),
+                ("Bedroom 4", 11.0, 11.0, "bedroom", 0.052, 2),
+            ]
+            additional_bathrooms = [
+                ("Bathroom 2", 8.0, 7.0, "bathroom", 0.024, 1),
+                ("Bathroom 3", 7.0, 6.0, "bathroom", 0.018, 0),
+            ]
+        
+        # Utility rooms scaled by home size
+        utility_rooms = [
+            ("Laundry", 8.0, 8.0, "laundry", 0.027, 1),
+            ("Hallway", 30.0, 5.0, "hallway", 0.064, 0),
+            ("Entry", 10.0, 8.0, "other", 0.034, 1),
+            ("Closets", 10.0, 15.0, "closet", 0.064, 0),
+        ]
+        
+        # Combine all room definitions
+        all_room_defs = base_rooms + additional_bedrooms + additional_bathrooms + utility_rooms
+        
+        # Create rooms with scaled dimensions
         rooms = []
-        for name, (width, height), room_type, area, window_count in typical_rooms:
+        for name, base_width, base_height, room_type, area_pct, window_count in all_room_defs:
+            # Scale dimensions with variance
+            width = base_width * scale_factor * variance
+            height = base_height * scale_factor * variance
+            
+            # Calculate area based on percentage of total
+            area = target_sqft * area_pct * variance
+            
+            # Adjust dimensions to match calculated area
+            dim_area = width * height
+            if dim_area > 0:
+                adjustment = (area / dim_area) ** 0.5
+                width *= adjustment
+                height *= adjustment
+            
+            # Round to reasonable precision
+            width = round(width, 1)
+            height = round(height, 1)
+            area = round(area, 0)
+            
             room = Room(
-                name=f"{name} (Fallback)",
+                name=f"{name} (Estimated)",
                 dimensions_ft=(width, height),
                 floor=1,
                 windows=window_count,
@@ -798,16 +863,25 @@ class BlueprintParser:
                 confidence=0.1,  # Very low confidence
                 center_position=(0.0, 0.0),
                 label_found=False,
-                dimensions_source="fallback"
+                dimensions_source="estimated"
             )
             rooms.append(room)
         
         return rooms
     
-    def _create_partial_blueprint(self, zip_code: str, project_id: Optional[str], metadata: ParsingMetadata, error: str) -> BlueprintSchema:
-        """Create partial blueprint when parsing fails - use intelligent fallback"""
+    def _create_partial_blueprint(self, zip_code: str, project_id: Optional[str], metadata: ParsingMetadata, error: str, target_sqft: Optional[float] = None) -> BlueprintSchema:
+        """Create partial blueprint when parsing fails - use intelligent fallback
+        
+        Args:
+            zip_code: Project zip code
+            project_id: Optional project ID
+            metadata: Parsing metadata
+            error: Error message that caused the fallback
+            target_sqft: Optional target square footage (if known from partial parsing)
+        """
         # Create a more realistic fallback room structure
-        rooms = self._create_typical_fallback_rooms()
+        # Use target square footage if available, otherwise default
+        rooms = self._create_typical_fallback_rooms(target_sqft)
         total_area = sum(room.area for room in rooms)
         
         # Update metadata with error information

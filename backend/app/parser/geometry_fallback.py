@@ -28,8 +28,8 @@ class GeometryFallbackParser:
     
     def __init__(self):
         # Room size thresholds (in square feet)
-        self.MIN_ROOM_AREA = 15  # Minimum for closets
-        self.MAX_ROOM_AREA = 800  # Maximum for residential rooms
+        self.MIN_ROOM_AREA = 10  # Minimum for small closets/pantries
+        self.MAX_ROOM_AREA = 1200  # Maximum for large residential rooms (great rooms)
         self.TYPICAL_CEILING_HEIGHT = 9.0  # feet
         
         # Room type classification by area
@@ -126,11 +126,11 @@ class GeometryFallbackParser:
         if not rooms:
             logger.warning("No valid rooms found in geometry - trying alternative approaches")
             
-            # First try: Relax thresholds
+            # First try: Relax thresholds even more
             original_min = self.MIN_ROOM_AREA
             original_max = self.MAX_ROOM_AREA
-            self.MIN_ROOM_AREA = 10  # Lower threshold for small rooms
-            self.MAX_ROOM_AREA = 1200  # Higher threshold for large rooms
+            self.MIN_ROOM_AREA = 8  # Lower threshold for tiny rooms
+            self.MAX_ROOM_AREA = 1500  # Higher threshold for very large rooms
             
             rooms = self._extract_rooms_from_geometry(raw_geo, raw_text)
             
@@ -295,10 +295,28 @@ class GeometryFallbackParser:
                            f"feet=({width_ft:.1f}x{height_ft:.1f}), area={area_ft:.1f} sq ft")
             
             # NOW check if the converted area is reasonable
-            if area_ft < self.MIN_ROOM_AREA or area_ft > self.MAX_ROOM_AREA:
-                logger.debug(f"Rectangle {idx}: Filtered - area {area_ft:.1f} sq ft outside range {self.MIN_ROOM_AREA}-{self.MAX_ROOM_AREA}")
+            # Be more lenient with filtering to catch more rooms
+            if area_ft < self.MIN_ROOM_AREA:
+                # Only filter if it's really too small (< MIN_ROOM_AREA)
+                logger.debug(f"Rectangle {idx}: Filtered - area {area_ft:.1f} sq ft too small (< {self.MIN_ROOM_AREA})")
                 filtered_count += 1
                 continue
+            elif area_ft > self.MAX_ROOM_AREA:
+                # For large areas, check aspect ratio - might be entire floor
+                aspect_ratio = max(width_ft, height_ft) / min(width_ft, height_ft)
+                if aspect_ratio > 4.0:
+                    # Very elongated - likely a wall or entire building
+                    logger.debug(f"Rectangle {idx}: Filtered - area {area_ft:.1f} sq ft with aspect ratio {aspect_ratio:.1f}")
+                    filtered_count += 1
+                    continue
+                elif area_ft > self.MAX_ROOM_AREA * 2:
+                    # Way too large - likely entire floor or building outline
+                    logger.debug(f"Rectangle {idx}: Filtered - area {area_ft:.1f} sq ft too large (> {self.MAX_ROOM_AREA * 2})")
+                    filtered_count += 1
+                    continue
+                else:
+                    # Large but reasonable - might be a great room or open concept
+                    logger.info(f"Rectangle {idx}: Large room accepted - {area_ft:.1f} sq ft")
             
             # Find nearby text label
             center_x = rect.get('center_x', (rect.get('x0', 0) + rect.get('x1', 0)) / 2)
