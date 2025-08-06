@@ -150,9 +150,16 @@ def _prepare_context(raw_geo: RawGeometry, raw_text: RawText, zip_code: str) -> 
         "rooms": [
             {
                 "bounds": [rect["x0"], rect["y0"], rect["x1"], rect["y1"]],
-                "area": rect["area"],
+                # Convert area from pixels to square feet using scale_factor
+                "area": rect.get("area_sqft", 
+                        rect["area"] / (raw_geo.scale_factor ** 2) if raw_geo.scale_factor and raw_geo.scale_factor > 0 
+                        else rect["area"]),
                 "center": [rect["center_x"], rect["center_y"]],
-                "dimensions": [rect["width"], rect["height"]],
+                # Convert dimensions from pixels to feet using scale_factor
+                "dimensions": [
+                    rect.get("width_ft", rect["width"] / raw_geo.scale_factor if raw_geo.scale_factor and raw_geo.scale_factor > 0 else rect["width"]),
+                    rect.get("height_ft", rect["height"] / raw_geo.scale_factor if raw_geo.scale_factor and raw_geo.scale_factor > 0 else rect["height"])
+                ],
                 "room_probability": rect.get("room_probability", 0.5)
             }
             for rect in raw_geo.rectangles
@@ -287,9 +294,10 @@ ANALYSIS GUIDELINES:
      * Laundry: 30-80 sqft
 
 2. DIMENSIONS & AREA:
-   - Convert page coordinates to real-world feet using scale_factor if available
-   - If no scale provided, estimate based on typical residential dimensions
-   - Calculate area as width × length
+   - When scale_factor is provided, room areas and dimensions are already converted to square feet and feet
+   - If scale_factor is missing or 0, values may be in page units - estimate based on typical residential dimensions
+   - Validate that areas are reasonable (bedrooms 100-300 sqft, not 0.5-2 sqft)
+   - Calculate area as width × length if needed
    - Round dimensions to nearest 0.5 feet
 
 3. WINDOWS:

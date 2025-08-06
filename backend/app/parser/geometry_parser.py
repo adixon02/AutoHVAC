@@ -368,7 +368,11 @@ class GeometryParser:
                                     'y1': float(rect['y1']),
                                     'width': width,
                                     'height': height,
-                                    'area': area,
+                                    'area': area,  # Area in pixels
+                                    # Add converted measurements for downstream use
+                                    'area_sqft': area / (scale_factor ** 2) if scale_factor and scale_factor > 0 else None,
+                                    'width_ft': width / scale_factor if scale_factor and scale_factor > 0 else None,
+                                    'height_ft': height / scale_factor if scale_factor and scale_factor > 0 else None,
                                     'center_x': float(rect['x0'] + width / 2),
                                     'center_y': float(rect['y0'] + height / 2),
                                     'aspect_ratio': width / height if height > 0 else 0,
@@ -597,6 +601,8 @@ class GeometryParser:
                     # This method doesn't have scale_factor, so use conservative filtering
                     # The actual room size validation happens in geometry_fallback.py
                     if area > 100:  # Very minimal filtering - let downstream handle it
+                        # Note: This path doesn't have scale_factor, so we can't convert to feet yet
+                        # The conversion will happen downstream when scale_factor is available
                         rectangles.append({
                             'type': 'rect',
                             'coords': [float(rect['x0']), float(rect['y0']), float(rect['x1']), float(rect['y1'])],
@@ -606,7 +612,11 @@ class GeometryParser:
                             'y1': float(rect['y1']),
                             'width': width,
                             'height': height,
-                            'area': area,
+                            'area': area,  # Area in pixels
+                            # Can't convert without scale_factor
+                            'area_sqft': None,
+                            'width_ft': None,
+                            'height_ft': None,
                             'center_x': float(rect['x0'] + width / 2),
                             'center_y': float(rect['y0'] + height / 2),
                             'aspect_ratio': width / height if height > 0 else 0,

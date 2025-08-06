@@ -283,11 +283,17 @@ class GeometryFallbackParser:
                 logger.debug(f"Rectangle {idx}: Skipped - invalid dimensions ({width} x {height})")
                 continue
             
-            # ALWAYS convert from page units to feet using scale factor
-            # The geometry parser returns coordinates in page units (pixels/points)
-            width_ft = width / scale_factor  # pixels / (pixels/foot) = feet
-            height_ft = height / scale_factor
-            area_ft = width_ft * height_ft
+            # Use pre-converted values if available, otherwise convert from page units
+            # The geometry parser now provides both pixel and feet measurements
+            if rect.get('width_ft') is not None and rect.get('height_ft') is not None:
+                width_ft = rect['width_ft']
+                height_ft = rect['height_ft']
+                area_ft = rect.get('area_sqft', width_ft * height_ft)
+            else:
+                # Fallback: convert from page units to feet using scale factor
+                width_ft = width / scale_factor  # pixels / (pixels/foot) = feet
+                height_ft = height / scale_factor
+                area_ft = width_ft * height_ft
             
             # Log the conversion for debugging
             if idx < 5 or area_ft > 50:  # Log first 5 or significant rectangles
