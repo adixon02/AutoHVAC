@@ -160,7 +160,8 @@ class TextParser:
                         if i % BATCH_SIZE == 0 and i > 0:
                             logger.debug(f"[Thread {thread_name}:{thread_id}] Processed {i}/{words_to_process} words")
                         
-                        # Only extract essential attributes for HVAC calculations
+                        # Extract essential attributes for HVAC calculations
+                        height = float(word['bottom'] - word['top'])
                         words.append({
                             'text': str(word['text']),
                             'x0': float(word['x0']),
@@ -168,8 +169,9 @@ class TextParser:
                             'x1': float(word['x1']),
                             'bottom': float(word['bottom']),
                             'width': float(word['x1'] - word['x0']),
-                            'height': float(word['bottom'] - word['top']),
-                            # Skip non-essential attributes like font, size for performance
+                            'height': height,
+                            'size': float(word.get('size', height)),  # Use height as fallback for size
+                            'font': word.get('fontname', ''),  # Keep font for better room detection
                             'source': 'pdfplumber'
                         })
                     
@@ -485,7 +487,7 @@ class TextParser:
         confidence = 0.5
         
         # Larger text is more likely to be room labels
-        if word['size'] > 10:
+        if word.get('size', 0) > 10:
             confidence += 0.2
         
         # Text in certain positions (center of rectangles) more likely
