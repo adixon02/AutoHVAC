@@ -19,9 +19,9 @@ from .schema import RawGeometry
 logger = logging.getLogger(__name__)
 
 # Complexity limits for multi-page processing
-MAX_ELEMENTS_PER_PAGE = 20000
-MAX_LINES_PER_PAGE = 15000
-MAX_RECTANGLES_PER_PAGE = 5000
+MAX_ELEMENTS_PER_PAGE = 100000  # Increased to handle complex floor plans
+MAX_LINES_PER_PAGE = 50000  # Increased proportionally
+MAX_RECTANGLES_PER_PAGE = 10000  # Increased proportionally
 
 
 class GeometryParserTimeout(Exception):

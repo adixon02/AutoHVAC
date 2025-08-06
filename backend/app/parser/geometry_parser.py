@@ -14,6 +14,7 @@ from typing import Dict, List, Any, Optional, Tuple
 import re
 from .schema import RawGeometry
 from .scale_detector import ScaleDetector, ScaleResult
+from .multi_page_scale_detector import MultiPageScaleDetector
 from .exceptions import ScaleDetectionError
 from services.pdf_thread_manager import safe_pdfplumber_operation, safe_pymupdf_operation
 
@@ -34,6 +35,8 @@ class GeometryParser:
     def __init__(self):
         # Initialize scale detector
         self.scale_detector = ScaleDetector(dpi=72.0)  # Standard PDF DPI
+        # Initialize multi-page scale detector for better accuracy
+        self.multi_page_scale_detector = MultiPageScaleDetector()
         # Initialize OCR extractor if available
         self.ocr_extractor = OCRExtractor(use_gpu=False) if PADDLEOCR_AVAILABLE else None
         

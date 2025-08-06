@@ -13,7 +13,7 @@ import re
 logger = logging.getLogger(__name__)
 
 # Maximum elements per page before rejecting as too complex
-MAX_ELEMENTS_PER_PAGE = 20000
+MAX_ELEMENTS_PER_PAGE = 100000  # Increased to handle complex floor plans
 
 # Room type keywords for scoring
 ROOM_KEYWORDS = [
@@ -151,19 +151,28 @@ class PDFPageAnalyzer:
         try:
             # Quick complexity check - count drawing elements
             drawings = page.get_drawings()
-            if len(drawings) > MAX_ELEMENTS_PER_PAGE:
-                logger.warning(f"Page {page_num + 1} has {len(drawings)} elements, exceeding limit of {MAX_ELEMENTS_PER_PAGE}")
-                return PageAnalysis(
-                    page_number=page_num + 1,
-                    score=0.0,
-                    rectangle_count=0,
-                    room_label_count=0,
-                    dimension_count=0,
-                    text_element_count=0,
-                    geometric_complexity=len(drawings),
-                    processing_time=0.0,
-                    too_complex=True
-                )
+            element_count = len(drawings)
+            
+            # Progressive complexity handling - don't reject complex pages outright
+            if element_count > MAX_ELEMENTS_PER_PAGE:
+                logger.warning(f"Page {page_num + 1} has {element_count} elements, exceeding soft limit of {MAX_ELEMENTS_PER_PAGE}")
+                # Mark as complex but still try to process if it's likely a floor plan
+                # Only hard reject if it's way over limit (>200k elements)
+                if element_count > 200000:
+                    logger.error(f"Page {page_num + 1} has {element_count} elements - too complex to process")
+                    return PageAnalysis(
+                        page_number=page_num + 1,
+                        score=0.0,
+                        rectangle_count=0,
+                        room_label_count=0,
+                        dimension_count=0,
+                        text_element_count=0,
+                        geometric_complexity=element_count,
+                        processing_time=0.0,
+                        too_complex=True
+                    )
+                # Otherwise, continue processing but note the complexity
+                logger.info(f"Processing complex page {page_num + 1} despite high element count")
             
             # Extract text for analysis
             text_content = page.get_text()
@@ -281,13 +290,15 @@ class PDFPageAnalyzer:
         # Dimensions: +3 points per dimension, up to 30 points
         score += min(dimensions * 3, 30)
         
-        # Geometric complexity bonus (moderate complexity is good for floor plans)
-        if 50 <= total_drawings <= 2000:
-            score += 15  # Sweet spot for floor plan complexity
+        # Geometric complexity bonus (moderate to high complexity often indicates detailed floor plans)
+        if 50 <= total_drawings <= 5000:
+            score += 20  # Good range for floor plans
+        elif 5000 < total_drawings <= 50000:
+            score += 15  # Complex but likely still a detailed floor plan
         elif 20 <= total_drawings < 50:
             score += 10  # Acceptable but simple
-        elif total_drawings > 2000:
-            score -= 10  # Penalize overly complex pages
+        elif total_drawings > 50000:
+            score += 5   # Very complex, but could still be main floor plan
         
         # Text density bonus (floor plans should have some text but not be document pages)
         if 10 <= text_words <= 200:
@@ -314,23 +325,42 @@ class PDFPageAnalyzer:
         Raises:
             ValueError: If no suitable pages found
         """
-        # Filter out pages with errors or too complex
-        valid_analyses = [a for a in analyses if not a.error and not a.too_complex]
+        # First, try pages that aren't marked as errors
+        non_error_analyses = [a for a in analyses if not a.error]
         
-        if not valid_analyses:
-            # If all pages failed, try to find the least problematic one
-            if analyses:
-                # Return first page as fallback
-                logger.warning("No valid pages found, using page 1 as fallback")
-                analyses[0].selected = True
-                return 1
+        if not non_error_analyses:
+            # If all pages have errors, use all for consideration
+            non_error_analyses = analyses
+            logger.warning("All pages have errors, considering all for selection")
+        
+        # Sort ALL pages by score first (including complex ones)
+        # Complex pages might still be the best floor plans
+        all_sorted = sorted(non_error_analyses, key=lambda x: x.score, reverse=True)
+        
+        # Check if a "complex" page has significantly better score
+        if all_sorted:
+            best_overall = all_sorted[0]
+            
+            # Filter to non-complex pages
+            simple_pages = [a for a in non_error_analyses if not a.too_complex]
+            
+            if simple_pages:
+                best_simple = max(simple_pages, key=lambda x: x.score)
+                
+                # If complex page has much better score (2x or more), use it
+                # This handles cases where main floor plans are complex but important
+                if best_overall.too_complex and best_overall.score > best_simple.score * 1.5:
+                    logger.info(f"Selecting complex page {best_overall.page_number} with score {best_overall.score} "
+                              f"over simpler page {best_simple.page_number} with score {best_simple.score}")
+                    best_analysis = best_overall
+                else:
+                    best_analysis = best_simple
             else:
-                raise ValueError("No pages could be analyzed")
-        
-        # Sort by score (highest first)
-        valid_analyses.sort(key=lambda x: x.score, reverse=True)
-        
-        best_analysis = valid_analyses[0]
+                # All pages are complex, use the best one
+                logger.warning("All pages are complex, using highest scoring page")
+                best_analysis = best_overall
+        else:
+            raise ValueError("No pages could be analyzed")
         
         # Require minimum score threshold
         if best_analysis.score < 10:
@@ -338,6 +368,10 @@ class PDFPageAnalyzer:
         
         # Mark as selected
         best_analysis.selected = True
+        
+        logger.info(f"Selected page {best_analysis.page_number} with score {best_analysis.score}, "
+                   f"complex={best_analysis.too_complex}, rectangles={best_analysis.rectangle_count}, "
+                   f"room_labels={best_analysis.room_label_count}")
         
         return best_analysis.page_number
     
