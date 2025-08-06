@@ -21,6 +21,7 @@ import numpy as np
 from io import BytesIO
 from .schema import RawText
 from services.pdf_thread_manager import safe_pdfplumber_operation, safe_pymupdf_operation
+from utils.memory_monitor import MemoryMonitor, monitor_memory
 
 logger = logging.getLogger(__name__)
 
@@ -142,23 +143,31 @@ class TextParser:
                 logger.info(f"[Thread {thread_name}:{thread_id}] Extracting words from pdfplumber page object")
                 
                 try:
-                    # Smart text extraction with limits for performance
-                    MAX_WORDS = 1000  # Sufficient for any blueprint
-                    BATCH_SIZE = 100  # Process in batches for progress tracking
+                    # Smart text extraction with memory monitoring
+                    # With 1.5GB memory limit, we can handle large PDFs safely
+                    BATCH_SIZE = 500  # Process in larger batches for efficiency
+                    
+                    # Initialize memory monitor for this extraction
+                    memory_monitor = MemoryMonitor()
+                    initial_memory = memory_monitor.get_memory_usage_mb()
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Starting word extraction, memory: {initial_memory:.1f}MB")
                     
                     raw_words = page.extract_words()
                     total_found = len(raw_words)
                     logger.info(f"[Thread {thread_name}:{thread_id}] Found {total_found} raw words from pdfplumber")
                     
-                    # Limit processing for performance
-                    words_to_process = min(total_found, MAX_WORDS)
-                    if total_found > MAX_WORDS:
-                        logger.info(f"[Thread {thread_name}:{thread_id}] Limiting to {MAX_WORDS} words for performance (found {total_found})")
+                    # Process ALL words for maximum accuracy (we have 1.5GB memory)
+                    words_to_process = total_found
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Processing all {total_found} words for maximum accuracy")
                     
-                    # Process words in batches with progress tracking
-                    for i, word in enumerate(raw_words[:words_to_process]):
+                    # Process words in batches with memory monitoring
+                    for i, word in enumerate(raw_words):
                         if i % BATCH_SIZE == 0 and i > 0:
-                            logger.debug(f"[Thread {thread_name}:{thread_id}] Processed {i}/{words_to_process} words")
+                            # Check memory every batch
+                            if not memory_monitor.check_memory_circuit_breaker():
+                                logger.warning(f"[Thread {thread_name}:{thread_id}] Memory limit approaching, processed {i}/{total_found} words")
+                                break
+                            logger.debug(f"[Thread {thread_name}:{thread_id}] Processed {i}/{words_to_process} words, memory: {memory_monitor.get_memory_usage_mb():.1f}MB")
                         
                         # Extract essential attributes for HVAC calculations
                         height = float(word['bottom'] - word['top'])
@@ -175,7 +184,11 @@ class TextParser:
                             'source': 'pdfplumber'
                         })
                     
+                    # Log final memory stats
+                    final_memory = memory_monitor.get_memory_usage_mb()
+                    memory_increase = final_memory - initial_memory
                     logger.info(f"[Thread {thread_name}:{thread_id}] Successfully processed {len(words)} words")
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Memory usage: {initial_memory:.1f}MB -> {final_memory:.1f}MB (increase: {memory_increase:.1f}MB)")
                         
                 except Exception as e:
                     error_str = str(e).lower()

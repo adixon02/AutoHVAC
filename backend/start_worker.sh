@@ -9,7 +9,7 @@ celery -A tasks.calculate_hvac_loads worker \
   --loglevel=info \
   --concurrency=2 \
   --max-tasks-per-child=50 \
-  --max-memory-per-child=512000 \
+  --max-memory-per-child=1536000 \
   --time-limit=1800 \
   --soft-time-limit=1740 \
   --without-gossip \

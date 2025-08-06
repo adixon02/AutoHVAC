@@ -17,6 +17,7 @@ from .scale_detector import ScaleDetector, ScaleResult
 from .multi_page_scale_detector import MultiPageScaleDetector
 from .exceptions import ScaleDetectionError
 from .smart_drawing_extractor import smart_extractor
+from .optimized_scale_detector import OptimizedScaleDetector, extract_scale_quickly
 from services.pdf_thread_manager import safe_pdfplumber_operation, safe_pymupdf_operation
 
 # Try to import OCR extractor for better text extraction
@@ -36,6 +37,8 @@ class GeometryParser:
     def __init__(self):
         # Initialize scale detector
         self.scale_detector = ScaleDetector(dpi=72.0)  # Standard PDF DPI
+        # Initialize optimized scale detector for fast text-based detection
+        self.optimized_scale_detector = OptimizedScaleDetector(dpi=72.0)
         # Initialize multi-page scale detector for better accuracy
         self.multi_page_scale_detector = MultiPageScaleDetector()
         # Initialize OCR extractor if available
@@ -110,91 +113,119 @@ class GeometryParser:
                 scale_result = None
                 
                 try:
-                    # Extract text elements for scale detection
-                    # Use PaddleOCR if available for better accuracy
-                    if self.ocr_extractor and PADDLEOCR_AVAILABLE:
-                        logger.info(f"[Thread {thread_name}:{thread_id}] Using PaddleOCR for text extraction")
-                        # Render page as image for OCR
-                        import fitz
-                        import numpy as np
-                        from PIL import Image
-                        from io import BytesIO
-                        import cv2
+                    # OPTIMIZATION: Try fast text-based scale detection first
+                    quick_scale_success = False
+                    try:
+                        logger.info(f"[Thread {thread_name}:{thread_id}] Attempting optimized text-based scale detection...")
+                        page_text = page.extract_text()  # Much faster than extract_words()
                         
-                        # Convert page to image
-                        mat = fitz.Matrix(2, 2)  # 2x zoom for better OCR
-                        pix = page.page.get_pixmap(matrix=mat) if hasattr(page, 'page') else None
-                        if pix:
-                            img_data = pix.tobytes("ppm")
-                            img = Image.open(BytesIO(img_data))
-                            img_array = np.array(img)
-                            # Convert RGB to BGR for OpenCV/PaddleOCR
-                            if len(img_array.shape) == 3 and img_array.shape[2] == 3:
-                                img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+                        if page_text:
+                            quick_result = self.optimized_scale_detector.detect_scale_from_text(page_text)
                             
-                            # Extract text with PaddleOCR
-                            text_regions = self.ocr_extractor.extract_all_text(img_array)
+                            if quick_result and quick_result.confidence >= 0.85:
+                                # High confidence text-based detection - use it directly
+                                logger.info(f"[Thread {thread_name}:{thread_id}] Fast scale detection successful: {quick_result.scale_factor:.1f} px/ft (confidence: {quick_result.confidence:.2f})")
+                                scale_factor = quick_result.scale_factor
+                                scale_result = ScaleResult(
+                                    scale_factor=quick_result.scale_factor,
+                                    confidence=quick_result.confidence,
+                                    detection_method=f"optimized_{quick_result.detection_method}",
+                                    validation_results={'text_based': True, 'optimized': True},
+                                    alternative_scales=[]
+                                )
+                                quick_scale_success = True
+                                logger.info(f"[Thread {thread_name}:{thread_id}] Using optimized scale, skipping expensive word extraction")
+                                
+                    except Exception as e:
+                        logger.debug(f"[Thread {thread_name}:{thread_id}] Fast scale detection failed: {e}")
+                    
+                    # Only do expensive extraction if quick detection failed or had low confidence
+                    if not quick_scale_success:
+                        # Extract text elements for scale detection
+                        # Use PaddleOCR if available for better accuracy
+                        if self.ocr_extractor and PADDLEOCR_AVAILABLE:
+                            logger.info(f"[Thread {thread_name}:{thread_id}] Using PaddleOCR for text extraction")
+                            # Render page as image for OCR
+                            import fitz
+                            import numpy as np
+                            from PIL import Image
+                            from io import BytesIO
+                            import cv2
                             
-                            # Convert to text elements format
-                            text_elements = []
-                            for region in text_regions:
-                                if region.text.strip() and region.confidence > 0.3:
-                                    bbox = region.bbox
-                                    x = float(min(point[0] for point in bbox)) / 2  # Adjust for 2x zoom
-                                    y = float(min(point[1] for point in bbox)) / 2
-                                    text_elements.append({
-                                        'text': region.text.strip(),
-                                        'x0': x,
-                                        'top': y,
-                                        'confidence': region.confidence,
-                                        'source': 'paddleocr'
-                                    })
-                            logger.info(f"[Thread {thread_name}:{thread_id}] PaddleOCR extracted {len(text_elements)} text elements")
+                            # Convert page to image
+                            mat = fitz.Matrix(2, 2)  # 2x zoom for better OCR
+                            pix = page.page.get_pixmap(matrix=mat) if hasattr(page, 'page') else None
+                            if pix:
+                                img_data = pix.tobytes("ppm")
+                                img = Image.open(BytesIO(img_data))
+                                img_array = np.array(img)
+                                # Convert RGB to BGR for OpenCV/PaddleOCR
+                                if len(img_array.shape) == 3 and img_array.shape[2] == 3:
+                                    img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+                                
+                                # Extract text with PaddleOCR
+                                text_regions = self.ocr_extractor.extract_all_text(img_array)
+                                
+                                # Convert to text elements format
+                                text_elements = []
+                                for region in text_regions:
+                                    if region.text.strip() and region.confidence > 0.3:
+                                        bbox = region.bbox
+                                        x = float(min(point[0] for point in bbox)) / 2  # Adjust for 2x zoom
+                                        y = float(min(point[1] for point in bbox)) / 2
+                                        text_elements.append({
+                                            'text': region.text.strip(),
+                                            'x0': x,
+                                            'top': y,
+                                            'confidence': region.confidence,
+                                            'source': 'paddleocr'
+                                        })
+                                logger.info(f"[Thread {thread_name}:{thread_id}] PaddleOCR extracted {len(text_elements)} text elements")
+                            else:
+                                # Fallback to pdfplumber
+                                logger.warning(f"[Thread {thread_name}:{thread_id}] Failed to render page for OCR, using pdfplumber")
+                                words = page.extract_words()
+                                text_elements = [{'text': w['text'], 'x0': w.get('x0', 0), 'top': w.get('top', 0)} for w in words]
                         else:
-                            # Fallback to pdfplumber
-                            logger.warning(f"[Thread {thread_name}:{thread_id}] Failed to render page for OCR, using pdfplumber")
+                            # Use pdfplumber text extraction
+                            logger.info(f"[Thread {thread_name}:{thread_id}] Using pdfplumber for text extraction (PaddleOCR not available)")
                             words = page.extract_words()
                             text_elements = [{'text': w['text'], 'x0': w.get('x0', 0), 'top': w.get('top', 0)} for w in words]
-                    else:
-                        # Use pdfplumber text extraction
-                        logger.info(f"[Thread {thread_name}:{thread_id}] Using pdfplumber for text extraction (PaddleOCR not available)")
-                        words = page.extract_words()
-                        text_elements = [{'text': w['text'], 'x0': w.get('x0', 0), 'top': w.get('top', 0)} for w in words]
-                    
-                    # Extract dimensions (look for patterns like "12'-0"")
-                    dimensions = []
-                    dimension_pattern = r"(\d+)['\s]*-?\s*(\d+)?[\"\s]*"
-                    for element in text_elements:
-                        if re.search(dimension_pattern, element['text']):
-                            dimensions.append({
-                                'dimension_text': element['text'],
-                                'x0': element.get('x0', 0),
-                                'top': element.get('top', 0),
-                                'parsed_dimensions': self._parse_dimension_text(element['text'])
-                            })
-                    
-                    # We'll get rectangles and lines later, but pass empty for initial detection
-                    # This allows text-based detection to work first
-                    scale_result = self.scale_detector.detect_scale(
-                        text_elements=text_elements,
-                        dimensions=dimensions,
-                        rectangles=[],  # Will be filled after we extract them
-                        lines=[],  # Will be filled after we extract them
-                        page_width=page_width,
-                        page_height=page_height
-                    )
-                    
-                    scale_factor = scale_result.scale_factor
-                    logger.info(f"[Thread {thread_name}:{thread_id}] Scale detection result:")
-                    logger.info(f"[Thread {thread_name}:{thread_id}]   Scale: {scale_factor:.1f} px/ft")
-                    logger.info(f"[Thread {thread_name}:{thread_id}]   Confidence: {scale_result.confidence:.2f}")
-                    logger.info(f"[Thread {thread_name}:{thread_id}]   Method: {scale_result.detection_method}")
-                    logger.info(f"[Thread {thread_name}:{thread_id}]   Validation: {scale_result.validation_results}")
-                    
-                    # Check if confidence is too low and raise exception if needed
-                    if scale_result.confidence < 0.5:
-                        logger.warning(f"[Thread {thread_name}:{thread_id}] Scale detection confidence too low: {scale_result.confidence:.2f}")
-                        # We'll raise this after extracting geometry to provide more context
+                        
+                        # Extract dimensions (look for patterns like "12'-0"")
+                        dimensions = []
+                        dimension_pattern = r"(\d+)['\s]*-?\s*(\d+)?[\"\s]*"
+                        for element in text_elements:
+                            if re.search(dimension_pattern, element['text']):
+                                dimensions.append({
+                                    'dimension_text': element['text'],
+                                    'x0': element.get('x0', 0),
+                                    'top': element.get('top', 0),
+                                    'parsed_dimensions': self._parse_dimension_text(element['text'])
+                                })
+                        
+                        # We'll get rectangles and lines later, but pass empty for initial detection
+                        # This allows text-based detection to work first
+                        scale_result = self.scale_detector.detect_scale(
+                            text_elements=text_elements,
+                            dimensions=dimensions,
+                            rectangles=[],  # Will be filled after we extract them
+                            lines=[],  # Will be filled after we extract them
+                            page_width=page_width,
+                            page_height=page_height
+                        )
+                        
+                        scale_factor = scale_result.scale_factor
+                        logger.info(f"[Thread {thread_name}:{thread_id}] Scale detection result:")
+                        logger.info(f"[Thread {thread_name}:{thread_id}]   Scale: {scale_factor:.1f} px/ft")
+                        logger.info(f"[Thread {thread_name}:{thread_id}]   Confidence: {scale_result.confidence:.2f}")
+                        logger.info(f"[Thread {thread_name}:{thread_id}]   Method: {scale_result.detection_method}")
+                        logger.info(f"[Thread {thread_name}:{thread_id}]   Validation: {scale_result.validation_results}")
+                        
+                        # Check if confidence is too low and raise exception if needed
+                        if scale_result.confidence < 0.5:
+                            logger.warning(f"[Thread {thread_name}:{thread_id}] Scale detection confidence too low: {scale_result.confidence:.2f}")
+                            # We'll raise this after extracting geometry to provide more context
                         
                 except Exception as e:
                     logger.warning(f"[Thread {thread_name}:{thread_id}] Robust scale detection failed: {e}")
