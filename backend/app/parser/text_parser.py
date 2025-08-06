@@ -48,7 +48,64 @@ class TextParser:
     
     # Removed _retry_on_document_closed - now using thread-safe PDF manager
     
-    def parse(self, pdf_path: str, page_number: int = 0) -> RawText:
+    def extract_text_near_rectangles(self, pdf_path: str, page_number: int, rectangles: List[Dict]) -> List[Dict]:
+        """
+        Extract text prioritizing areas near room rectangles
+        Used for faster, more accurate room label detection
+        """
+        words = []
+        
+        try:
+            import pdfplumber
+            with pdfplumber.open(pdf_path) as pdf:
+                if page_number >= len(pdf.pages):
+                    return words
+                    
+                page = pdf.pages[page_number]
+                
+                # Extract text near each rectangle center (likely room labels)
+                for rect in rectangles[:20]:  # Focus on first 20 rectangles
+                    if 'x0' in rect and 'x1' in rect and 'y0' in rect and 'y1' in rect:
+                        center_x = (rect['x0'] + rect['x1']) / 2
+                        center_y = (rect['y0'] + rect['y1']) / 2
+                        
+                        # Define search area around rectangle center
+                        search_bbox = (
+                            max(0, center_x - 100),
+                            max(0, center_y - 50),
+                            min(page.width, center_x + 100),
+                            min(page.height, center_y + 50)
+                        )
+                        
+                        try:
+                            # Extract words in this region
+                            region_words = page.within_bbox(search_bbox).extract_words()
+                            
+                            # Add first 5 words from this region
+                            for word in region_words[:5]:
+                                words.append({
+                                    'text': str(word['text']),
+                                    'x0': float(word['x0']),
+                                    'top': float(word['top']),
+                                    'x1': float(word['x1']),
+                                    'bottom': float(word['bottom']),
+                                    'source': 'spatial'
+                                })
+                                
+                                if len(words) >= 200:  # Limit total words
+                                    break
+                        except:
+                            continue
+                    
+                    if len(words) >= 200:
+                        break
+                        
+        except Exception as e:
+            logger.warning(f"Spatial text extraction failed: {e}")
+            
+        return words
+    
+    def parse(self, pdf_path: str, page_number: int = 0, rectangles: List[Dict] = None) -> RawText:
         """
         Extract text elements from architectural PDF using thread-safe operations
         
@@ -85,10 +142,25 @@ class TextParser:
                 logger.info(f"[Thread {thread_name}:{thread_id}] Extracting words from pdfplumber page object")
                 
                 try:
-                    raw_words = page.extract_words()
-                    logger.info(f"[Thread {thread_name}:{thread_id}] Found {len(raw_words)} raw words from pdfplumber")
+                    # Smart text extraction with limits for performance
+                    MAX_WORDS = 1000  # Sufficient for any blueprint
+                    BATCH_SIZE = 100  # Process in batches for progress tracking
                     
-                    for word in raw_words:
+                    raw_words = page.extract_words()
+                    total_found = len(raw_words)
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Found {total_found} raw words from pdfplumber")
+                    
+                    # Limit processing for performance
+                    words_to_process = min(total_found, MAX_WORDS)
+                    if total_found > MAX_WORDS:
+                        logger.info(f"[Thread {thread_name}:{thread_id}] Limiting to {MAX_WORDS} words for performance (found {total_found})")
+                    
+                    # Process words in batches with progress tracking
+                    for i, word in enumerate(raw_words[:words_to_process]):
+                        if i % BATCH_SIZE == 0 and i > 0:
+                            logger.debug(f"[Thread {thread_name}:{thread_id}] Processed {i}/{words_to_process} words")
+                        
+                        # Only extract essential attributes for HVAC calculations
                         words.append({
                             'text': str(word['text']),
                             'x0': float(word['x0']),
@@ -97,10 +169,11 @@ class TextParser:
                             'bottom': float(word['bottom']),
                             'width': float(word['x1'] - word['x0']),
                             'height': float(word['bottom'] - word['top']),
-                            'size': float(word.get('size', 12)),
-                            'font': word.get('fontname', ''),
+                            # Skip non-essential attributes like font, size for performance
                             'source': 'pdfplumber'
                         })
+                    
+                    logger.info(f"[Thread {thread_name}:{thread_id}] Successfully processed {len(words)} words")
                         
                 except Exception as e:
                     error_str = str(e).lower()
