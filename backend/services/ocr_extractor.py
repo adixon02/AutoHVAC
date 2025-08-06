@@ -53,12 +53,17 @@ class OCRExtractor:
         if PADDLEOCR_AVAILABLE:
             try:
                 # Initialize PaddleOCR with minimal parameters
-                # Note: PaddleOCR 3.1.0 has changed API - use_gpu and show_log are no longer valid
-                self.ocr = PaddleOCR(
-                    use_angle_cls=True,  # Enable text angle classification
-                    lang='en'
-                )
-                logger.info("PaddleOCR initialized successfully - enhanced blueprint parsing enabled")
+                # Note: Compatibility issues with some PaddlePaddle versions
+                # Temporarily disabled in production until version compatibility is resolved
+                logger.warning("PaddleOCR temporarily disabled due to compatibility issues")
+                logger.warning("Using GPT-4V for text extraction (may be less accurate for scale detection)")
+                self.ocr = None
+                # Uncomment when PaddleOCR compatibility is fixed:
+                # self.ocr = PaddleOCR(
+                #     use_angle_cls=True,  # Enable text angle classification
+                #     lang='en'
+                # )
+                # logger.info("PaddleOCR initialized successfully - enhanced blueprint parsing enabled")
             except Exception as e:
                 logger.warning(f"PaddleOCR initialization failed (will use GPT-4V only): {str(e)}")
                 self.ocr = None
