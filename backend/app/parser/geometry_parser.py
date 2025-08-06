@@ -16,6 +16,7 @@ from .schema import RawGeometry
 from .scale_detector import ScaleDetector, ScaleResult
 from .multi_page_scale_detector import MultiPageScaleDetector
 from .exceptions import ScaleDetectionError
+from .smart_drawing_extractor import smart_extractor
 from services.pdf_thread_manager import safe_pdfplumber_operation, safe_pymupdf_operation
 
 # Try to import OCR extractor for better text extraction
@@ -53,11 +54,11 @@ class GeometryParser:
             r'1\s*:\s*(\d+)',                  # 1:48
         ]
         
-        # Defensive limits to prevent infinite processing
-        self.MAX_LINES = 10000
-        self.MAX_RECTANGLES = 5000
-        self.MAX_POLYLINES = 2000
-        self.MAX_DRAWING_ITEMS = 1000
+        # Increased limits - smart extractor handles timeouts properly
+        self.MAX_LINES = 50000  # Increased from 10000
+        self.MAX_RECTANGLES = 10000  # Increased from 5000  
+        self.MAX_POLYLINES = 10000  # Increased from 2000
+        self.MAX_DRAWING_ITEMS = 5000  # Increased from 1000
     
     # Removed _retry_on_document_closed - now using thread-safe PDF manager
     
@@ -374,11 +375,40 @@ class GeometryParser:
                 max_retries=2
             )
             
-            # Extract polylines using thread-safe PyMuPDF operation
-            logger.info(f"[Thread {thread_name}:{thread_id}] Extracting polylines with PyMuPDF...")
+            # Extract polylines using smart extractor with progressive degradation
+            logger.info(f"[Thread {thread_name}:{thread_id}] Extracting polylines with smart extractor...")
             poly_start = time.time()
-            polylines = self._extract_polylines_pymupdf_safe(pdf_path, page_number)
-            logger.info(f"[Thread {thread_name}:{thread_id}] Polyline extraction took {time.time() - poly_start:.2f}s, found {len(polylines)} polylines")
+            
+            # Use smart extractor that never blocks
+            extraction_result = smart_extractor.extract_drawings(pdf_path, page_number)
+            
+            # Convert to legacy polyline format
+            polylines = []
+            for polyline in extraction_result.polylines:
+                if len(polyline) >= 2:
+                    polylines.append({
+                        'points': polyline,
+                        'quality': extraction_result.quality_factor
+                    })
+            
+            # Also add drawings as simplified polylines if quality is low
+            if extraction_result.quality_factor < 0.5 and extraction_result.drawings:
+                for drawing in extraction_result.drawings[:100]:  # Limit to 100
+                    if 'bbox' in drawing:
+                        bbox = drawing['bbox']
+                        # Convert bbox to polyline
+                        polylines.append({
+                            'points': [
+                                (bbox[0], bbox[1]),
+                                (bbox[2], bbox[3])
+                            ],
+                            'quality': extraction_result.quality_factor,
+                            'type': 'bbox_fallback'
+                        })
+            
+            logger.info(f"[Thread {thread_name}:{thread_id}] Smart extraction took {time.time() - poly_start:.2f}s")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Method: {extraction_result.extraction_method}, Quality: {extraction_result.quality_factor}")
+            logger.info(f"[Thread {thread_name}:{thread_id}] Found {len(polylines)} polylines")
             
             # Compile final result
             result = RawGeometry(
