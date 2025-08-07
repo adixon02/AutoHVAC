@@ -56,6 +56,9 @@ class BlueprintParser:
         self.geometry_parser = GeometryParser()
         self.page_analyzer = PDFPageAnalyzer(timeout_per_page=30, max_pages=20)
         self.validator = BlueprintValidator()
+        self.min_quality_score = int(os.getenv('MIN_QUALITY_SCORE', '40'))
+        self.enable_fail_fast = os.getenv('FAIL_FAST', 'true').lower() == 'true'
+        self.default_scale_override = int(os.getenv('SCALE_OVERRIDE', '48'))  # 1/4"=1'
         
     def parse_pdf_to_json(
         self, 
@@ -754,9 +757,15 @@ class BlueprintParser:
         parsed_labels: List[ParsedLabel],
         parsed_dimensions: List[ParsedDimension],
         geometry_elements: List[GeometricElement],
-        parsing_metadata: ParsingMetadata
+        parsing_metadata: ParsingMetadata,
+        detected_scale: float = 48
     ) -> BlueprintSchema:
-        """Compile all parsed data into final BlueprintSchema"""
+        """Compile all parsed data into final BlueprintSchema with scale information"""
+        
+        # Add detected scale to raw geometry for downstream use
+        if isinstance(raw_geometry, dict):
+            raw_geometry['detected_scale'] = detected_scale
+            raw_geometry['scale_source'] = 'multi_method_voting'
         
         # Calculate totals
         total_area = sum(room.area for room in rooms)
@@ -1089,6 +1098,262 @@ class BlueprintParser:
             # Return rooms unchanged if enhancement fails
         
         return rooms
+    
+    def _extract_text_with_ocr(self, pdf_path: str, page_number: int, metadata: ParsingMetadata) -> tuple[Dict[str, Any], List[ParsedLabel], List[ParsedDimension]]:
+        """Extract text with OCR enhancement for better accuracy"""
+        try:
+            # First try standard text extraction
+            raw_text, parsed_labels, parsed_dimensions = self._extract_text(pdf_path, page_number, metadata)
+            
+            # Then enhance with OCR if available
+            try:
+                from services.ocr_extractor import ocr_extractor
+                if getattr(ocr_extractor, 'ocr', None):
+                    logger.info("Enhancing text extraction with OCR")
+                    
+                    # Convert PDF page to image for OCR
+                    import fitz  # PyMuPDF
+                    doc = fitz.open(pdf_path)
+                    page = doc[page_number]
+                    
+                    # Higher resolution for OCR
+                    mat = fitz.Matrix(2.0, 2.0)  # 2x zoom
+                    pix = page.get_pixmap(matrix=mat)
+                    img_data = pix.tobytes("png")
+                    doc.close()
+                    
+                    # Convert to numpy array
+                    import cv2
+                    import numpy as np
+                    nparr = np.frombuffer(img_data, np.uint8)
+                    img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    
+                    # Extract with OCR
+                    text_regions = ocr_extractor.extract_all_text(img_cv)
+                    dimensions = ocr_extractor.extract_dimensions(img_cv)
+                    room_labels = ocr_extractor.extract_room_labels(img_cv)
+                    scale_notation = ocr_extractor.extract_scale_notation(img_cv)
+                    
+                    # Add OCR results to raw_text
+                    if scale_notation:
+                        raw_text['ocr_scale'] = scale_notation
+                        logger.info(f"OCR detected scale: {scale_notation}")
+                    
+                    # Merge OCR dimensions with parsed dimensions
+                    for dim in dimensions:
+                        parsed_dim = ParsedDimension(
+                            text=dim.text,
+                            width_ft=dim.width_ft,
+                            length_ft=dim.length_ft,
+                            position=(0, 0),
+                            confidence=dim.confidence,
+                            dimension_type="ocr_extracted"
+                        )
+                        parsed_dimensions.append(parsed_dim)
+                    
+                    # Merge OCR room labels
+                    for label in room_labels:
+                        parsed_label = ParsedLabel(
+                            text=label.text,
+                            position=(0, 0),
+                            label_type="room",
+                            confidence=label.confidence,
+                            font_size=12
+                        )
+                        parsed_labels.append(parsed_label)
+                    
+                    metadata.text_confidence = max(metadata.text_confidence, 0.8)
+                    logger.info(f"OCR enhancement added {len(dimensions)} dimensions and {len(room_labels)} room labels")
+            
+            except Exception as e:
+                logger.warning(f"OCR enhancement failed: {e}")
+            
+            return raw_text, parsed_labels, parsed_dimensions
+            
+        except Exception as e:
+            logger.error(f"Text extraction with OCR failed: {e}")
+            return {}, [], []
+    
+    def _perform_room_detection_with_scale_voting(
+        self, 
+        raw_geometry: Dict[str, Any],
+        raw_text: Dict[str, Any],
+        parsed_dimensions: List[ParsedDimension],
+        zip_code: str,
+        metadata: ParsingMetadata
+    ) -> tuple[List[Room], float]:
+        """Perform room detection with multi-method scale validation"""
+        
+        # Method 1: Try AI analysis first
+        rooms = []
+        try:
+            rooms = self._perform_ai_analysis(raw_geometry, raw_text, zip_code, metadata)
+        except Exception as e:
+            logger.warning(f"AI analysis failed: {e}")
+            # Continue with traditional methods
+        
+        # Method 2: Traditional room detection as fallback
+        if not rooms or len(rooms) < 3:
+            logger.info("Using traditional room detection")
+            rooms = self._perform_traditional_room_detection(raw_geometry, raw_text, metadata)
+        
+        # Scale detection with voting
+        detected_scale = self._detect_scale_with_voting(
+            raw_geometry, raw_text, parsed_dimensions, rooms
+        )
+        
+        # Apply scale correction to rooms if needed
+        if detected_scale != 48:  # Default is 48 (1/4"=1')
+            scale_factor = detected_scale / 48.0
+            logger.info(f"Applying scale correction factor: {scale_factor:.2f}")
+            for room in rooms:
+                room.area *= scale_factor * scale_factor  # Area scales quadratically
+                dims = list(room.dimensions_ft)
+                room.dimensions_ft = (dims[0] * scale_factor, dims[1] * scale_factor)
+        
+        return rooms, detected_scale
+    
+    def _detect_scale_with_voting(
+        self,
+        raw_geometry: Dict[str, Any],
+        raw_text: Dict[str, Any],
+        parsed_dimensions: List[ParsedDimension],
+        rooms: List[Room]
+    ) -> float:
+        """Detect scale using multiple methods and vote on the result"""
+        votes = {}
+        
+        # Method 1: OCR-extracted scale (highest confidence)
+        ocr_scale = raw_text.get('ocr_scale')
+        if ocr_scale:
+            # Parse scale notation (e.g., "1/4\"=1'-0\"")
+            if "1/4" in ocr_scale:
+                votes[48] = 3  # 1/4" = 1' is 48 px/ft
+            elif "1/8" in ocr_scale:
+                votes[96] = 3  # 1/8" = 1' is 96 px/ft
+            elif "3/8" in ocr_scale:
+                votes[32] = 3  # 3/8" = 1' is 32 px/ft
+            logger.info(f"OCR scale detection: {ocr_scale} -> votes: {votes}")
+        
+        # Method 2: Geometry-based scale
+        if raw_geometry and 'scale_factor' in raw_geometry:
+            geom_scale = raw_geometry['scale_factor']
+            if geom_scale and geom_scale > 0:
+                votes[geom_scale] = votes.get(geom_scale, 0) + 2
+                logger.info(f"Geometry scale detection: {geom_scale}")
+        
+        # Method 3: Statistical validation from room sizes
+        if rooms:
+            room_areas = [room.area for room in rooms]
+            avg_area = sum(room_areas) / len(room_areas) if room_areas else 0
+            
+            # Check if room sizes are realistic
+            if 50 < avg_area < 400:  # Realistic room sizes
+                # Current scale is probably correct
+                votes[48] = votes.get(48, 0) + 1
+            elif avg_area < 10:  # Too small, scale might be wrong
+                votes[96] = votes.get(96, 0) + 1  # Try doubling
+            elif avg_area > 1000:  # Too large, scale might be wrong
+                votes[24] = votes.get(24, 0) + 1  # Try halving
+            
+            logger.info(f"Statistical validation: avg room size {avg_area:.1f} sqft")
+        
+        # Method 4: Check environment variable override
+        scale_override = os.getenv('SCALE_OVERRIDE')
+        if scale_override:
+            try:
+                override_value = int(scale_override)
+                votes[override_value] = 10  # Override has highest priority
+                logger.info(f"Scale override from environment: {override_value}")
+            except ValueError:
+                pass
+        
+        # Return scale with most votes, default to 48 (1/4"=1')
+        if votes:
+            winning_scale = max(votes, key=votes.get)
+            logger.info(f"Scale voting results: {votes} -> selected: {winning_scale}")
+            return float(winning_scale)
+        else:
+            logger.info(f"No scale detected, using default: {self.default_scale_override}")
+            return float(self.default_scale_override)
+    
+    def _apply_validation_gates(self, rooms: List[Room], detected_scale: float, metadata: ParsingMetadata):
+        """Apply strict validation gates with fail-fast logic"""
+        issues = []
+        
+        # Gate 1: Minimum room count
+        if len(rooms) < 3:
+            error_msg = f"Only {len(rooms)} rooms detected - minimum 3 required for HVAC calculations"
+            logger.error(error_msg)
+            if self.enable_fail_fast:
+                raise RoomDetectionFailedError(
+                    walls_found=0,
+                    polygons_found=len(rooms),
+                    confidence=0.2,
+                    message=error_msg
+                )
+            issues.append(error_msg)
+        
+        # Gate 2: Scale confidence
+        if detected_scale == 0 or detected_scale < 10 or detected_scale > 200:
+            error_msg = f"Invalid scale detected: {detected_scale} px/ft"
+            logger.error(error_msg)
+            if self.enable_fail_fast:
+                raise ScaleDetectionError(
+                    detected_scale=detected_scale,
+                    confidence=0.1,
+                    alternatives=[24, 48, 96],
+                    validation_issues=["Scale outside valid range"]
+                )
+            issues.append(error_msg)
+        
+        # Gate 3: Room size validation
+        if rooms:
+            total_area = sum(room.area for room in rooms)
+            avg_room_size = total_area / len(rooms)
+            
+            if avg_room_size < 30:
+                error_msg = f"Average room size {avg_room_size:.1f} sqft is unrealistically small"
+                logger.error(error_msg)
+                if self.enable_fail_fast:
+                    raise ScaleError(error_msg)
+                issues.append(error_msg)
+            
+            elif avg_room_size > 500:
+                error_msg = f"Average room size {avg_room_size:.1f} sqft is unrealistically large"
+                logger.error(error_msg)
+                if self.enable_fail_fast:
+                    raise ScaleError(error_msg)
+                issues.append(error_msg)
+        
+        # Gate 4: Total area validation
+        total_area = sum(room.area for room in rooms) if rooms else 0
+        if total_area < 500:
+            error_msg = f"Total area {total_area:.0f} sqft is too small for residential building"
+            logger.error(error_msg)
+            issues.append(error_msg)
+        
+        # Gate 5: Data quality score
+        if hasattr(metadata, 'data_quality_score') and metadata.data_quality_score is not None:
+            if metadata.data_quality_score < self.min_quality_score:
+                error_msg = f"Data quality score {metadata.data_quality_score:.0f} below minimum {self.min_quality_score}"
+                logger.error(error_msg)
+                if self.enable_fail_fast:
+                    raise LowConfidenceError(
+                        confidence=metadata.data_quality_score / 100,
+                        threshold=self.min_quality_score / 100,
+                        issues=[error_msg]
+                    )
+                issues.append(error_msg)
+        
+        # Log all issues
+        if issues:
+            logger.warning(f"Validation issues detected: {len(issues)}")
+            for issue in issues:
+                metadata.warnings.append(issue)
+        else:
+            logger.info("All validation gates passed successfully")
+    
 
 
 # Global instance

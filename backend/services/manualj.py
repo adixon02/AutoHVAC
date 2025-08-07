@@ -103,20 +103,20 @@ def _apply_thermal_bridging_factor(
             ("concrete", "floor"): 1.06,       # Balanced: 6% for concrete floor
         }
     else:
-        # MAINTAIN cooling factors for accuracy
+        # CALIBRATED cooling factors to reduce 27% overestimation
         bridging_factors = {
-            ("wood_frame", "wall"): 1.04,      # 4% for wood studs
-            ("wood_frame", "roof"): 1.06,      # 6% for roof trusses
-            ("wood_frame", "floor"): 1.04,     # 4% for floor joists
-            ("steel_frame", "wall"): 1.20,     # 20% for steel studs
-            ("steel_frame", "roof"): 1.16,     # 16% for steel trusses
-            ("steel_frame", "floor"): 1.12,    # 12% for steel joists
-            ("masonry", "wall"): 1.09,         # 9% for masonry ties
-            ("masonry", "roof"): 1.04,         # 4% for roof connections
-            ("masonry", "floor"): 1.03,        # 3% for floor connections
-            ("concrete", "wall"): 1.12,        # 12% for concrete bridges
-            ("concrete", "roof"): 1.08,        # 8% for concrete roof
-            ("concrete", "floor"): 1.08,       # 8% for concrete floor
+            ("wood_frame", "wall"): 1.02,      # Reduced from 1.04 (2% for wood studs)
+            ("wood_frame", "roof"): 1.04,      # Reduced from 1.06 (4% for roof trusses)
+            ("wood_frame", "floor"): 1.02,     # Reduced from 1.04 (2% for floor joists)
+            ("steel_frame", "wall"): 1.12,     # Reduced from 1.20 (12% for steel studs)
+            ("steel_frame", "roof"): 1.10,     # Reduced from 1.16 (10% for steel trusses)
+            ("steel_frame", "floor"): 1.08,    # Reduced from 1.12 (8% for steel joists)
+            ("masonry", "wall"): 1.06,         # Reduced from 1.09 (6% for masonry ties)
+            ("masonry", "roof"): 1.03,         # Reduced from 1.04 (3% for roof connections)
+            ("masonry", "floor"): 1.02,        # Reduced from 1.03 (2% for floor connections)
+            ("concrete", "wall"): 1.08,        # Reduced from 1.12 (8% for concrete bridges)
+            ("concrete", "roof"): 1.06,        # Reduced from 1.08 (6% for concrete roof)
+            ("concrete", "floor"): 1.06,       # Reduced from 1.08 (6% for concrete floor)
         }
     
     # Default to wood frame if construction type unknown
@@ -527,20 +527,20 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     people_load = calculate_internal_load_clf(people_count * 275, 'people')  # 275 BTU/hr per person sensible (increased activity)
     cooling_load += people_load
     
-    # Modern lighting load (mix of LED and decorative lighting)
-    # Adjusted to 1.9 W/sq ft for new construction with more accent lighting
-    lighting_load = calculate_internal_load_clf(room.area * 1.9 * 3.41, 'lighting')  # Convert W to BTU/hr
+    # CALIBRATED lighting load for LED-dominant homes
+    # Reduced from 1.9 to 1.5 W/sq ft (modern LED efficiency)
+    lighting_load = calculate_internal_load_clf(room.area * 1.5 * 3.41, 'lighting')  # Convert W to BTU/hr
     cooling_load += lighting_load
     
-    # Increased equipment loads for modern homes with more electronics
-    # New construction has more smart devices, chargers, and appliances
+    # CALIBRATED equipment loads for realistic residential usage
+    # Reduced to fix 27% cooling overestimation
     equipment_loads = {
-        'kitchen': room.area * 5.2,  # Modern appliances: induction cooking, smart fridge, dishwasher
-        'office': room.area * 3.5,   # Work-from-home: multiple monitors, computers, printers
-        'living': room.area * 1.8,   # Large TVs, gaming systems, streaming devices
-        'bedroom': room.area * 1.3,  # TVs, chargers, smart devices, fans
-        'bathroom': room.area * 2.2, # Hair dryers, heated floors, smart mirrors
-        'other': room.area * 1.2     # General smart home devices and chargers
+        'kitchen': room.area * 3.5,  # Reduced from 5.2 (typical residential kitchen)
+        'office': room.area * 2.5,   # Reduced from 3.5 (home office, not commercial)
+        'living': room.area * 1.5,   # Reduced from 1.8 (TV and entertainment)
+        'bedroom': room.area * 1.0,  # Reduced from 1.3 (minimal equipment)
+        'bathroom': room.area * 1.5, # Reduced from 2.2 (occasional use items)
+        'other': room.area * 1.0     # Reduced from 1.2 (general loads)
     }
     equipment_heat = equipment_loads.get(room_type, equipment_loads['other'])
     equipment_load = calculate_internal_load_clf(equipment_heat, 'equipment')

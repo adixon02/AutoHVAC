@@ -3,6 +3,7 @@ Geometry-based fallback parser for AutoHVAC
 Used when AI parsing fails to extract meaningful room data from blueprints
 """
 
+import os
 import logging
 from typing import List, Dict, Any, Tuple, Optional
 from uuid import uuid4, UUID
@@ -35,15 +36,21 @@ class GeometryFallbackParser:
     """
     
     def __init__(self):
-        # Room size thresholds (in square feet)
-        # Increased minimum to filter out artifacts/walls while keeping small rooms
-        self.MIN_ROOM_AREA = 25  # Minimum for small closets/pantries (was 10)
-        # Reduced maximum to better detect individual rooms vs entire floor
-        self.MAX_ROOM_AREA = 800  # Maximum for large residential rooms (was 1200)
+        # Dynamic room size thresholds based on scale
+        # These will be adjusted based on detected scale
+        self.base_min_room_area = 25  # Base minimum for small closets/pantries
+        self.base_max_room_area = 800  # Base maximum for large residential rooms
         self.TYPICAL_CEILING_HEIGHT = 9.0  # feet
+        
+        # Current thresholds (will be updated based on scale)
+        self.MIN_ROOM_AREA = self.base_min_room_area
+        self.MAX_ROOM_AREA = self.base_max_room_area
         
         # Track filtering statistics for debugging
         self.last_filter_stats = {}
+        
+        # Get scale override from environment
+        self.scale_override = int(os.getenv('SCALE_OVERRIDE', '48'))  # Default 1/4"=1'
         
         # Room type classification by area
         self.ROOM_SIZE_RANGES = {
@@ -59,6 +66,33 @@ class GeometryFallbackParser:
             'office': (80, 200),
         }
     
+    def _adjust_thresholds_for_scale(self, scale_factor: float):
+        """Adjust room size thresholds based on detected scale"""
+        if not scale_factor or scale_factor <= 0:
+            scale_factor = self.scale_override
+        
+        # Standard scale is 48 px/ft (1/4"=1')
+        # Adjust thresholds proportionally
+        scale_ratio = scale_factor / 48.0
+        
+        # Don't adjust if scale is within normal range
+        if 0.5 < scale_ratio < 2.0:
+            self.MIN_ROOM_AREA = self.base_min_room_area
+            self.MAX_ROOM_AREA = self.base_max_room_area
+        else:
+            # Adjust thresholds inversely to scale
+            # If scale is 2x larger, rooms appear 4x larger (area)
+            area_adjustment = 1.0 / (scale_ratio * scale_ratio)
+            self.MIN_ROOM_AREA = self.base_min_room_area * area_adjustment
+            self.MAX_ROOM_AREA = self.base_max_room_area * area_adjustment
+            
+            # Clamp to reasonable bounds
+            self.MIN_ROOM_AREA = max(10, min(100, self.MIN_ROOM_AREA))
+            self.MAX_ROOM_AREA = max(200, min(2000, self.MAX_ROOM_AREA))
+            
+            logger.info(f"Adjusted thresholds for scale {scale_factor:.1f} px/ft: "
+                       f"MIN={self.MIN_ROOM_AREA:.0f}, MAX={self.MAX_ROOM_AREA:.0f} sq ft")
+    
     def create_fallback_blueprint(
         self,
         raw_geo: RawGeometry,
@@ -66,7 +100,8 @@ class GeometryFallbackParser:
         zip_code: str,
         project_id: Optional[str] = None,
         metadata: Optional[ParsingMetadata] = None,
-        error_msg: str = ""
+        error_msg: str = "",
+        detected_scale: Optional[float] = None
     ) -> BlueprintSchema:
         """
         Create a blueprint from geometry when AI parsing fails
@@ -92,16 +127,20 @@ class GeometryFallbackParser:
         metadata.geometry_status = ParsingStatus.PARTIAL
         metadata.ai_status = ParsingStatus.FAILED
         
+        # Adjust thresholds based on detected scale
+        scale_factor = detected_scale or raw_geo.scale_factor if raw_geo else self.scale_override
+        self._adjust_thresholds_for_scale(scale_factor)
+        
         # First try polygon detection from wall lines
         rooms = []
         if raw_geo and raw_geo.lines and len(raw_geo.lines) > 10:
-            logger.info("Attempting polygon-based room detection from wall lines")
+            logger.info(f"Attempting polygon-based room detection from wall lines (scale: {scale_factor} px/ft)")
             try:
                 polygon_rooms = polygon_detector.detect_rooms(
                     lines=raw_geo.lines,
                     page_width=raw_geo.page_width,
                     page_height=raw_geo.page_height,
-                    scale_factor=raw_geo.scale_factor
+                    scale_factor=scale_factor
                 )
                 
                 if polygon_rooms:

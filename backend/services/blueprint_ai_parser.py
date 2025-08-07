@@ -63,6 +63,8 @@ class BlueprintAIParser:
         self.max_pages = 10  # Increased to ensure complete parsing
         self.min_resolution = 1024  # Increased minimum for better OCR
         self.max_resolution = 2048  # Cap maximum resolution to control size
+        self.ocr_dpi = 300  # Higher DPI for OCR accuracy
+        self.enable_ocr_enhancement = os.getenv('OCR_ENHANCEMENT', 'true').lower() == 'true'
         
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key or api_key == "your-openai-api-key-here" or api_key.strip() == "":
@@ -138,12 +140,13 @@ class BlueprintAIParser:
             parsing_metadata.pdf_page_count = len(images)
             logger.info(f"Converted PDF to {len(images)} images in {time.time() - step_start:.1f}s")
             
-            # Step 2: Preprocess and classify pages
-            logger.info("\n[STEP 2] Preprocessing and classifying pages...")
+            # Step 2: OCR-First Extraction and Page Classification
+            logger.info("\n[STEP 2] OCR-First Extraction and Page Classification...")
             step_start = time.time()
             preprocessed_images = []
             page_classifications = []
             ocr_results = []
+            ocr_contexts = []  # Store comprehensive OCR context for each page
             
             if ENHANCED_PARSING:
                 for idx, img_bytes in enumerate(images):
@@ -157,12 +160,21 @@ class BlueprintAIParser:
                     nparr = np.frombuffer(preprocessed, np.uint8)
                     img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                     
-                    # Extract text with OCR
+                    # CRITICAL: Extract comprehensive OCR context FIRST
                     ocr_start = time.time()
-                    text_regions = ocr_extractor.extract_all_text(img_cv) if getattr(ocr_extractor, 'ocr', None) else []
+                    ocr_context = self._extract_comprehensive_ocr_context(img_cv, idx + 1)
+                    ocr_contexts.append(ocr_context)
+                    
+                    # Store text regions for compatibility
+                    text_regions = ocr_context.get('text_regions', [])
                     ocr_text = [region.text for region in text_regions]
                     ocr_results.append(text_regions)
-                    logger.info(f"Page {idx + 1} OCR extraction: {time.time() - ocr_start:.1f}s, found {len(text_regions)} regions")
+                    
+                    logger.info(f"Page {idx + 1} OCR extraction: {time.time() - ocr_start:.1f}s")
+                    logger.info(f"  - Text regions: {len(text_regions)}")
+                    logger.info(f"  - Dimensions found: {len(ocr_context.get('dimensions', []))}")
+                    logger.info(f"  - Room labels: {len(ocr_context.get('room_labels', []))}")
+                    logger.info(f"  - Scale detected: {ocr_context.get('scale_notation', 'Not found')}")
                     
                     # Classify page
                     classification = page_classifier.classify_page(img_cv, ocr_text)
@@ -216,19 +228,20 @@ class BlueprintAIParser:
                         
                         logger.info(f"Trying page {page_idx + 1} ({len(preprocessed_images[page_idx])} bytes)")
                         
-                        # Pass OCR results to GPT-4V if available
+                        # Pass comprehensive OCR context to GPT-4V
                         ocr_data = None
-                        if ENHANCED_PARSING and page_idx < len(ocr_results) and ocr_results[page_idx]:
-                            # Extract dimensions from OCR
-                            dimensions = ocr_extractor.extract_dimensions_from_regions(ocr_results[page_idx])
-                            room_labels = [r for r in ocr_results[page_idx] if r.region_type == 'room_label']
-                            ocr_data = {
-                                'dimensions': dimensions,
-                                'room_labels': room_labels,
-                                'floor_level': page_classifications[page_idx].floor_level if page_idx < len(page_classifications) else None
-                            }
+                        if ENHANCED_PARSING and page_idx < len(ocr_contexts):
+                            ocr_data = ocr_contexts[page_idx]
+                            # Add floor level from classification
+                            if page_idx < len(page_classifications):
+                                ocr_data['floor_level'] = page_classifications[page_idx].floor_level
                         
-                        page_data = await self._extract_blueprint_data(preprocessed_images[page_idx], ocr_data=ocr_data)
+                        # Enhanced GPT-4V call with OCR context
+                        page_data = await self._extract_blueprint_data(
+                            preprocessed_images[page_idx], 
+                            ocr_data=ocr_data,
+                            page_num=page_idx + 1
+                        )
                         
                         # Check if this page has substantial content
                         if page_data and 'rooms' in page_data and len(page_data['rooms']) > 0:
@@ -389,7 +402,7 @@ class BlueprintAIParser:
             raise BlueprintAIParsingError(f"GPT-4V parsing failed: {str(e)}")
     
     def _convert_pdf_to_images(self, pdf_path: str) -> List[bytes]:
-        """Convert PDF pages to high-quality images using PyMuPDF (no poppler needed)"""
+        """Convert PDF pages to high-quality images with OCR-optimal resolution"""
         try:
             import fitz  # PyMuPDF
             
@@ -400,7 +413,7 @@ class BlueprintAIParser:
             if total_pages == 0:
                 raise BlueprintAIParsingError("PDF has no pages")
             
-            logger.info(f"Converting {total_pages} pages to images using PyMuPDF")
+            logger.info(f"Converting {total_pages} pages to images using PyMuPDF (OCR-enhanced mode)")
             
             # Limit pages to process
             last_page = min(self.max_pages, total_pages)
@@ -410,16 +423,19 @@ class BlueprintAIParser:
                 try:
                     page = doc[page_num]
                     
-                    # Optimized resolution - target higher quality for better OCR
-                    # Target ~1600-2000px on longest side for optimal GPT-4V text reading
+                    # CRITICAL: Higher resolution for OCR accuracy
+                    # OCR needs at least 300 DPI, target 2000-2500px for blueprints
                     page_rect = page.rect
                     max_dimension = max(page_rect.width, page_rect.height)
                     
-                    # Calculate optimal zoom to target 1500px on longest side (balance speed/accuracy)
-                    target_size = 1500  # Reduced for faster processing
+                    # Calculate zoom for OCR-optimal resolution (300 DPI equivalent)
+                    # Blueprints are typically 24"x36" or 30"x42"
+                    # At 300 DPI: 24" = 7200px, 36" = 10800px
+                    # We target 2500px for balance of quality and size
+                    target_size = 2500 if self.enable_ocr_enhancement else 1500
                     zoom_factor = target_size / max_dimension
-                    zoom_factor = min(zoom_factor, 2.5)  # Max 2.5x zoom (reduced from 3.0)
-                    zoom_factor = max(zoom_factor, 1.0)  # Don't downscale
+                    zoom_factor = min(zoom_factor, 3.0)  # Max 3x zoom for OCR
+                    zoom_factor = max(zoom_factor, 1.5)  # Min 1.5x for readability
                     
                     mat = fitz.Matrix(zoom_factor, zoom_factor)
                     logger.info(f"Page {page_num + 1}: Using {zoom_factor:.2f}x zoom (target: {target_size}px)")
@@ -586,6 +602,60 @@ class BlueprintAIParser:
             logger.error(f"Failed to enhance image for page {page_num}: {str(e)}")
             return image_bytes  # Return original on failure
     
+    def _extract_comprehensive_ocr_context(self, img_cv: np.ndarray, page_num: int) -> Dict[str, Any]:
+        """Extract comprehensive OCR context for GPT-4V enhancement"""
+        ocr_context = {
+            'text_regions': [],
+            'dimensions': [],
+            'room_labels': [],
+            'scale_notation': None,
+            'floor_label': None,
+            'total_text_confidence': 0.0,
+            'has_ocr': False
+        }
+        
+        try:
+            if not getattr(ocr_extractor, 'ocr', None):
+                logger.warning(f"Page {page_num}: OCR not available - GPT-4V will work without text assistance")
+                return ocr_context
+            
+            # Extract all text regions
+            text_regions = ocr_extractor.extract_all_text(img_cv)
+            ocr_context['text_regions'] = text_regions
+            ocr_context['has_ocr'] = len(text_regions) > 0
+            
+            if text_regions:
+                # Extract dimensions with high confidence
+                dimensions = ocr_extractor.extract_dimensions_from_regions(text_regions)
+                ocr_context['dimensions'] = dimensions
+                
+                # Extract room labels
+                room_labels = ocr_extractor.extract_room_labels(img_cv)
+                ocr_context['room_labels'] = room_labels
+                
+                # Extract scale notation - CRITICAL for accuracy
+                scale_notation = ocr_extractor.extract_scale_notation(img_cv)
+                ocr_context['scale_notation'] = scale_notation
+                
+                # Extract floor label
+                floor_label = ocr_extractor.extract_floor_label(img_cv)
+                ocr_context['floor_label'] = floor_label
+                
+                # Calculate average confidence
+                if text_regions:
+                    total_conf = sum(r.confidence for r in text_regions)
+                    ocr_context['total_text_confidence'] = total_conf / len(text_regions)
+                
+                logger.info(f"Page {page_num} OCR context extracted:")
+                logger.info(f"  - Scale: {scale_notation or 'Not detected'}")
+                logger.info(f"  - Floor: {floor_label or 'Not detected'}")
+                logger.info(f"  - Avg confidence: {ocr_context['total_text_confidence']:.2f}")
+        
+        except Exception as e:
+            logger.error(f"OCR context extraction failed for page {page_num}: {str(e)}")
+        
+        return ocr_context
+    
     def _preprocess_image_opencv(self, image_bytes: bytes, page_num: int) -> bytes:
         """Fast preprocessing for OCR and parsing - optimized for speed"""
         try:
@@ -620,7 +690,7 @@ class BlueprintAIParser:
             logger.error(f"Fast preprocessing failed for page {page_num}: {str(e)}")
             return image_bytes
     
-    async def _extract_blueprint_data(self, image_bytes: bytes, retry_count: int = 0, ocr_data: Dict = None) -> Dict[str, Any]:
+    async def _extract_blueprint_data(self, image_bytes: bytes, retry_count: int = 0, ocr_data: Dict = None, page_num: int = 1) -> Dict[str, Any]:
         """Extract blueprint data using GPT-4V with retry logic and OCR assistance"""
         # Check if API key is valid before attempting call
         if not self.api_key_valid or not self.client:
@@ -630,8 +700,8 @@ class BlueprintAIParser:
             # Encode image to base64
             image_base64 = base64.b64encode(image_bytes).decode('utf-8')
             
-            # Create the prompt
-            prompt = self._create_blueprint_prompt()
+            # Create enhanced prompt with OCR context
+            prompt = self._create_blueprint_prompt_with_ocr(ocr_data, page_num) if ocr_data and ocr_data.get('has_ocr') else self._create_blueprint_prompt()
             
             # Call GPT-4V (using gpt-4o which has vision capabilities)
             logger.info(f"Making GPT-4V API call with image size: {len(image_base64)} base64 chars")
@@ -733,6 +803,95 @@ class BlueprintAIParser:
         except Exception as e:
             raise BlueprintAIParsingError(f"GPT-4V API call failed: {str(e)}")
     
+    def _create_blueprint_prompt_with_ocr(self, ocr_data: Dict, page_num: int) -> str:
+        """Create enhanced prompt with OCR-extracted context for maximum accuracy"""
+        
+        # Format OCR-extracted data
+        scale_info = ocr_data.get('scale_notation', 'Not detected')
+        floor_info = ocr_data.get('floor_label', 'Not detected')
+        
+        # Format dimensions
+        dimensions_text = ""
+        if ocr_data.get('dimensions'):
+            dims_list = []
+            for dim in ocr_data['dimensions'][:20]:  # Limit to first 20
+                dims_list.append(f"  - {dim.text}: {dim.width_ft:.1f}' x {dim.length_ft:.1f}'")
+            dimensions_text = "\n".join(dims_list)
+        else:
+            dimensions_text = "  No dimensions detected by OCR"
+        
+        # Format room labels
+        room_labels_text = ""
+        if ocr_data.get('room_labels'):
+            labels_list = []
+            for label in ocr_data['room_labels'][:30]:  # Limit to first 30
+                labels_list.append(f"  - {label.text}")
+            room_labels_text = "\n".join(labels_list)
+        else:
+            room_labels_text = "  No room labels detected by OCR"
+        
+        return f"""You are analyzing a floor plan image (page {page_num}) for residential HVAC load calculations.
+
+OCR HAS ALREADY EXTRACTED THE FOLLOWING TEXT FROM THIS IMAGE:
+
+SCALE DETECTED: {scale_info}
+FLOOR LEVEL: {floor_info}
+
+DIMENSIONS FOUND BY OCR:
+{dimensions_text}
+
+ROOM LABELS FOUND BY OCR:
+{room_labels_text}
+
+INSTRUCTIONS:
+1. Use the OCR-extracted dimensions and room labels to guide your analysis
+2. The scale is: {scale_info if scale_info != 'Not detected' else '1/4"=1-0 (most common)'}
+3. Validate room boundaries visually and match them with OCR labels
+4. Calculate accurate square footage using the OCR dimensions
+5. If OCR dimensions seem wrong based on visual proportions, note this
+
+CRITICAL REQUIREMENTS:
+- Extract ALL rooms visible in the image
+- Use OCR dimensions when available, estimate if missing
+- Include closets, hallways, and utility spaces
+- Set floor=0 for basement, floor=1 for first/main, floor=2 for second
+- Current floor from OCR: {floor_info}
+
+RETURN JSON FORMAT:
+{{
+  "image_type": "floor_plan",
+  "scale_found": {str(scale_info != 'Not detected').lower()},
+  "scale_notation": "{scale_info}",
+  "scale_factor": 48,
+  "total_area": 0,
+  "stories": 1,
+  "floor_level": {1 if floor_info == 'Not detected' else 2 if 'second' in floor_info.lower() else 0 if 'basement' in floor_info.lower() else 1},
+  "floor_label": "{floor_info}",
+  "rooms": [
+    {{
+      "name": "Room Name from OCR or Visual",
+      "raw_dimensions": "width x height from OCR",
+      "dimensions_ft": [width, height],
+      "area": calculated_area,
+      "floor": {1 if floor_info == 'Not detected' else 2 if 'second' in floor_info.lower() else 0 if 'basement' in floor_info.lower() else 1},
+      "windows": count,
+      "exterior_walls": count,
+      "orientation": "N/S/E/W/etc",
+      "room_type": "bedroom/bathroom/kitchen/etc",
+      "confidence": 0.0-1.0,
+      "dimension_source": "ocr" or "estimated"
+    }}
+  ],
+  "verification": {{
+    "ocr_dimensions_used": {len(ocr_data.get('dimensions', []))},
+    "ocr_labels_matched": 0,
+    "room_count": 0,
+    "total_area_calculated": 0
+  }}
+}}
+
+Extract all rooms systematically. The OCR has given you the text - now match it to the visual floor plan."""
+
     def _create_blueprint_prompt(self) -> str:
         """Create optimized prompt for fast, accurate HVAC data extraction"""
         return """
