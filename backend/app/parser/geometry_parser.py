@@ -61,6 +61,13 @@ class GeometryParser:
         self.MAX_RECTANGLES = 10000  # Increased from 5000  
         self.MAX_POLYLINES = 10000  # Increased from 2000
         self.MAX_DRAWING_ITEMS = 5000  # Increased from 1000
+        
+        # Plausible architectural scales in px/ft for standard 72 DPI PDFs
+        # 1/8"=1' -> 24, 1/4"=1' -> 48, 1/2"=1' -> 96
+        self.PLAUSIBLE_SCALES = [96.0, 48.0, 24.0]
+        # Residential total area plausibility bounds (single plan page)
+        self.MIN_RES_AREA_SQFT = 600.0
+        self.MAX_RES_AREA_SQFT = 8000.0
     
     # Removed _retry_on_document_closed - now using thread-safe PDF manager
     
@@ -472,16 +479,18 @@ class GeometryParser:
                     try:
                         current_accept_count = len(rectangles)
                         low_confidence = (scale_result.confidence < 0.5) if scale_result else True
-                        if (low_confidence or current_accept_count == 0) and len(raw_rects) > 0:
+                        # Do not override a strong text/implicit detection
+                        strong_text_detection = bool(scale_result and str(scale_result.detection_method).startswith("optimized_") and scale_result.confidence >= 0.75)
+                        implicit_detection = bool(scale_result and "implicit" in str(scale_result.detection_method).lower() and scale_result.confidence >= 0.7)
+                        if (low_confidence or current_accept_count == 0) and not (strong_text_detection or implicit_detection) and len(raw_rects) > 0:
                             logger.warning(f"[Thread {thread_name}:{thread_id}] Low-confidence scale ({scale_result.confidence if scale_result else 'n/a'}). Evaluating alternative scales")
-                            candidate_scales = [48.0, 96.0, 24.0]
-                            # Include optimized detector adjusted scales if available
-                            for v in getattr(self.optimized_scale_detector, 'adjusted_scales', {}).values():
-                                if isinstance(v, (int, float)) and v not in candidate_scales:
-                                    candidate_scales.append(float(v))
+                            # Restrict to plausible architectural scales only
+                            candidate_scales = list(self.PLAUSIBLE_SCALES)
                             best_scale = scale_factor or 48.0
                             best_count = current_accept_count
                             best_rects = rectangles
+                            best_area_sqft = sum((r.get('area', 0.0) / ((scale_factor or 48.0) ** 2)) for r in rectangles) if rectangles else 0.0
+
                             def accept_rects_for_scale(test_scale: float) -> List[Dict[str, Any]]:
                                 min_sqft, max_sqft = 10, 2000
                                 min_units = min_sqft * (test_scale ** 2)
@@ -522,19 +531,25 @@ class GeometryParser:
                                 return sorted(accepted, key=lambda r: r['area'], reverse=True)
                             for cand in candidate_scales:
                                 accepted = accept_rects_for_scale(cand)
-                                if len(accepted) > best_count:
+                                # Plausibility checks: minimum count and total area within residential bounds
+                                total_area_sqft = sum(r['area'] / (cand ** 2) for r in accepted)
+                                plausible_area = self.MIN_RES_AREA_SQFT <= total_area_sqft <= self.MAX_RES_AREA_SQFT
+                                enough_rooms = len(accepted) >= 10  # avoid switching based on a few rectangles
+                                if len(accepted) > best_count and plausible_area and enough_rooms:
                                     best_count = len(accepted)
                                     best_scale = cand
                                     best_rects = accepted
+                                    best_area_sqft = total_area_sqft
                             if best_count > current_accept_count:
-                                logger.info(f"[Thread {thread_name}:{thread_id}] Switching scale to {best_scale:.1f} px/ft based on rectangle acceptance ({best_count} vs {current_accept_count})")
+                                logger.info(f"[Thread {thread_name}:{thread_id}] Switching scale to {best_scale:.1f} px/ft based on rectangle acceptance ({best_count} vs {current_accept_count}), total_area≈{best_area_sqft:.0f} sqft")
                                 scale_factor = best_scale
                                 rectangles = best_rects
                                 # Adjust scale_result to reflect change
                                 if scale_result:
                                     scale_result.scale_factor = best_scale
-                                    scale_result.detection_method = "alt_scale_rectangles"
-                                    scale_result.confidence = max(scale_result.confidence, 0.6)
+                                    scale_result.detection_method = "alt_scale_rectangles_plausible"
+                                    # Confidence improves if area and count are plausible
+                                    scale_result.confidence = max(scale_result.confidence, 0.7)
                     except Exception as _e:
                         logger.debug(f"[Thread {thread_name}:{thread_id}] Alternative scale evaluation failed: {_e}")
                     
