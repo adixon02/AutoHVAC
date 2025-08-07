@@ -312,6 +312,25 @@ class GeometryParser:
                     raw_rects = page.rects
                     logger.info(f"[Thread {thread_name}:{thread_id}] Found {len(raw_rects)} raw rectangles to process")
                     
+                    # Debug: Check if page.rects is actually returning rectangles
+                    if len(raw_rects) == 0:
+                        logger.warning(f"[Thread {thread_name}:{thread_id}] No rectangles found by pdfplumber. Checking for alternative sources...")
+                        # Try to extract rectangles from curves/edges if available
+                        if hasattr(page, 'curves') and page.curves:
+                            logger.info(f"[Thread {thread_name}:{thread_id}] Found {len(page.curves)} curves that might contain rectangles")
+                        if hasattr(page, 'edges') and page.edges:
+                            logger.info(f"[Thread {thread_name}:{thread_id}] Found {len(page.edges)} edges that might form rectangles")
+                    
+                    # Debug: Log a sample of raw rectangle sizes
+                    if len(raw_rects) > 0 and scale_factor:
+                        for i, rect in enumerate(raw_rects[:5]):  # Log first 5 rectangles
+                            if rect.get('x0') is not None and rect.get('x1') is not None:
+                                w = rect['x1'] - rect['x0']
+                                h = rect['y1'] - rect['y0']
+                                area = w * h
+                                area_sqft = area / (scale_factor ** 2) if scale_factor > 0 else 0
+                                logger.info(f"[Thread {thread_name}:{thread_id}] Sample rect {i}: {w:.0f}x{h:.0f} px, area={area:.0f} px², ~{area_sqft:.1f} sqft")
+                    
                     # Apply defensive limit
                     if len(raw_rects) > self.MAX_RECTANGLES:
                         logger.warning(f"[Thread {thread_name}:{thread_id}] Too many rectangles ({len(raw_rects)}), limiting to {self.MAX_RECTANGLES}")
@@ -319,10 +338,10 @@ class GeometryParser:
                     
                     # Calculate scale-aware thresholds for rectangle filtering
                     if scale_factor and scale_factor > 0:
-                        # Be more permissive with filtering - let geometry_fallback handle validation
-                        # Many blueprint elements are smaller than actual rooms
-                        min_room_sqft = 0.5  # Very small minimum to catch all elements
-                        max_room_sqft = 5000  # Very large maximum
+                        # Adaptive thresholds based on scale to handle different blueprint types
+                        # Lower minimum to catch more potential rooms, let fallback parser validate
+                        min_room_sqft = 10  # Lowered to catch smaller valid spaces (pantries, closets)
+                        max_room_sqft = 2000  # Increased to handle open floor plans and great rooms
                         
                         # Convert to page units: area_page = area_sqft * (scale_px_per_ft)^2
                         min_area_page_units = min_room_sqft * (scale_factor ** 2)
@@ -359,6 +378,11 @@ class GeometryParser:
                                 # Calculate estimated square footage for logging
                                 est_sqft = area / (scale_factor ** 2) if scale_factor else 0
                                 
+                                # Log significant rectangles for debugging
+                                if est_sqft > 50:  # Log rooms larger than 50 sqft
+                                    logger.info(f"[Thread {thread_name}:{thread_id}] Found room: {est_sqft:.1f} sqft "
+                                              f"({width:.0f}x{height:.0f} px, area={area:.0f} px²)")
+                                
                                 rectangles.append({
                                     'type': 'rect',
                                     'coords': [float(rect['x0']), float(rect['y0']), float(rect['x1']), float(rect['y1'])],
@@ -385,7 +409,9 @@ class GeometryParser:
                                     if est_sqft > max_room_sqft:
                                         logger.debug(f"[Thread {thread_name}:{thread_id}] Rectangle {i} filtered: too large ({est_sqft:.0f} sq ft > {max_room_sqft} sq ft)")
                                     elif est_sqft < min_room_sqft:
-                                        logger.debug(f"[Thread {thread_name}:{thread_id}] Rectangle {i} filtered: too small ({est_sqft:.0f} sq ft < {min_room_sqft} sq ft)")
+                                        # Only log significant filtered rectangles (5-25 sqft range)
+                                        if 5 <= est_sqft < min_room_sqft:
+                                            logger.info(f"[Thread {thread_name}:{thread_id}] Rectangle {i} filtered: {est_sqft:.0f} sq ft < {min_room_sqft} sq ft threshold")
                             
                         except Exception as e:
                             logger.debug(f"[Thread {thread_name}:{thread_id}] Error processing rectangle {i}: {e}")
