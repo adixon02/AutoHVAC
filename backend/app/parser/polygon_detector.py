@@ -532,25 +532,37 @@ class PolygonRoomDetector:
     
     def _calculate_room_confidence(self, area_sqft: float, aspect_ratio: float, vertex_count: int) -> float:
         """
-        Calculate confidence score for a detected room
+        Calculate confidence score for a detected room with improved scoring
         """
-        confidence = 0.5  # Base confidence
+        confidence = 0.65  # Higher base confidence for detected polygons
         
-        # Area-based confidence
-        if 20 <= area_sqft <= 500:
-            confidence += 0.2  # Typical room size
-        elif 10 <= area_sqft < 20 or 500 < area_sqft <= 1000:
-            confidence += 0.1  # Less typical but possible
+        # Area-based confidence (more generous ranges)
+        if 50 <= area_sqft <= 500:
+            confidence += 0.25  # Typical room size - higher weight
+        elif 20 <= area_sqft < 50 or 500 < area_sqft <= 1000:
+            confidence += 0.15  # Less typical but still valid
+        elif 10 <= area_sqft < 20 or 1000 < area_sqft <= 2000:
+            confidence += 0.05  # Edge cases but possible (closets, open areas)
         
-        # Shape-based confidence
-        if 1 <= aspect_ratio <= 3:
-            confidence += 0.2  # Good aspect ratio
-        elif 3 < aspect_ratio <= 5:
+        # Shape-based confidence (rectangularity)
+        if 0.5 <= aspect_ratio <= 2.0:
+            confidence += 0.15  # Good aspect ratio (more square-like)
+        elif 0.33 <= aspect_ratio < 0.5 or 2.0 < aspect_ratio <= 3.0:
             confidence += 0.1  # Acceptable aspect ratio
+        elif 0.2 <= aspect_ratio < 0.33 or 3.0 < aspect_ratio <= 5.0:
+            confidence += 0.05  # Less ideal but still room-like
         
         # Vertex count confidence (4-8 vertices is typical for rooms)
-        if 4 <= vertex_count <= 8:
-            confidence += 0.1
+        if vertex_count == 4:
+            confidence += 0.15  # Perfect rectangle
+        elif 5 <= vertex_count <= 8:
+            confidence += 0.1  # Good polygon
+        elif 9 <= vertex_count <= 12:
+            confidence += 0.05  # Complex but valid
+        
+        # Ensure minimum confidence for any properly detected polygon
+        if area_sqft >= 10:  # Any reasonable area
+            confidence = max(0.75, confidence)  # Minimum 0.75 for detected rooms
         
         return min(0.95, confidence)
     
@@ -584,8 +596,8 @@ class PolygonRoomDetector:
             if aspect_ratio > max_aspect_ratio:
                 continue
             
-            # Lower confidence for relaxed detection
-            confidence = self._calculate_room_confidence(area_sqft, aspect_ratio, len(data['polygon'])) * 0.7
+            # Slightly lower confidence for relaxed detection but still good
+            confidence = self._calculate_room_confidence(area_sqft, aspect_ratio, len(data['polygon'])) * 0.85
             
             rooms.append({
                 'polygon': data['polygon'],

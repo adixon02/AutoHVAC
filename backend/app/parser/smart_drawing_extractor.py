@@ -176,9 +176,25 @@ class SmartDrawingExtractor:
                     items_to_process = min(20, len(drawing['items']))  # Limit items per drawing
                     for item in drawing['items'][:items_to_process]:
                         if item[0] == 'l':  # Line
-                            polylines.append([item[1], item[2]])
+                            # Convert PyMuPDF Point objects to tuples for JSON serialization
+                            p1 = item[1]
+                            p2 = item[2]
+                            if hasattr(p1, 'x') and hasattr(p1, 'y'):
+                                # Point objects - convert to tuples
+                                polylines.append([(p1.x, p1.y), (p2.x, p2.y)])
+                            else:
+                                # Already tuples or lists
+                                polylines.append([p1, p2])
                         elif item[0] == 'c':  # Curve
-                            polylines.append([item[1], item[4]])
+                            # Convert PyMuPDF Point objects to tuples for JSON serialization
+                            p1 = item[1]
+                            p2 = item[4]
+                            if hasattr(p1, 'x') and hasattr(p1, 'y'):
+                                # Point objects - convert to tuples
+                                polylines.append([(p1.x, p1.y), (p2.x, p2.y)])
+                            else:
+                                # Already tuples or lists
+                                polylines.append([p1, p2])
                         total_count += 1
                         
                         if total_count >= max_elements * 2:  # Polyline limit

@@ -24,6 +24,27 @@ ROOM_KEYWORDS = [
     'br', 'ba', 'kit', 'lr', 'dr', 'mb'  # Common abbreviations
 ]
 
+# Page type indicators
+FLOOR_PLAN_INDICATORS = [
+    'floor plan', 'floorplan', 'floor-plan', 'layout', 'main level',
+    'first floor', 'second floor', 'upper level', 'lower level',
+    'basement plan', 'ground floor', 'site plan'
+]
+
+SPECIFICATION_INDICATORS = [
+    'specification', 'specifications', 'spec', 'specs', 'notes',
+    'general notes', 'construction notes', 'details', 'legend',
+    'schedule', 'electrical notes', 'mechanical notes', 'structural notes',
+    'building code', 'requirements', 'standards', 'procedures',
+    'installation', 'warranty', 'material list', 'equipment list'
+]
+
+ELEVATION_INDICATORS = [
+    'elevation', 'front elevation', 'rear elevation', 'side elevation',
+    'north elevation', 'south elevation', 'east elevation', 'west elevation',
+    'section', 'cross section', 'detail', 'perspective'
+]
+
 # Dimension patterns for scoring
 DIMENSION_PATTERNS = [
     r"(\d+)'\s*-?\s*(\d+)\"?",           # 12'-6"
@@ -48,6 +69,7 @@ class PageAnalysis:
     selected: bool = False
     too_complex: bool = False
     error: Optional[str] = None
+    page_type: str = "unknown"  # floor_plan, specification, elevation, unknown
 
 
 class PDFPageAnalyzer:
@@ -104,7 +126,7 @@ class PDFPageAnalyzer:
                     analysis.processing_time = time.time() - page_start
                     
                     analyses.append(analysis)
-                    logger.info(f"Page {page_num + 1} score: {analysis.score:.1f} "
+                    logger.info(f"Page {page_num + 1} - Type: {analysis.page_type}, Score: {analysis.score:.1f} "
                               f"(rectangles: {analysis.rectangle_count}, "
                               f"room_labels: {analysis.room_label_count}, "
                               f"dimensions: {analysis.dimension_count})")
@@ -128,7 +150,13 @@ class PDFPageAnalyzer:
             
             total_time = time.time() - start_time
             logger.info(f"Multi-page analysis completed in {total_time:.2f}s")
-            logger.info(f"Selected page {best_page_num} as best floor plan")
+            # Log detailed selection reasoning
+            for analysis in analyses:
+                if analysis.selected:
+                    logger.info(f"Selected page {best_page_num} as best floor plan - "
+                              f"Type: {analysis.page_type}, Score: {analysis.score}, "
+                              f"Rectangles: {analysis.rectangle_count}, "
+                              f"Room Labels: {analysis.room_label_count}")
             
             return best_page_num, analyses
             
@@ -178,19 +206,24 @@ class PDFPageAnalyzer:
             text_content = page.get_text()
             text_words = text_content.split() if text_content else []
             
+            # Detect page type
+            page_type = self._detect_page_type(text_content)
+            
             # Count geometric elements
             rectangles = self._count_rectangles(drawings)
             
-            # Count room labels
+            # Count room labels with context awareness
             room_labels = self._count_room_labels(text_content)
             
             # Count dimensions
             dimensions = self._count_dimensions(text_content)
             
-            # Calculate floor plan score
+            # Calculate floor plan score with page type awareness
             score = self._calculate_floor_plan_score(
-                rectangles, room_labels, dimensions, len(drawings), len(text_words)
+                rectangles, room_labels, dimensions, len(drawings), len(text_words), page_type
             )
+            
+            logger.info(f"Page {page_num + 1} detected as {page_type} with score {score}")
             
             return PageAnalysis(
                 page_number=page_num + 1,
@@ -200,7 +233,8 @@ class PDFPageAnalyzer:
                 dimension_count=dimensions,
                 text_element_count=len(text_words),
                 geometric_complexity=len(drawings),
-                processing_time=0.0  # Will be set by caller
+                processing_time=0.0,  # Will be set by caller
+                page_type=page_type  # Store detected page type
             )
             
         except Exception as e:
@@ -239,12 +273,50 @@ class PDFPageAnalyzer:
         
         return rectangle_count
     
+    def _detect_page_type(self, text: str) -> str:
+        """Detect the type of page based on text content"""
+        if not text:
+            return "unknown"
+        
+        text_lower = text.lower()
+        
+        # Check for floor plan indicators (highest priority)
+        for indicator in FLOOR_PLAN_INDICATORS:
+            if indicator in text_lower[:1000]:  # Check in first 1000 chars (usually title area)
+                return "floor_plan"
+        
+        # Check for specification indicators
+        spec_count = sum(1 for indicator in SPECIFICATION_INDICATORS if indicator in text_lower)
+        if spec_count >= 2:  # Multiple spec indicators = likely a spec page
+            return "specification"
+        
+        # Check for elevation indicators
+        for indicator in ELEVATION_INDICATORS:
+            if indicator in text_lower[:1000]:
+                return "elevation"
+        
+        return "unknown"
+    
     def _count_room_labels(self, text: str) -> int:
-        """Count room labels in text content"""
+        """Count room labels in text content with context awareness"""
         if not text:
             return 0
         
         text_lower = text.lower()
+        
+        # If this is a specification page, don't count room keywords as heavily
+        page_type = self._detect_page_type(text)
+        if page_type == "specification":
+            # Only count room labels that appear to be actual labels (with dimensions)
+            room_count = 0
+            for keyword in ROOM_KEYWORDS:
+                # Look for room keyword followed by dimension pattern
+                pattern = r'\b' + re.escape(keyword) + r'\b.*?\d+[\'"].*?\d+[\'"]'
+                matches = re.findall(pattern, text_lower)
+                room_count += len(matches)
+            return min(room_count, 10)  # Cap specification page room count
+        
+        # For non-specification pages, use normal counting
         room_count = 0
         
         for keyword in ROOM_KEYWORDS:
@@ -273,7 +345,7 @@ class PDFPageAnalyzer:
     
     def _calculate_floor_plan_score(self, rectangles: int, room_labels: int, 
                                    dimensions: int, total_drawings: int, 
-                                   text_words: int) -> float:
+                                   text_words: int, page_type: str = "unknown") -> float:
         """
         Calculate floor plan likelihood score for a page
         
@@ -281,34 +353,65 @@ class PDFPageAnalyzer:
         """
         score = 0.0
         
+        # Page type bonuses/penalties
+        if page_type == "floor_plan":
+            score += 50  # Strong bonus for detected floor plans
+            logger.debug(f"Added 50 points for floor_plan page type")
+        elif page_type == "specification":
+            score -= 30  # Strong penalty for specification pages
+            logger.debug(f"Subtracted 30 points for specification page type")
+        elif page_type == "elevation":
+            score -= 20  # Penalty for elevation pages
+            logger.debug(f"Subtracted 20 points for elevation page type")
+        
         # Rectangle count (potential rooms): +2 points per rectangle, up to 40 points
-        score += min(rectangles * 2, 40)
+        rect_score = min(rectangles * 2, 40)
+        score += rect_score
+        if rect_score > 0:
+            logger.debug(f"Added {rect_score} points for {rectangles} rectangles")
         
         # Room labels: +5 points per room label, up to 50 points
-        score += min(room_labels * 5, 50)
+        # Reduced weight if specification page
+        if page_type == "specification":
+            room_score = min(room_labels * 2, 20)  # Much less weight for specs
+        else:
+            room_score = min(room_labels * 5, 50)
+        score += room_score
+        if room_score > 0:
+            logger.debug(f"Added {room_score} points for {room_labels} room labels")
         
         # Dimensions: +3 points per dimension, up to 30 points
-        score += min(dimensions * 3, 30)
+        dim_score = min(dimensions * 3, 30)
+        score += dim_score
+        if dim_score > 0:
+            logger.debug(f"Added {dim_score} points for {dimensions} dimensions")
         
         # Geometric complexity bonus (moderate to high complexity often indicates detailed floor plans)
         if 50 <= total_drawings <= 5000:
             score += 20  # Good range for floor plans
+            logger.debug(f"Added 20 points for ideal drawing complexity ({total_drawings} drawings)")
         elif 5000 < total_drawings <= 50000:
             score += 15  # Complex but likely still a detailed floor plan
+            logger.debug(f"Added 15 points for high drawing complexity ({total_drawings} drawings)")
         elif 20 <= total_drawings < 50:
             score += 10  # Acceptable but simple
+            logger.debug(f"Added 10 points for simple drawing complexity ({total_drawings} drawings)")
         elif total_drawings > 50000:
             score += 5   # Very complex, but could still be main floor plan
+            logger.debug(f"Added 5 points for very high drawing complexity ({total_drawings} drawings)")
         
         # Text density bonus (floor plans should have some text but not be document pages)
         if 10 <= text_words <= 200:
             score += 10  # Good balance of text
+            logger.debug(f"Added 10 points for ideal text density ({text_words} words)")
         elif text_words > 500:
-            score -= 5   # Penalize text-heavy pages (likely not floor plans)
+            penalty = -10 if page_type != "floor_plan" else -5  # Less penalty if detected as floor plan
+            score += penalty
+            logger.debug(f"Added {penalty} points for high text density ({text_words} words)")
         
         # Minimum viable score threshold
-        if rectangles == 0 and room_labels == 0:
-            score = 0.0  # No potential for floor plan
+        if rectangles == 0 and room_labels == 0 and page_type != "floor_plan":
+            score = max(score, 0.0)  # Don't go negative unless there's a reason
         
         return round(score, 1)
     
@@ -394,7 +497,8 @@ class PDFPageAnalyzer:
                     'dimensions': a.dimension_count,
                     'selected': a.selected,
                     'too_complex': a.too_complex,
-                    'error': a.error
+                    'error': a.error,
+                    'page_type': a.page_type
                 }
                 for a in analyses
             ]

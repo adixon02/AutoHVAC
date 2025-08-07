@@ -161,12 +161,26 @@ backend/audit_logs/
 blueprint-example-*.pdf
 /blueprint-example-*.pdf
 
+# Test blueprints folder (contains proprietary test data)
+test blueprints/
+/test blueprints/
+
+# Internal development documentation
+austin-claude-prompts.md
+git-logs.md
+HVAC_CALCULATION_FIXES.md
+IMPROVEMENTS_SUMMARY.md
+OPTIMIZATION_SUMMARY.md
+MVP_TEST_INSTRUCTIONS.md
+PAYWALL_TESTING.md
+
 # Test artifacts
 test_*.py
 test_*.html
 test_*.sh
 debug_*.py
 minimal_test_server.py
+/test_*.py
 
 # Load calculation documentation (integrated into README)
 LOAD_CALCULATION_IMPROVEMENTS.md
