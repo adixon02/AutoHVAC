@@ -762,6 +762,38 @@ class BlueprintParser:
         total_area = sum(room.area for room in rooms)
         max_floor = max((room.floor for room in rooms), default=1)
         
+        # VALIDATION: Square footage sanity checks
+        if rooms:
+            room_count = len(rooms)
+            avg_room_size = total_area / room_count if room_count > 0 else 0
+            
+            # Critical warning: Only 1 room detected from geometry
+            if room_count == 1 and raw_geometry and hasattr(raw_geometry, 'rectangles'):
+                rect_count = len(raw_geometry.rectangles) if isinstance(raw_geometry.rectangles, list) else 0
+                if rect_count > 10:
+                    logger.error(f"⚠️ SQUARE FOOTAGE ISSUE: Only 1 room from {rect_count} rectangles!")
+                    logger.error(f"  Total area: {total_area:.0f} sq ft - likely entire floor detected as one room")
+                    parsing_metadata.warnings.append(f"Square footage likely incorrect - only 1 room from {rect_count} rectangles")
+            
+            # Check for unrealistic room sizes
+            if avg_room_size > 600:
+                logger.warning(f"Average room size {avg_room_size:.0f} sq ft exceeds typical residential (>600)")
+                parsing_metadata.warnings.append(f"Room sizes may be overestimated (avg: {avg_room_size:.0f} sq ft)")
+            elif avg_room_size < 40 and room_count > 2:
+                logger.warning(f"Average room size {avg_room_size:.0f} sq ft below typical residential (<40)")
+                parsing_metadata.warnings.append(f"Room sizes may be underestimated (avg: {avg_room_size:.0f} sq ft)")
+            
+            # Check total area bounds
+            if total_area > 6000:
+                logger.warning(f"Total area {total_area:.0f} sq ft exceeds typical home size (>6000)")
+                parsing_metadata.warnings.append(f"Total area {total_area:.0f} sq ft may be overestimated")
+            elif total_area < 600 and room_count > 3:
+                logger.warning(f"Total area {total_area:.0f} sq ft too small for {room_count} rooms")
+                parsing_metadata.warnings.append(f"Total area {total_area:.0f} sq ft may be underestimated")
+            
+            # Log validation results
+            logger.info(f"Square footage validation: {room_count} rooms, {total_area:.0f} total sq ft, {avg_room_size:.0f} avg sq ft/room")
+        
         return BlueprintSchema(
             project_id=project_id,
             zip_code=zip_code,

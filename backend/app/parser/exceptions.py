@@ -2,6 +2,7 @@
 Custom exceptions for blueprint parsing that require user intervention
 """
 
+from typing import Optional, Dict
 
 class UserInterventionRequired(Exception):
     """Raised when parsing cannot proceed without user input"""
@@ -33,8 +34,8 @@ class RoomDetectionFailedError(UserInterventionRequired):
         walls_found: int = 0,
         polygons_found: int = 0,
         confidence: float = 0.0,
-        message: str | None = None,
-        extra_details: dict | None = None,
+        message: Optional[str] = None,
+        extra_details: Optional[Dict] = None,
     ):
         base_message = (
             message

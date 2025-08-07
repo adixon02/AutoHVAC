@@ -12,6 +12,14 @@ from .schema import BlueprintSchema, Room, RawGeometry, RawText, ParsingMetadata
 from .exceptions import RoomDetectionFailedError, LowConfidenceError
 from .polygon_detector import polygon_detector
 
+# Try to import OCR for enhanced room label detection
+try:
+    from services.ocr_extractor import OCRExtractor
+    OCR_AVAILABLE = True
+except ImportError:
+    OCR_AVAILABLE = False
+    logging.info("OCR not available for enhanced room label detection")
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,9 +36,14 @@ class GeometryFallbackParser:
     
     def __init__(self):
         # Room size thresholds (in square feet)
-        self.MIN_ROOM_AREA = 10  # Minimum for small closets/pantries
-        self.MAX_ROOM_AREA = 1200  # Maximum for large residential rooms (great rooms)
+        # Increased minimum to filter out artifacts/walls while keeping small rooms
+        self.MIN_ROOM_AREA = 25  # Minimum for small closets/pantries (was 10)
+        # Reduced maximum to better detect individual rooms vs entire floor
+        self.MAX_ROOM_AREA = 800  # Maximum for large residential rooms (was 1200)
         self.TYPICAL_CEILING_HEIGHT = 9.0  # feet
+        
+        # Track filtering statistics for debugging
+        self.last_filter_stats = {}
         
         # Room type classification by area
         self.ROOM_SIZE_RANGES = {
@@ -137,8 +150,8 @@ class GeometryFallbackParser:
             # First try: Relax thresholds even more
             original_min = self.MIN_ROOM_AREA
             original_max = self.MAX_ROOM_AREA
-            self.MIN_ROOM_AREA = 8  # Lower threshold for tiny rooms
-            self.MAX_ROOM_AREA = 1500  # Higher threshold for very large rooms
+            self.MIN_ROOM_AREA = 15  # Lower threshold but not too low (was 8)
+            self.MAX_ROOM_AREA = 1000  # Higher threshold but reasonable (was 1500)
             
             rooms = self._extract_rooms_from_geometry(raw_geo, raw_text)
             
@@ -309,27 +322,35 @@ class GeometryFallbackParser:
                            f"feet=({width_ft:.1f}x{height_ft:.1f}), area={area_ft:.1f} sq ft")
             
             # NOW check if the converted area is reasonable
-            # Be more lenient with filtering to catch more rooms
+            # More intelligent filtering to catch individual rooms
             if area_ft < self.MIN_ROOM_AREA:
-                # Only filter if it's really too small (< MIN_ROOM_AREA)
+                # Filter out tiny artifacts but log for debugging
                 logger.debug(f"Rectangle {idx}: Filtered - area {area_ft:.1f} sq ft too small (< {self.MIN_ROOM_AREA})")
                 filtered_count += 1
                 continue
             elif area_ft > self.MAX_ROOM_AREA:
-                # For large areas, check aspect ratio - might be entire floor
-                aspect_ratio = max(width_ft, height_ft) / min(width_ft, height_ft)
-                if aspect_ratio > 4.0:
-                    # Very elongated - likely a wall or entire building
-                    logger.debug(f"Rectangle {idx}: Filtered - area {area_ft:.1f} sq ft with aspect ratio {aspect_ratio:.1f}")
+                # Large rectangle - check if it's a whole floor or legitimate large room
+                aspect_ratio = max(width_ft, height_ft) / min(width_ft, height_ft) if min(width_ft, height_ft) > 0 else 999
+                
+                # More nuanced aspect ratio check - 3.0 instead of 4.0
+                if aspect_ratio > 3.0 and area_ft > 400:
+                    # Elongated and large - likely a hallway or entire building side
+                    logger.debug(f"Rectangle {idx}: Filtered - elongated large area {area_ft:.1f} sq ft, aspect {aspect_ratio:.1f}")
                     filtered_count += 1
                     continue
-                elif area_ft > self.MAX_ROOM_AREA * 2:
-                    # Way too large - likely entire floor or building outline
-                    logger.debug(f"Rectangle {idx}: Filtered - area {area_ft:.1f} sq ft too large (> {self.MAX_ROOM_AREA * 2})")
-                    filtered_count += 1
-                    continue
+                elif area_ft > self.MAX_ROOM_AREA * 1.5:  # Changed from 2x to 1.5x
+                    # Significantly oversized - likely entire floor
+                    # But log it as a warning since this might be our issue
+                    logger.warning(f"Rectangle {idx}: OVERSIZED - {area_ft:.1f} sq ft (>{self.MAX_ROOM_AREA * 1.5}). May be entire floor!")
+                    # Try to split it or reject it
+                    if area_ft > 2000:  # Definitely too big for a single room
+                        logger.info(f"Rectangle {idx}: Rejecting oversized rectangle that's likely the entire floor")
+                        filtered_count += 1
+                        continue
+                    # Otherwise accept with warning
+                    logger.warning(f"Rectangle {idx}: Accepting large area with caution - {area_ft:.1f} sq ft")
                 else:
-                    # Large but reasonable - might be a great room or open concept
+                    # Large but within extended bounds - might be open concept
                     logger.info(f"Rectangle {idx}: Large room accepted - {area_ft:.1f} sq ft")
             
             # Find nearby text label
@@ -349,11 +370,21 @@ class GeometryFallbackParser:
                 confidence = 0.7  # Higher confidence with label
                 label_found = True
                 used_labels.add(room_label.get('text'))
+                
+                # Further boost confidence if room type matches expected size
+                expected_type = self._infer_room_type_from_size(area_ft)
+                if expected_type == room_type:
+                    confidence = min(0.9, confidence + 0.2)
+                    logger.debug(f"Room type '{room_type}' matches expected size, confidence boosted to {confidence}")
             else:
                 # Infer room type from size
                 room_type = self._infer_room_type_from_size(area_ft)
                 room_name = f"{room_type.title()} {idx + 1}"
-                confidence = 0.4  # Lower confidence without label
+                # Slightly better confidence if size is typical for room type
+                if room_type != 'unknown' and self._is_typical_room_size(area_ft, room_type):
+                    confidence = 0.3  # Better than default
+                else:
+                    confidence = 0.2  # Lower confidence without label
                 label_found = False
             
             # Estimate windows based on room type and size
@@ -389,13 +420,30 @@ class GeometryFallbackParser:
                 logger.info(f"Reached maximum of 20 rooms, stopping extraction")
                 break
         
+        # Store and log detailed filtering statistics
+        self.last_filter_stats = {
+            'total_rectangles': len(rectangles),
+            'filtered_count': filtered_count,
+            'accepted_count': len(rooms),
+            'scale_factor': scale_factor,
+            'total_area': sum(room.area for room in rooms) if rooms else 0
+        }
+        
         logger.info(f"Room extraction completed:")
         logger.info(f"  Rectangles processed: {len(rectangles)}")
         logger.info(f"  Rectangles filtered: {filtered_count}")
         logger.info(f"  Rooms extracted: {len(rooms)}")
         if rooms:
             total_area = sum(room.area for room in rooms)
+            areas = [room.area for room in rooms]
             logger.info(f"  Total area: {total_area:.0f} sq ft")
+            logger.info(f"  Room areas: min={min(areas):.0f}, max={max(areas):.0f}, avg={sum(areas)/len(areas):.0f} sq ft")
+        
+        # CRITICAL WARNING if only 1 room accepted from many rectangles
+        if len(rooms) == 1 and len(rectangles) > 10:
+            logger.error(f"⚠️ CRITICAL: Only 1 room accepted from {len(rectangles)} rectangles!")
+            logger.error(f"  This likely means we're detecting the entire floor as one room.")
+            logger.error(f"  Room area: {rooms[0].area:.0f} sq ft")
         
         # If no rooms extracted and we have rectangles, try a relaxed second pass
         if not rooms and raw_geo and raw_geo.rectangles:
@@ -461,6 +509,17 @@ class GeometryFallbackParser:
             return 'living'
         else:
             return 'other'
+    
+    def _is_typical_room_size(self, area_sqft: float, room_type: str) -> bool:
+        """Check if area is typical for the given room type"""
+        if room_type not in self.ROOM_SIZE_RANGES:
+            return False
+        min_area, max_area = self.ROOM_SIZE_RANGES[room_type]
+        # Consider it typical if it's in the middle 60% of the range
+        range_size = max_area - min_area
+        typical_min = min_area + range_size * 0.2
+        typical_max = max_area - range_size * 0.2
+        return typical_min <= area_sqft <= typical_max
     
     def _estimate_windows(self, room_type: str, area: float) -> int:
         """Estimate number of windows based on room type and size"""
