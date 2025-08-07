@@ -28,16 +28,28 @@ class ScaleNotDetectedError(UserInterventionRequired):
 class RoomDetectionFailedError(UserInterventionRequired):
     """Raised when no valid rooms can be detected"""
     
-    def __init__(self, walls_found: int = 0, polygons_found: int = 0, confidence: float = 0.0):
-        message = "No valid rooms could be detected from blueprint. Manual room definition required."
+    def __init__(
+        self,
+        walls_found: int = 0,
+        polygons_found: int = 0,
+        confidence: float = 0.0,
+        message: str | None = None,
+        extra_details: dict | None = None,
+    ):
+        base_message = (
+            message
+            or "No valid rooms could be detected from blueprint. Manual room definition required."
+        )
         details = {
             "error_type": "room_detection_failed",
             "walls_found": walls_found,
             "polygons_found": polygons_found,
             "confidence": confidence,
-            "user_action_required": "define_rooms"
+            "user_action_required": "define_rooms",
         }
-        super().__init__(message, details)
+        if extra_details:
+            details.update(extra_details)
+        super().__init__(base_message, details)
 
 
 class LowConfidenceError(UserInterventionRequired):

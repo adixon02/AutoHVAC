@@ -23,9 +23,8 @@ from services.pdf_thread_manager import safe_pdfplumber_operation, safe_pymupdf_
 # Try to import OCR extractor for better text extraction
 try:
     from services.ocr_extractor import OCRExtractor
-    PADDLEOCR_AVAILABLE = True
 except ImportError:
-    PADDLEOCR_AVAILABLE = False
+    OCRExtractor = None  # type: ignore
     logging.warning("PaddleOCR not available for scale detection - using basic text extraction")
 
 logger = logging.getLogger(__name__)
@@ -42,7 +41,7 @@ class GeometryParser:
         # Initialize multi-page scale detector for better accuracy
         self.multi_page_scale_detector = MultiPageScaleDetector()
         # Initialize OCR extractor if available
-        self.ocr_extractor = OCRExtractor(use_gpu=False) if PADDLEOCR_AVAILABLE else None
+        self.ocr_extractor = OCRExtractor(use_gpu=False) if OCRExtractor else None
         
         # Keep legacy scale patterns for backward compatibility
         self.scale_patterns = [
@@ -143,7 +142,7 @@ class GeometryParser:
                     if not quick_scale_success:
                         # Extract text elements for scale detection
                         # Use PaddleOCR if available for better accuracy
-                        if self.ocr_extractor and PADDLEOCR_AVAILABLE:
+                        if self.ocr_extractor and getattr(self.ocr_extractor, 'ocr', None):
                             logger.info(f"[Thread {thread_name}:{thread_id}] Using PaddleOCR for text extraction")
                             # Render page as image for OCR
                             import fitz

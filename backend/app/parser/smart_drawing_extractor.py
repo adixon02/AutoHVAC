@@ -200,9 +200,16 @@ class SmartDrawingExtractor:
                         if total_count >= max_elements * 2:  # Polyline limit
                             break
                 
+                # Normalize PyMuPDF Rect to plain list for JSON safety
+                rect_val = drawing.get('rect')
+                if rect_val is not None and hasattr(rect_val, 'x0') and hasattr(rect_val, 'x1'):
+                    rect_serialized = [float(rect_val.x0), float(rect_val.y0), float(rect_val.x1), float(rect_val.y1)]
+                else:
+                    rect_serialized = rect_val
+
                 drawings.append({
                     'type': 'drawing',
-                    'rect': drawing.get('rect'),
+                    'rect': rect_serialized,
                     'fill': drawing.get('fill'),
                     'color': drawing.get('color')
                 })
@@ -252,9 +259,15 @@ class SmartDrawingExtractor:
                     if i >= max_elements:
                         break
                         
+                    rect_val = drawing.get('rect', [0, 0, 0, 0])
+                    if rect_val is not None and hasattr(rect_val, 'x0') and hasattr(rect_val, 'x1'):
+                        rect_serialized = [float(rect_val.x0), float(rect_val.y0), float(rect_val.x1), float(rect_val.y1)]
+                    else:
+                        rect_serialized = rect_val
+
                     drawings.append({
                         'type': 'drawing_limited',
-                        'rect': drawing.get('rect', [0, 0, 0, 0])
+                        'rect': rect_serialized
                     })
                     
             except Exception as e:

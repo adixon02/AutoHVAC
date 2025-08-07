@@ -30,7 +30,7 @@ class TextParser:
     """Elite text extraction for HVAC blueprints"""
     
     def __init__(self):
-        # Initialize OCR extractor
+        # Initialize OCR extractor (may be disabled via env)
         self.ocr_extractor = OCRExtractor(use_gpu=False)
         self.room_keywords = [
             'bedroom', 'living', 'kitchen', 'bathroom', 'dining', 'office',
@@ -281,7 +281,7 @@ class TextParser:
         logger.info(f"[Thread {thread_name}:{thread_id}] PDF file: {pdf_path}")
         logger.info(f"[Thread {thread_name}:{thread_id}] Page number: {page_number + 1}")
         
-        if not self.ocr_extractor or not self.ocr_extractor.ocr:
+        if not self.ocr_extractor or not getattr(self.ocr_extractor, 'ocr', None):
             logger.info(f"[Thread {thread_name}:{thread_id}] PaddleOCR not available, skipping")
             return []
         

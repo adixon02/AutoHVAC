@@ -34,7 +34,7 @@ try:
     from services.ocr_extractor import ocr_extractor, TextRegion
     from services.page_classifier import page_classifier
     ENHANCED_PARSING = True
-    logger.info("Enhanced parsing with PaddleOCR is available and will be used")
+    logger.info("Enhanced parsing modules imported; OCR usage depends on ENABLE_PADDLE_OCR and runtime readiness")
 except ImportError as e:
     logger.warning(f"Enhanced parsing modules not available: {e}")
     ENHANCED_PARSING = False
@@ -159,7 +159,7 @@ class BlueprintAIParser:
                     
                     # Extract text with OCR
                     ocr_start = time.time()
-                    text_regions = ocr_extractor.extract_all_text(img_cv)
+                    text_regions = ocr_extractor.extract_all_text(img_cv) if getattr(ocr_extractor, 'ocr', None) else []
                     ocr_text = [region.text for region in text_regions]
                     ocr_results.append(text_regions)
                     logger.info(f"Page {idx + 1} OCR extraction: {time.time() - ocr_start:.1f}s, found {len(text_regions)} regions")

@@ -3,6 +3,7 @@ OCR Extraction Module for Blueprint Analysis
 Uses PaddleOCR for accurate text extraction from technical drawings
 """
 
+import os
 import re
 import logging
 from typing import List, Dict, Tuple, Optional
@@ -47,26 +48,35 @@ class OCRExtractor:
         Args:
             use_gpu: Whether to use GPU acceleration (requires CUDA)
         """
+        # Limit thread usage for predictable performance in containers
+        os.environ.setdefault("OMP_NUM_THREADS", "1")
+        os.environ.setdefault("MKL_NUM_THREADS", "1")
+
         self.use_gpu = use_gpu
         self.ocr = None
-        
+
+        # Opt-in gate to avoid heavy install issues by default
+        enable_paddle = os.getenv("ENABLE_PADDLE_OCR", "false").lower() in {"1", "true", "yes"}
+
+        if not enable_paddle:
+            logger.info("ENABLE_PADDLE_OCR is disabled; OCR will be skipped and pdfplumber used instead")
+            return
+
         if PADDLEOCR_AVAILABLE:
             try:
-                # Initialize PaddleOCR with minimal parameters
-                # Note: Compatibility issues with some PaddlePaddle versions
-                # Temporarily disabled in production until version compatibility is resolved
-                logger.warning("PaddleOCR temporarily disabled due to compatibility issues")
-                logger.warning("Using GPT-4V for text extraction (may be less accurate for scale detection)")
-                self.ocr = None
-                # Uncomment when PaddleOCR compatibility is fixed:
-                # self.ocr = PaddleOCR(
-                #     use_angle_cls=True,  # Enable text angle classification
-                #     lang='en'
-                # )
-                # logger.info("PaddleOCR initialized successfully - enhanced blueprint parsing enabled")
+                # Initialize PaddleOCR with stable, CPU-friendly defaults
+                self.ocr = PaddleOCR(
+                    use_angle_cls=True,
+                    lang="en",
+                    use_gpu=self.use_gpu,
+                    show_log=False
+                )
+                logger.info("PaddleOCR initialized successfully - enhanced blueprint parsing enabled")
             except Exception as e:
-                logger.warning(f"PaddleOCR initialization failed (will use GPT-4V only): {str(e)}")
+                logger.warning(f"PaddleOCR initialization failed (OCR disabled): {str(e)}")
                 self.ocr = None
+        else:
+            logger.warning("PaddleOCR not installed; set ENABLE_PADDLE_OCR=true after installing paddlepaddle and paddleocr")
     
     def extract_all_text(self, image: np.ndarray) -> List[TextRegion]:
         """Extract all text from blueprint image
@@ -78,10 +88,7 @@ class OCRExtractor:
             List of TextRegion objects
         """
         if not self.ocr:
-            logger.error("PaddleOCR not initialized - OCR extraction disabled")
-            logger.error("To enable OCR: pip install paddlepaddle paddleocr")
-            logger.error("This significantly impacts blueprint parsing accuracy!")
-            logger.error("Without OCR: No scale detection from text, no room labels, no dimensions")
+            logger.info("OCR not available; returning empty results (pdfplumber fallback in other modules)")
             return []
         
         try:
