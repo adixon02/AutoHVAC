@@ -70,16 +70,26 @@ class OCRExtractor:
 
         if enable_paddle and PADDLEOCR_AVAILABLE:
             try:
-                # Initialize PaddleOCR with minimal parameters
-                # The new version has different parameter names
+                # Initialize PaddleOCR - simpler is better for compatibility
+                # The new version has deprecated use_angle_cls in favor of use_textline_orientation
                 self.ocr = PaddleOCR(
-                    use_angle_cls=True,
-                    lang="en"
+                    lang="en",  # English language
+                    # Use the new parameter name (use_textline_orientation replaces use_angle_cls)
+                    use_textline_orientation=True,  # Enable text angle detection
+                    # Disable advanced features that aren't needed for blueprints
+                    use_doc_orientation_classify=False,
+                    use_doc_unwarping=False
                 )
                 logger.info("PaddleOCR initialized successfully - enhanced blueprint parsing enabled")
             except Exception as e:
                 logger.warning(f"PaddleOCR initialization failed: {str(e)}")
-                self.ocr = None
+                # Try even simpler initialization
+                try:
+                    self.ocr = PaddleOCR(lang="en")
+                    logger.info("PaddleOCR (minimal config) initialized successfully")
+                except Exception as e2:
+                    logger.warning(f"PaddleOCR minimal initialization also failed: {str(e2)}")
+                    self.ocr = None
         
         # Fall back to Tesseract if PaddleOCR not available
         if not self.ocr and enable_tesseract and TESSERACT_AVAILABLE:
@@ -159,34 +169,51 @@ class OCRExtractor:
             return []
         
         try:
-            # Run OCR on the image
-            result = self.ocr.ocr(image, cls=True)
-            
-            if not result or not result[0]:
-                logger.warning("No text detected in image")
-                return []
-            
-            text_regions = []
-            min_confidence = 0.5  # Filter low confidence text (increased for better quality)
-            
-            for line in result[0]:
-                bbox = line[0]
-                text = line[1][0]
-                confidence = line[1][1]
+            # Check if we have the new API (v3.1.0+)
+            if hasattr(self.ocr, 'predict'):
+                # New API for PaddleOCR v3.1.0+
+                result = self.ocr.predict(image)
                 
-                # Skip low confidence text
-                if confidence < min_confidence:
-                    continue
+                if not result:
+                    logger.warning("No text detected in image")
+                    return []
                 
-                # Classify the text region type
-                region_type = self._classify_text_region(text)
+                text_regions = []
+                min_confidence = 0.5
                 
-                text_regions.append(TextRegion(
-                    text=text,
-                    bbox=bbox,
-                    confidence=confidence,
-                    region_type=region_type
-                ))
+                # Process results from new API
+                for res in result:
+                    if hasattr(res, 'text') and hasattr(res, 'confidence'):
+                        if res.confidence >= min_confidence:
+                            text_regions.append(TextRegion(
+                                text=res.text,
+                                bbox=res.bbox if hasattr(res, 'bbox') else [[0, 0], [0, 0], [0, 0], [0, 0]],
+                                confidence=res.confidence,
+                                region_type=self._classify_text_region(res.text)
+                            ))
+            else:
+                # Legacy API for older versions
+                result = self.ocr.ocr(image, cls=True)
+                
+                if not result or not result[0]:
+                    logger.warning("No text detected in image")
+                    return []
+                
+                text_regions = []
+                min_confidence = 0.5
+                
+                for line in result[0]:
+                    bbox = line[0]
+                    text = line[1][0]
+                    confidence = line[1][1]
+                    
+                    if confidence >= min_confidence:
+                        text_regions.append(TextRegion(
+                            text=text,
+                            bbox=bbox,
+                            confidence=confidence,
+                            region_type=self._classify_text_region(text)
+                        ))
             
             logger.info(f"PaddleOCR extracted {len(text_regions)} text regions")
             return text_regions
