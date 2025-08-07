@@ -389,6 +389,19 @@ class GeometryFallbackParser:
             total_area = sum(room.area for room in rooms)
             logger.info(f"  Total area: {total_area:.0f} sq ft")
         
+        # If no rooms extracted and we have rectangles, try a relaxed second pass
+        if not rooms and raw_geo and raw_geo.rectangles:
+            logger.info("No rooms from strict pass; retrying rectangle extraction with relaxed thresholds")
+            original_min = self.MIN_ROOM_AREA
+            original_max = self.MAX_ROOM_AREA
+            try:
+                self.MIN_ROOM_AREA = max(6, int(original_min * 0.6))
+                self.MAX_ROOM_AREA = int(original_max * 1.5)
+                rooms = self._extract_rooms_from_geometry(raw_geo, raw_text)
+            finally:
+                self.MIN_ROOM_AREA = original_min
+                self.MAX_ROOM_AREA = original_max
+
         return rooms
     
     def _find_nearest_label(

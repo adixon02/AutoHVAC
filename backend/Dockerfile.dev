@@ -12,7 +12,10 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    # Optional: Install PaddleOCR for enhanced OCR if enabled via env
+    pip install --no-cache-dir paddlepaddle==2.5.2 -i https://mirror.baidu.com/pypi/simple && \
+    pip install --no-cache-dir paddleocr
 
 COPY . .
 

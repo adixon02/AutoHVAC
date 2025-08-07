@@ -349,7 +349,7 @@ async def main():
     """Main test function"""
     
     # Configuration
-    pdf_path = "backend/tests/sample_blueprints/blueprint-example-99206.pdf"
+    pdf_path = "tests/sample_blueprints/blueprint-example-99206.pdf"
     zip_code = "99206"
     
     # Check if PDF exists

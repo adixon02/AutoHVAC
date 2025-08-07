@@ -21,7 +21,10 @@ COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    # Optional: Install PaddleOCR for enhanced OCR if enabled via env
+    pip install --no-cache-dir paddlepaddle==2.5.2 -i https://mirror.baidu.com/pypi/simple && \
+    pip install --no-cache-dir paddleocr
 
 # Copy application code
 COPY . .

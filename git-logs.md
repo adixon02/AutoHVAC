@@ -1,4 +1,19 @@
-fc864e89b0d4739ebc830b6d3e6a088fd3f0f6f1
+commit/fc864e89b0d4739ebc830b6d3e6a088fd3f0f6f1
 - Job ID: 371b5620-3c90-46cf-bfba-38299a1314e9
 - very close load calcs: Total Heating Load 65,347 BTU/hr ≈ 5.4 tons Total Cooling Load 29,919 BTU/hr ≈ 2.5 tons
+- Expected loads: Heating load: 66,250 BTU/hr | Cooling load: 30,624 BTU/hr
 
+commit/cbc046f694e73eb9d6bd06ff9522b2dcc4bb2679
+- Job ID: (forgot to copy)
+- very close, but seems to replicate committ fc854e because of fallbacks: Total Heating Load 65,347 BTU/hr ≈ 5.4 tons Total Cooling Load 29,919 BTU/hr ≈ 2.5 tons
+- Expected loads: Heating load: 66,250 BTU/hr | Cooling load: 30,624 BTU/hr
+
+commit/1c1154537017f1761d46d92280ef892d1d5ff4d0
+- Job ID: 68b9f221-dceb-4073-ae1c-2f484131f80e
+- Total Heating Load 66,250 BTU/hr ≈ 5.5 tons Total Cooling Load 30,624 BTU/hr ≈ 2.6 tons
+- Expected loads: Heating load: 66,250 BTU/hr | Cooling load: 30,624 BTU/hr
+
+commit/14279587e019ee2b22471a025fa182f8a93565fd
+- Job ID: 6fc96fe2-7536-439a-bedc-3d33ae80f91b
+- Total Heating Load 68,668 BTU/hr ≈ 5.7 tons Total Cooling Load 31,116 BTU/hr ≈ 2.6 tons
+- Expected loads: Heating load: 74,980 BTU/hr | Cooling load: 25,520 BTU/hr

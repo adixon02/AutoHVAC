@@ -251,8 +251,8 @@ class GeometryParser:
                     
                     # Apply smart limits based on line count
                     if len(raw_lines) > 20000:
-                        logger.warning(f"[Thread {thread_name}:{thread_id}] Excessive lines ({len(raw_lines)}), skipping line extraction for performance")
-                        raw_lines = []  # Skip lines entirely for very complex drawings
+                        logger.warning(f"[Thread {thread_name}:{thread_id}] Excessive lines ({len(raw_lines)}), sampling every 5th line instead of skipping")
+                        raw_lines = raw_lines[::5]  # Sample every 5th line for very complex drawings
                     elif len(raw_lines) > 10000:
                         logger.warning(f"[Thread {thread_name}:{thread_id}] Many lines ({len(raw_lines)}), sampling every 3rd line")
                         raw_lines = raw_lines[::3]  # Sample every 3rd line
