@@ -2,17 +2,24 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies for production
+# Install system dependencies for production with enhanced OCR support
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+        # Build dependencies
         libjpeg-dev zlib1g-dev libfreetype6-dev build-essential \
+        gcc g++ python3-dev \
+        # Tesseract OCR with English language pack
         tesseract-ocr tesseract-ocr-eng \
-        libpoppler-utils poppler-utils \
-        libgl1-mesa-glx libglib2.0-0 \
+        # PDF processing tools
+        libpoppler-utils poppler-utils libpoppler-cpp-dev \
+        # OpenCV and PaddleOCR dependencies
+        libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 \
+        # PyMuPDF dependencies
         libmupdf-dev mupdf-tools \
+        # Fonts for better OCR accuracy
         fonts-liberation fonts-dejavu-core \
-        file \
-        psmisc \
+        # Utilities
+        file psmisc wget curl \
         && rm -rf /var/lib/apt/lists/* && \
         apt-get clean
 
@@ -20,11 +27,9 @@ RUN apt-get update && \
 COPY requirements.txt .
 
 # Install Python dependencies
+# PaddleOCR is now included in requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt && \
-    # Optional: Install PaddleOCR for enhanced OCR if enabled via env
-    pip install --no-cache-dir paddlepaddle==2.5.2 -i https://mirror.baidu.com/pypi/simple && \
-    pip install --no-cache-dir paddleocr
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .

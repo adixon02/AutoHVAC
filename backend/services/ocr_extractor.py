@@ -70,12 +70,11 @@ class OCRExtractor:
 
         if enable_paddle and PADDLEOCR_AVAILABLE:
             try:
-                # Initialize PaddleOCR with stable, CPU-friendly defaults
+                # Initialize PaddleOCR with minimal parameters
+                # The new version has different parameter names
                 self.ocr = PaddleOCR(
                     use_angle_cls=True,
-                    lang="en",
-                    use_gpu=self.use_gpu,
-                    show_log=False
+                    lang="en"
                 )
                 logger.info("PaddleOCR initialized successfully - enhanced blueprint parsing enabled")
             except Exception as e:
