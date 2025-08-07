@@ -262,13 +262,20 @@ class GeometryParser:
                     
                     for i, line in enumerate(raw_lines):
                         try:
-                            x0, y0, x1, y1 = line['x0'], line['y0'], line['x1'], line['y1']
+                            # Coerce pdfplumber Decimal values to float before math
+                            x0 = float(line.get('x0')) if line.get('x0') is not None else None
+                            y0 = float(line.get('y0')) if line.get('y0') is not None else None
+                            x1 = float(line.get('x1')) if line.get('x1') is not None else None
+                            y1 = float(line.get('y1')) if line.get('y1') is not None else None
                             
                             # Validate coordinates
                             if any(coord is None for coord in [x0, y0, x1, y1]):
                                 continue
                             
-                            length = np.sqrt((x1 - x0)**2 + (y1 - y0)**2)
+                            # Compute length using floats to avoid Decimal/NumPy issues
+                            dx = x1 - x0
+                            dy = y1 - y0
+                            length = float((dx * dx + dy * dy) ** 0.5)
                             
                             # Skip degenerate lines
                             if length < 0.1:
@@ -278,13 +285,13 @@ class GeometryParser:
                             
                             lines.append({
                                 'type': 'line',
-                                'coords': [float(x0), float(y0), float(x1), float(y1)],
-                                'x0': float(x0),
-                                'y0': float(y0),
-                                'x1': float(x1),
-                                'y1': float(y1),
+                                'coords': [x0, y0, x1, y1],
+                                'x0': x0,
+                                'y0': y0,
+                                'x1': x1,
+                                'y1': y1,
                                 'width': width,
-                                'length': float(length),
+                                'length': length,
                                 'line_type': 'wall' if width > 2.0 and length > 50 else 'dimension' if length > 100 and width < 1.5 else 'other',
                                 'orientation': 'vertical' if abs(x1 - x0) < 2 else 'horizontal' if abs(y1 - y0) < 2 else 'diagonal',
                                 'wall_probability': min((length/200 + width/3.0)/2, 1.0)
@@ -415,6 +422,121 @@ class GeometryParser:
                         except Exception as e:
                             logger.debug(f"[Thread {thread_name}:{thread_id}] Error processing rectangle {i}: {e}")
                             continue
+                    
+                    # If we failed to accept any rectangles on the first pass, retry with relaxed min area
+                    if len(rectangles) == 0 and len(raw_rects) > 0:
+                        logger.warning(f"[Thread {thread_name}:{thread_id}] No rectangles accepted; retrying with relaxed min area")
+                        rectangles_relaxed = []
+                        # Use a smaller minimum room size to catch closets/pantries
+                        relaxed_min_sqft = 4 if scale_factor and scale_factor > 0 else None
+                        relaxed_min_area_units = (relaxed_min_sqft * (scale_factor ** 2)) if relaxed_min_sqft else 25.0
+                        for i, rect in enumerate(raw_rects):
+                            try:
+                                if any(coord is None for coord in [rect.get('x0'), rect.get('y0'), rect.get('x1'), rect.get('y1')]):
+                                    continue
+                                width = float(rect['x1'] - rect['x0'])
+                                height = float(rect['y1'] - rect['y0'])
+                                if width <= 0 or height <= 0:
+                                    continue
+                                area = width * height
+                                if area > relaxed_min_area_units:
+                                    est_sqft = area / (scale_factor ** 2) if scale_factor and scale_factor > 0 else None
+                                    rectangles_relaxed.append({
+                                        'type': 'rect',
+                                        'coords': [float(rect['x0']), float(rect['y0']), float(rect['x1']), float(rect['y1'])],
+                                        'x0': float(rect['x0']),
+                                        'y0': float(rect['y0']),
+                                        'x1': float(rect['x1']),
+                                        'y1': float(rect['y1']),
+                                        'width': width,
+                                        'height': height,
+                                        'area': area,
+                                        'area_sqft': est_sqft,
+                                        'width_ft': width / scale_factor if scale_factor and scale_factor > 0 else None,
+                                        'height_ft': height / scale_factor if scale_factor and scale_factor > 0 else None,
+                                        'center_x': float(rect['x0'] + width / 2),
+                                        'center_y': float(rect['y0'] + height / 2),
+                                        'aspect_ratio': width / height if height > 0 else 0,
+                                        'room_probability': 0.4,
+                                        'estimated_sqft': est_sqft
+                                    })
+                            except Exception:
+                                continue
+                        if rectangles_relaxed:
+                            rectangles = sorted(rectangles_relaxed, key=lambda r: r['area'], reverse=True)
+                            logger.info(f"[Thread {thread_name}:{thread_id}] Relaxed pass accepted {len(rectangles)} rectangles")
+                        else:
+                            logger.info(f"[Thread {thread_name}:{thread_id}] Relaxed pass still found 0 rectangles")
+
+                    # If confidence is low or still zero rectangles, try alternative common scales and pick the one that accepts the most rectangles
+                    try:
+                        current_accept_count = len(rectangles)
+                        low_confidence = (scale_result.confidence < 0.5) if scale_result else True
+                        if (low_confidence or current_accept_count == 0) and len(raw_rects) > 0:
+                            logger.warning(f"[Thread {thread_name}:{thread_id}] Low-confidence scale ({scale_result.confidence if scale_result else 'n/a'}). Evaluating alternative scales")
+                            candidate_scales = [48.0, 96.0, 24.0]
+                            # Include optimized detector adjusted scales if available
+                            for v in getattr(self.optimized_scale_detector, 'adjusted_scales', {}).values():
+                                if isinstance(v, (int, float)) and v not in candidate_scales:
+                                    candidate_scales.append(float(v))
+                            best_scale = scale_factor or 48.0
+                            best_count = current_accept_count
+                            best_rects = rectangles
+                            def accept_rects_for_scale(test_scale: float) -> List[Dict[str, Any]]:
+                                min_sqft, max_sqft = 10, 2000
+                                min_units = min_sqft * (test_scale ** 2)
+                                max_units = max_sqft * (test_scale ** 2)
+                                accepted: List[Dict[str, Any]] = []
+                                for rr in raw_rects:
+                                    try:
+                                        if any(coord is None for coord in [rr.get('x0'), rr.get('y0'), rr.get('x1'), rr.get('y1')]):
+                                            continue
+                                        w = float(rr['x1'] - rr['x0'])
+                                        h = float(rr['y1'] - rr['y0'])
+                                        if w <= 0 or h <= 0:
+                                            continue
+                                        a = w * h
+                                        if a > min_units and a < max_units:
+                                            est_sqft = a / (test_scale ** 2)
+                                            accepted.append({
+                                                'type': 'rect',
+                                                'coords': [float(rr['x0']), float(rr['y0']), float(rr['x1']), float(rr['y1'])],
+                                                'x0': float(rr['x0']),
+                                                'y0': float(rr['y0']),
+                                                'x1': float(rr['x1']),
+                                                'y1': float(rr['y1']),
+                                                'width': w,
+                                                'height': h,
+                                                'area': a,
+                                                'area_sqft': est_sqft,
+                                                'width_ft': w / test_scale,
+                                                'height_ft': h / test_scale,
+                                                'center_x': float(rr['x0'] + w / 2),
+                                                'center_y': float(rr['y0'] + h / 2),
+                                                'aspect_ratio': w / h if h > 0 else 0,
+                                                'room_probability': 0.5,
+                                                'estimated_sqft': est_sqft
+                                            })
+                                    except Exception:
+                                        continue
+                                return sorted(accepted, key=lambda r: r['area'], reverse=True)
+                            for cand in candidate_scales:
+                                accepted = accept_rects_for_scale(cand)
+                                if len(accepted) > best_count:
+                                    best_count = len(accepted)
+                                    best_scale = cand
+                                    best_rects = accepted
+                            if best_count > current_accept_count:
+                                logger.info(f"[Thread {thread_name}:{thread_id}] Switching scale to {best_scale:.1f} px/ft based on rectangle acceptance ({best_count} vs {current_accept_count})")
+                                scale_factor = best_scale
+                                rectangles = best_rects
+                                # Adjust scale_result to reflect change
+                                if scale_result:
+                                    scale_result.scale_factor = best_scale
+                                    scale_result.detection_method = "alt_scale_rectangles"
+                                    scale_result.confidence = max(scale_result.confidence, 0.6)
+                    except Exception as _e:
+                        logger.debug(f"[Thread {thread_name}:{thread_id}] Alternative scale evaluation failed: {_e}")
                     
                     logger.info(f"[Thread {thread_name}:{thread_id}] Successfully processed {len(rectangles)} valid rectangles")
                     rectangles = sorted(rectangles, key=lambda r: r['area'], reverse=True)

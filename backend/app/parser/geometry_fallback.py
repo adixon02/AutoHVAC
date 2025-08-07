@@ -121,6 +121,14 @@ class GeometryFallbackParser:
         # If polygon detection didn't work, try rectangle extraction
         if not rooms:
             logger.info("Polygon detection failed or no walls found, trying rectangle extraction")
+            # Guard against None raw_geo to avoid 'NoneType' attribute errors
+            if raw_geo is None:
+                logger.error("Raw geometry is None; cannot perform rectangle extraction")
+                raise RoomDetectionFailedError(
+                    walls_found=0,
+                    polygons_found=0,
+                    confidence=0.0
+                )
             rooms = self._extract_rooms_from_geometry(raw_geo, raw_text)
         
         if not rooms:
