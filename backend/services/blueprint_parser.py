@@ -513,8 +513,20 @@ class BlueprintParser:
                     enhanced_rooms.append(enhanced_room)
                 
                 # Validation Gate 4: Check room detection results
-                if len(enhanced_rooms) < 3:
-                    total_area = sum(room.area for room in enhanced_rooms)
+                total_area = sum(room.area for room in enhanced_rooms) if enhanced_rooms else 0
+                avg_room_size = total_area / len(enhanced_rooms) if enhanced_rooms else 0
+                
+                # Check for scale detection issues - rooms averaging < 20 sqft is impossible
+                if enhanced_rooms and avg_room_size < 20:
+                    logger.error(f"SCALE ERROR: Average room size {avg_room_size:.1f} sqft indicates wrong scale")
+                    logger.error(f"Detected {len(enhanced_rooms)} rooms with total area {total_area:.1f} sqft")
+                    # Log room sizes for debugging
+                    for i, room in enumerate(enhanced_rooms[:5]):  # Log first 5 rooms
+                        logger.error(f"  Room {i+1}: {room.name} = {room.area:.1f} sqft")
+                    logger.error(f"Scale detection failed - try SCALE_OVERRIDE=48 or SCALE_OVERRIDE=96")
+                    # Don't raise error, try to continue with fallback
+                    
+                if len(enhanced_rooms) < 3 or total_area < 500:
                     if total_area < 500:
                         logger.error(f"Insufficient rooms detected: {len(enhanced_rooms)} rooms, {total_area:.0f} sqft")
                         logger.error(f"Scale may be incorrect - consider setting SCALE_OVERRIDE=48 for 1/4\"=1' blueprints")

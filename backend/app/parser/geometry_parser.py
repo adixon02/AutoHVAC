@@ -482,7 +482,9 @@ class GeometryParser:
                         # Do not override a strong text/implicit detection
                         strong_text_detection = bool(scale_result and str(scale_result.detection_method).startswith("optimized_") and scale_result.confidence >= 0.75)
                         implicit_detection = bool(scale_result and "implicit" in str(scale_result.detection_method).lower() and scale_result.confidence >= 0.7)
-                        if (low_confidence or current_accept_count == 0) and not (strong_text_detection or implicit_detection) and len(raw_rects) > 0:
+                        # More aggressive: always try alternatives if confidence < 0.4 OR no rectangles
+                        should_try_alternatives = (scale_result and scale_result.confidence < 0.4) or current_accept_count == 0
+                        if should_try_alternatives and not (strong_text_detection or implicit_detection) and len(raw_rects) > 0:
                             logger.warning(f"[Thread {thread_name}:{thread_id}] Low-confidence scale ({scale_result.confidence if scale_result else 'n/a'}). Evaluating alternative scales")
                             # Restrict to plausible architectural scales only
                             candidate_scales = list(self.PLAUSIBLE_SCALES)
@@ -533,25 +535,65 @@ class GeometryParser:
                                 accepted = accept_rects_for_scale(cand)
                                 # Plausibility checks: minimum count and total area within residential bounds
                                 total_area_sqft = sum(r['area'] / (cand ** 2) for r in accepted)
-                                plausible_area = self.MIN_RES_AREA_SQFT <= total_area_sqft <= self.MAX_RES_AREA_SQFT
-                                enough_rooms = len(accepted) >= 10  # avoid switching based on a few rectangles
-                                if len(accepted) > best_count and plausible_area and enough_rooms:
+                                # Relaxed area bounds for recovery - focus on reasonable room sizes
+                                avg_room_size = total_area_sqft / len(accepted) if accepted else 0
+                                reasonable_avg = 30 <= avg_room_size <= 800  # Most rooms are 30-800 sqft
+                                # Much more permissive: 3+ rooms OR reasonable total area
+                                enough_rooms = len(accepted) >= 3
+                                plausible_area = 400 <= total_area_sqft <= 10000  # Wider range for recovery
+                                # Accept if we have enough rooms OR reasonable area (not both required)
+                                if len(accepted) > best_count and (enough_rooms or (plausible_area and reasonable_avg)):
                                     best_count = len(accepted)
                                     best_scale = cand
                                     best_rects = accepted
                                     best_area_sqft = total_area_sqft
                             if best_count > current_accept_count:
-                                logger.info(f"[Thread {thread_name}:{thread_id}] Switching scale to {best_scale:.1f} px/ft based on rectangle acceptance ({best_count} vs {current_accept_count}), total_area≈{best_area_sqft:.0f} sqft")
+                                avg_room = best_area_sqft / best_count if best_count > 0 else 0
+                                logger.info(f"[Thread {thread_name}:{thread_id}] Switching scale to {best_scale:.1f} px/ft based on rectangle acceptance ({best_count} vs {current_accept_count}), total_area≈{best_area_sqft:.0f} sqft, avg_room≈{avg_room:.0f} sqft")
                                 scale_factor = best_scale
                                 rectangles = best_rects
                                 # Adjust scale_result to reflect change
                                 if scale_result:
                                     scale_result.scale_factor = best_scale
                                     scale_result.detection_method = "alt_scale_rectangles_plausible"
-                                    # Confidence improves if area and count are plausible
-                                    scale_result.confidence = max(scale_result.confidence, 0.7)
+                                    # Higher confidence if average room size is reasonable
+                                    if 50 <= avg_room <= 500:
+                                        scale_result.confidence = max(scale_result.confidence, 0.75)
+                                    else:
+                                        scale_result.confidence = max(scale_result.confidence, 0.6)
                     except Exception as _e:
                         logger.debug(f"[Thread {thread_name}:{thread_id}] Alternative scale evaluation failed: {_e}")
+                    
+                    # Final validation: if we have rectangles but they're all tiny, the scale is likely wrong
+                    if rectangles and scale_factor:
+                        avg_sqft = sum(r.get('area_sqft', 0) for r in rectangles if r.get('area_sqft')) / len(rectangles)
+                        if avg_sqft < 10 and len(rectangles) > 2:
+                            logger.warning(f"[Thread {thread_name}:{thread_id}] Average room size {avg_sqft:.1f} sqft is impossibly small - scale likely wrong")
+                            # Try doubling the scale
+                            test_scale = scale_factor * 2
+                            if test_scale in [48.0, 96.0]:  # Only if it's a plausible scale
+                                logger.info(f"[Thread {thread_name}:{thread_id}] Testing doubled scale: {test_scale:.1f} px/ft")
+                                new_rects = []
+                                for rect in rectangles:
+                                    new_sqft = rect['area'] / (test_scale ** 2)
+                                    if 10 <= new_sqft <= 2000:  # Reasonable room size
+                                        new_rect = rect.copy()
+                                        new_rect['area_sqft'] = new_sqft
+                                        new_rect['width_ft'] = rect['width'] / test_scale
+                                        new_rect['height_ft'] = rect['height'] / test_scale
+                                        new_rect['estimated_sqft'] = new_sqft
+                                        new_rects.append(new_rect)
+                                
+                                if new_rects:
+                                    new_avg = sum(r['area_sqft'] for r in new_rects) / len(new_rects)
+                                    if 30 <= new_avg <= 500:  # Much more reasonable
+                                        logger.info(f"[Thread {thread_name}:{thread_id}] Scale correction successful: {scale_factor:.1f} -> {test_scale:.1f} px/ft, avg room {new_avg:.1f} sqft")
+                                        scale_factor = test_scale
+                                        rectangles = new_rects
+                                        if scale_result:
+                                            scale_result.scale_factor = test_scale
+                                            scale_result.detection_method = "scale_corrected_tiny_rooms"
+                                            scale_result.confidence = 0.65
                     
                     logger.info(f"[Thread {thread_name}:{thread_id}] Successfully processed {len(rectangles)} valid rectangles")
                     rectangles = sorted(rectangles, key=lambda r: r['area'], reverse=True)

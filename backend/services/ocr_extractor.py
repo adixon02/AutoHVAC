@@ -17,6 +17,14 @@ except ImportError:
     PADDLEOCR_AVAILABLE = False
     logging.warning("PaddleOCR not available - OCR extraction will be limited")
 
+try:
+    import pytesseract
+    from PIL import Image
+    TESSERACT_AVAILABLE = True
+except ImportError:
+    TESSERACT_AVAILABLE = False
+    logging.warning("Tesseract not available - OCR extraction will be limited")
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,15 +62,13 @@ class OCRExtractor:
 
         self.use_gpu = use_gpu
         self.ocr = None
+        self.use_tesseract = False
 
         # Opt-in gate to avoid heavy install issues by default
         enable_paddle = os.getenv("ENABLE_PADDLE_OCR", "false").lower() in {"1", "true", "yes"}
+        enable_tesseract = os.getenv("ENABLE_TESSERACT_OCR", "true").lower() in {"1", "true", "yes"}  # Default to enabled
 
-        if not enable_paddle:
-            logger.info("ENABLE_PADDLE_OCR is disabled; OCR will be skipped and pdfplumber used instead")
-            return
-
-        if PADDLEOCR_AVAILABLE:
+        if enable_paddle and PADDLEOCR_AVAILABLE:
             try:
                 # Initialize PaddleOCR with stable, CPU-friendly defaults
                 self.ocr = PaddleOCR(
@@ -73,10 +79,22 @@ class OCRExtractor:
                 )
                 logger.info("PaddleOCR initialized successfully - enhanced blueprint parsing enabled")
             except Exception as e:
-                logger.warning(f"PaddleOCR initialization failed (OCR disabled): {str(e)}")
+                logger.warning(f"PaddleOCR initialization failed: {str(e)}")
                 self.ocr = None
-        else:
-            logger.warning("PaddleOCR not installed; set ENABLE_PADDLE_OCR=true after installing paddlepaddle and paddleocr")
+        
+        # Fall back to Tesseract if PaddleOCR not available
+        if not self.ocr and enable_tesseract and TESSERACT_AVAILABLE:
+            try:
+                # Test that tesseract is installed
+                pytesseract.get_tesseract_version()
+                self.use_tesseract = True
+                logger.info("Tesseract OCR initialized as fallback - basic text extraction enabled")
+            except Exception as e:
+                logger.warning(f"Tesseract initialization failed: {str(e)}")
+                self.use_tesseract = False
+        
+        if not self.ocr and not self.use_tesseract:
+            logger.info("No OCR engine available; will use pdfplumber text extraction only")
     
     def extract_all_text(self, image: np.ndarray) -> List[TextRegion]:
         """Extract all text from blueprint image
@@ -87,8 +105,58 @@ class OCRExtractor:
         Returns:
             List of TextRegion objects
         """
+        if self.ocr:
+            return self._extract_with_paddle(image)
+        elif self.use_tesseract:
+            return self._extract_with_tesseract(image)
+        else:
+            logger.debug("No OCR engine available; returning empty results")
+            return []
+    
+    def _extract_with_tesseract(self, image: np.ndarray) -> List[TextRegion]:
+        """Extract text using Tesseract OCR as fallback"""
+        try:
+            # Convert BGR to RGB for PIL
+            import cv2
+            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(rgb_image)
+            
+            # Get detailed OCR data
+            ocr_data = pytesseract.image_to_data(pil_image, output_type=pytesseract.Output.DICT)
+            
+            text_regions = []
+            n_boxes = len(ocr_data['level'])
+            
+            for i in range(n_boxes):
+                # Only process word-level text with confidence > 30
+                if ocr_data['conf'][i] > 30 and ocr_data['text'][i].strip():
+                    text = ocr_data['text'][i]
+                    x, y, w, h = ocr_data['left'][i], ocr_data['top'][i], ocr_data['width'][i], ocr_data['height'][i]
+                    
+                    # Convert to bbox format similar to PaddleOCR
+                    bbox = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
+                    confidence = ocr_data['conf'][i] / 100.0
+                    
+                    # Classify the text region type
+                    region_type = self._classify_text_region(text)
+                    
+                    text_regions.append(TextRegion(
+                        text=text,
+                        bbox=bbox,
+                        confidence=confidence,
+                        region_type=region_type
+                    ))
+            
+            logger.info(f"Tesseract extracted {len(text_regions)} text regions")
+            return text_regions
+            
+        except Exception as e:
+            logger.error(f"Tesseract extraction failed: {str(e)}")
+            return []
+    
+    def _extract_with_paddle(self, image: np.ndarray) -> List[TextRegion]:
+        """Extract text using PaddleOCR"""
         if not self.ocr:
-            logger.info("OCR not available; returning empty results (pdfplumber fallback in other modules)")
             return []
         
         try:
@@ -121,11 +189,11 @@ class OCRExtractor:
                     region_type=region_type
                 ))
             
-            logger.info(f"Extracted {len(text_regions)} text regions")
+            logger.info(f"PaddleOCR extracted {len(text_regions)} text regions")
             return text_regions
             
         except Exception as e:
-            logger.error(f"OCR extraction failed: {str(e)}")
+            logger.error(f"PaddleOCR extraction failed: {str(e)}")
             return []
     
     def extract_dimensions(self, image: np.ndarray) -> List[DimensionData]:
