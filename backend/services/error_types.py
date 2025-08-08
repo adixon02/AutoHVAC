@@ -124,6 +124,28 @@ class ResourceError(CriticalError):
     pass
 
 
+class NeedsInputError(CriticalError):
+    """
+    Critical error indicating user input is required to proceed.
+    
+    Examples:
+    - Scale cannot be determined (needs SCALE_OVERRIDE)
+    - Blueprint quality too low to process
+    - Missing critical envelope data
+    - Too many/too few rooms detected
+    """
+    
+    def __init__(self, input_type: str, message: str, details: Optional[Dict[str, Any]] = None):
+        """
+        Args:
+            input_type: Type of input needed ('scale', 'plan_quality', 'envelope_gaps')
+            message: Descriptive error message
+            details: Additional context (current values, thresholds, etc.)
+        """
+        super().__init__(message, details)
+        self.input_type = input_type
+
+
 def categorize_exception(e: Exception) -> HVACCalculationError:
     """
     Categorize a generic exception into appropriate error type.

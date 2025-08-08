@@ -49,6 +49,71 @@ class BlueprintParsingError(Exception):
     pass
 
 
+class PageContext:
+    """Thread-safe context tracker for ensuring consistent page usage throughout pipeline."""
+    
+    def __init__(self):
+        self.selected_page: Optional[int] = None
+        self.scale_px_per_ft: Optional[float] = None
+        import threading
+        self.lock = threading.Lock()
+    
+    def set_page(self, page_num: int) -> None:
+        """Set the selected page (0-indexed)."""
+        with self.lock:
+            if self.selected_page is not None and self.selected_page != page_num:
+                from services.error_types import NeedsInputError
+                raise NeedsInputError(
+                    input_type='plan_quality',
+                    message=f"Page mismatch detected! Pipeline using page {self.selected_page}, attempted to use page {page_num}",
+                    details={
+                        'current_page': self.selected_page,
+                        'attempted_page': page_num,
+                        'recommendation': 'Internal error - please report this issue'
+                    }
+                )
+            self.selected_page = page_num
+            logger.info(f"[PAGE CONTEXT] Selected page set to {page_num} (0-indexed)")
+    
+    def get_page(self) -> int:
+        """Get the selected page, raising error if not set."""
+        with self.lock:
+            if self.selected_page is None:
+                raise ValueError("Page not set in context!")
+            return self.selected_page
+    
+    def set_scale(self, px_per_ft: float) -> None:
+        """Set the scale factor."""
+        with self.lock:
+            if self.scale_px_per_ft is not None and abs(self.scale_px_per_ft - px_per_ft) > 1.0:
+                from services.error_types import NeedsInputError
+                raise NeedsInputError(
+                    input_type='scale',
+                    message=f"Scale mismatch! Already using {self.scale_px_per_ft} px/ft, cannot switch to {px_per_ft}",
+                    details={
+                        'current_scale': self.scale_px_per_ft,
+                        'attempted_scale': px_per_ft,
+                        'recommendation': 'Use SCALE_OVERRIDE to force a specific scale'
+                    }
+                )
+            self.scale_px_per_ft = px_per_ft
+            logger.info(f"[SCALE CONTEXT] Scale set to {px_per_ft} px/ft")
+    
+    def get_scale(self) -> float:
+        """Get the scale, raising error if not set."""
+        with self.lock:
+            if self.scale_px_per_ft is None:
+                from services.error_types import NeedsInputError
+                raise NeedsInputError(
+                    input_type='scale',
+                    message="Scale not determined - cannot proceed with calculations",
+                    details={
+                        'recommendation': 'Set SCALE_OVERRIDE=48 for 1/4"=1\' or SCALE_OVERRIDE=96 for 1/8"=1\' blueprints'
+                    }
+                )
+            return self.scale_px_per_ft
+
+
 class BlueprintParser:
     """
     Main blueprint parser service that converts PDF files to comprehensive JSON
@@ -371,12 +436,19 @@ class BlueprintParser:
                 if quality_score < 50:
                     logger.error(f"Data quality score too low: {quality_score:.0f}")
                     critical_issues = [w.message for w in validation_result.issues if w.severity == 'critical']
-                    if critical_issues:
-                        raise LowConfidenceError(
-                            confidence=quality_score / 100,
-                            threshold=0.5,
-                            issues=critical_issues
-                        )
+                    
+                    # Always raise error if quality score is too low, not just when critical issues exist
+                    from services.error_types import NeedsInputError
+                    raise NeedsInputError(
+                        input_type='plan_quality',
+                        message=f"Blueprint quality score ({quality_score:.0f}) below minimum threshold (50). Cannot proceed with load calculations.",
+                        details={
+                            'quality_score': quality_score,
+                            'threshold': 50,
+                            'issues': critical_issues if critical_issues else [w.message for w in validation_result.issues][:5],
+                            'recommendation': 'Please provide a clearer blueprint or use PARSING_MODE=traditional_first'
+                        }
+                    )
                 
             except BlueprintValidationError as e:
                 logger.error(f"[VALIDATION] Critical validation failure: {e.message}")
@@ -1080,21 +1152,73 @@ class BlueprintParser:
                     logger.error(f"  Total area: {total_area:.0f} sq ft - likely entire floor detected as one room")
                     parsing_metadata.warnings.append(f"Square footage likely incorrect - only 1 room from {rect_count} rectangles")
             
-            # Check for unrealistic room sizes
-            if avg_room_size > 600:
+            # CRITICAL VALIDATION GATE: Check for unrealistic room sizes
+            # This is a hard stop - we cannot compute accurate loads with bad geometry
+            from services.error_types import NeedsInputError
+            
+            if avg_room_size < 40:
+                # This indicates scale is likely wrong - stop processing
+                logger.error(f"CRITICAL: Average room size {avg_room_size:.0f} sq ft is too small (<40 sqft)")
+                raise NeedsInputError(
+                    input_type='scale',
+                    message=f"Average room size ({avg_room_size:.0f} sqft) indicates incorrect scale. Cannot proceed.",
+                    details={
+                        'avg_room_sqft': avg_room_size,
+                        'total_sqft': total_area,
+                        'room_count': room_count,
+                        'min_acceptable': 40,
+                        'recommendation': 'Set SCALE_OVERRIDE=48 for 1/4"=1\' or SCALE_OVERRIDE=96 for 1/8"=1\' blueprints'
+                    }
+                )
+            elif avg_room_size > 600:
                 logger.warning(f"Average room size {avg_room_size:.0f} sq ft exceeds typical residential (>600)")
                 parsing_metadata.warnings.append(f"Room sizes may be overestimated (avg: {avg_room_size:.0f} sq ft)")
-            elif avg_room_size < 40 and room_count > 2:
-                logger.warning(f"Average room size {avg_room_size:.0f} sq ft below typical residential (<40)")
-                parsing_metadata.warnings.append(f"Room sizes may be underestimated (avg: {avg_room_size:.0f} sq ft)")
             
-            # Check total area bounds
-            if total_area > 6000:
+            # CRITICAL VALIDATION GATE: Check total area bounds
+            if total_area < 500:
+                # Too small for a typical home - likely scale issue
+                logger.error(f"CRITICAL: Total area {total_area:.0f} sq ft below minimum for SFH (<500)")
+                raise NeedsInputError(
+                    input_type='scale',
+                    message=f"Total area ({total_area:.0f} sqft) too small for residential building. Cannot proceed.",
+                    details={
+                        'total_sqft': total_area,
+                        'room_count': room_count,
+                        'min_acceptable': 500,
+                        'max_acceptable': 10000,
+                        'recommendation': 'Check scale or provide SCALE_OVERRIDE'
+                    }
+                )
+            elif total_area > 10000:
+                # Too large for typical SFH - likely commercial or scale issue
+                logger.error(f"CRITICAL: Total area {total_area:.0f} sq ft exceeds SFH maximum (>10000)")
+                raise NeedsInputError(
+                    input_type='plan_quality',
+                    message=f"Total area ({total_area:.0f} sqft) exceeds single-family home range.",
+                    details={
+                        'total_sqft': total_area,
+                        'room_count': room_count,
+                        'max_acceptable': 10000,
+                        'recommendation': 'This appears to be a commercial building or multi-unit. Please verify.'
+                    }
+                )
+            elif total_area > 6000:
                 logger.warning(f"Total area {total_area:.0f} sq ft exceeds typical home size (>6000)")
                 parsing_metadata.warnings.append(f"Total area {total_area:.0f} sq ft may be overestimated")
-            elif total_area < 600 and room_count > 3:
-                logger.warning(f"Total area {total_area:.0f} sq ft too small for {room_count} rooms")
-                parsing_metadata.warnings.append(f"Total area {total_area:.0f} sq ft may be underestimated")
+            
+            # CRITICAL VALIDATION GATE: Check room count
+            if room_count > 40:
+                logger.error(f"CRITICAL: {room_count} rooms detected - exceeds typical SFH")
+                raise NeedsInputError(
+                    input_type='plan_quality',
+                    message=f"Too many rooms detected ({room_count}). Likely detecting non-room elements.",
+                    details={
+                        'room_count': room_count,
+                        'max_typical': 40,
+                        'avg_room_sqft': avg_room_size,
+                        'recommendation': 'Use PARSING_MODE=traditional_first or adjust MIN_ROOM_SQFT'
+                    }
+                )
             
             # Log validation results
             logger.info(f"Square footage validation: {room_count} rooms, {total_area:.0f} total sq ft, {avg_room_size:.0f} avg sq ft/room")
