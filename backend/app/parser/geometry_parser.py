@@ -624,8 +624,21 @@ class GeometryParser:
             logger.info(f"[Thread {thread_name}:{thread_id}] Extracting polylines with smart extractor...")
             poly_start = time.time()
             
-            # Use smart extractor that never blocks
+            # Use smart extractor that prioritizes rectangles
             extraction_result = smart_extractor.extract_drawings(pdf_path, page_number)
+            
+            # Log what we got from each source
+            pdfplumber_rect_count = len(pdfplumber_results.get('rectangles', []))
+            smart_drawing_count = len(extraction_result.drawings)
+            
+            logger.info(f"[Thread {thread_name}:{thread_id}] Extraction summary:")
+            logger.info(f"[Thread {thread_name}:{thread_id}]   • pdfplumber rectangles: {pdfplumber_rect_count}")
+            logger.info(f"[Thread {thread_name}:{thread_id}]   • smart extractor drawings: {smart_drawing_count}")
+            logger.info(f"[Thread {thread_name}:{thread_id}]   • extraction method: {extraction_result.extraction_method}")
+            
+            # NOTE: We keep pdfplumber's rectangles as they are actual room-sized rectangles
+            # PyMuPDF's drawings are too granular (text boxes, tiny elements)
+            # The smart extractor is mainly useful for lines/polylines for wall detection
             
             # Convert to legacy polyline format
             polylines = []

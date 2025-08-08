@@ -63,3 +63,15 @@ commit/b3850c1b238ca8240178aafd80acd9c0e9d1866a
 - Blueprint: blueprint-example1-99006.pdf
 - Total Heating Load 65,732 BTU/hr ≈ 5.5 tons Total Cooling Load 29,732 BTU/hr ≈ 2.5 tons
 - Expected loads: Heating load: 61,393 BTU/hr | Cooling load: 23,314 BTU/hr
+
+commit/2f5b76035fc56e6199ea3b8afe50c29ccfeedc44
+- Jod ID: db4ec900-636c-4e35-b1ab-1ea8257ae98e
+- Blueprint: blueprint-example1-99006.pdf
+- Total Heating Load 63,919 BTU/hr ≈ 5.3 tons Total Cooling Load 25,071 BTU/hr ≈ 2.1 tons
+- Expected loads: Heating load: 61,393 BTU/hr | Cooling load: 23,314 BTU/hr
+
+commit/2f5b76035fc56e6199ea3b8afe50c29ccfeedc44
+- Jod ID: 5a353f48-95d4-453f-8faf-97fc318b0cba
+- Blueprint: blueprint-example2-99006.pdf
+- Total Heating Load 1,392 BTU/hr ≈ 0.1 tons Total Cooling Load 485 BTU/hr ≈ 0.0 tons
+- Expected loads: Heating load: 74,980 BTU/hr | Cooling load: 25,520 BTU/hr

@@ -38,7 +38,8 @@ boto3>=1.34.0
 
 # Enhanced blueprint parsing with OCR
 # OCR is now enabled by default for better accuracy
-paddlepaddle==2.5.2
-paddleocr>=2.7.0.3
-opencv-python>=4.8.0.74
+paddlepaddle==2.6.1
+paddleocr==2.7.3
+opencv-python==4.6.0.66
+opencv-contrib-python==4.6.0.66
 scipy>=1.11.0

@@ -30,6 +30,16 @@ from services.blueprint_validator import (
     calculate_data_quality_score
 )
 
+# Import our new lean components
+try:
+    from services.page_classifier import page_classifier, PageType
+    from services.scale_extractor import scale_extractor
+    from services.progressive_extractor import progressive_extractor
+    USE_LEAN_EXTRACTION = True
+except ImportError:
+    logger.warning("Lean extraction components not available, using legacy methods")
+    USE_LEAN_EXTRACTION = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -216,6 +226,8 @@ class BlueprintParser:
             
             # Stage 4: AI analysis and room identification
             logger.info("Stage 4: AI analysis and room identification")
+            # Store PDF path for GPT-4V to use
+            self.current_pdf_path = pdf_path
             rooms = self._perform_ai_analysis(raw_geometry, raw_text, zip_code, parsing_metadata)
             
             # Stage 5: Compile final blueprint schema
@@ -295,6 +307,47 @@ class BlueprintParser:
     def _analyze_pages(self, pdf_path: str, metadata: ParsingMetadata) -> tuple[List[PageAnalysisResult], int]:
         """Analyze all PDF pages and select the best one for processing"""
         try:
+            # Use lean page classifier if available
+            if USE_LEAN_EXTRACTION:
+                logger.info("Using lean page classifier for fast page analysis")
+                classifications = page_classifier.classify_pages(pdf_path, quick_mode=True)
+                
+                # Find best floor plan page
+                selected_page = 1  # Default
+                page_results = []
+                
+                for classification in classifications:
+                    # Convert to PageAnalysisResult format
+                    is_selected = (classification.page_type == PageType.FLOOR_PLAN and 
+                                 classification.confidence > 0.5 and 
+                                 selected_page == 1)  # Select first good floor plan
+                    
+                    if is_selected:
+                        selected_page = classification.page_num + 1  # Convert to 1-indexed
+                    
+                    page_result = PageAnalysisResult(
+                        page_number=classification.page_num + 1,  # 1-indexed
+                        selected=is_selected,
+                        score=classification.confidence,
+                        rectangle_count=classification.features.get('drawing_count', 0),
+                        room_label_count=classification.features.get('room_keyword_count', 0),
+                        dimension_count=0,  # Not tracked in lean version
+                        geometric_complexity=classification.features.get('drawing_count', 0) / 1000.0,
+                        text_element_count=classification.features.get('text_block_count', 0),
+                        processing_time_seconds=classification.processing_time,
+                        too_complex=classification.features.get('drawing_count', 0) > 50000,
+                        errors=[]
+                    )
+                    page_results.append(page_result)
+                
+                metadata.page_analyses = page_results
+                metadata.pdf_page_count = len(classifications)
+                metadata.selected_page = selected_page
+                
+                logger.info(f"Lean classifier selected page {selected_page} as floor plan")
+                return page_results, selected_page
+            
+            # Fallback to legacy page analyzer
             selected_page, analyses = self.page_analyzer.analyze_pdf_pages(pdf_path)
             
             # Convert to our schema format
@@ -348,19 +401,53 @@ class BlueprintParser:
         """Extract geometry from PDF page with thread safety and validation"""
         try:
             def geometry_operation(path: str):
-                result = self.geometry_parser.parse(path, page_number=page_number)
-                
-                # Validation Gate 1: Check scale confidence
-                if hasattr(result, 'scale_result') and result.scale_result:
-                    scale_conf = result.scale_result.confidence
-                    if scale_conf < 0.6:
-                        logger.error(f"Scale confidence too low: {scale_conf:.2f}")
-                        raise ScaleDetectionError(
-                            detected_scale=result.scale_result.scale_factor,
-                            confidence=scale_conf,
-                            alternatives=result.scale_result.alternative_scales,
-                            validation_issues=result.scale_result.validation_results
-                        )
+                # Use lean scale extraction if available
+                if USE_LEAN_EXTRACTION:
+                    logger.info("Using lean scale extraction for better accuracy")
+                    
+                    # First extract OCR text from the page
+                    import fitz
+                    doc = fitz.open(path)
+                    page = doc[page_number]
+                    ocr_text = page.get_text()
+                    doc.close()
+                    
+                    # Extract scale using our lean extractor
+                    scale_result = scale_extractor.extract_scale(ocr_text, page_number)
+                    logger.info(f"Lean scale: {scale_result.pixels_per_foot:.1f} px/ft "
+                              f"({scale_result.scale_notation}) confidence: {scale_result.confidence:.2f}")
+                    
+                    # Parse geometry with detected scale
+                    result = self.geometry_parser.parse(path, page_number=page_number)
+                    
+                    # Override scale with our better detection
+                    if hasattr(result, 'scale_factor'):
+                        result.scale_factor = scale_result.pixels_per_foot
+                    if hasattr(result, 'scale_result'):
+                        # Update the scale result with our lean detection
+                        result.scale_result.scale_factor = scale_result.pixels_per_foot
+                        result.scale_result.confidence = scale_result.confidence
+                        result.scale_result.detection_method = f"lean_ocr_{scale_result.source}"
+                    
+                    # Validation: Only warn if confidence is low (don't fail)
+                    if scale_result.confidence < 0.6:
+                        logger.warning(f"Scale confidence low: {scale_result.confidence:.2f}, but proceeding")
+                        metadata.warnings.append(f"Low scale confidence: {scale_result.confidence:.2f}")
+                else:
+                    # Use legacy extraction
+                    result = self.geometry_parser.parse(path, page_number=page_number)
+                    
+                    # Validation Gate 1: Check scale confidence
+                    if hasattr(result, 'scale_result') and result.scale_result:
+                        scale_conf = result.scale_result.confidence
+                        if scale_conf < 0.6:
+                            logger.error(f"Scale confidence too low: {scale_conf:.2f}")
+                            raise ScaleDetectionError(
+                                detected_scale=result.scale_result.scale_factor,
+                                confidence=scale_conf,
+                                alternatives=result.scale_result.alternative_scales,
+                                validation_issues=result.scale_result.validation_results
+                            )
                 
                 # Validation Gate 2: Check geometry quality
                 if hasattr(result, 'rectangles') and len(result.rectangles) < 1:
@@ -458,6 +545,46 @@ class BlueprintParser:
     def _perform_ai_analysis(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], zip_code: str, metadata: ParsingMetadata) -> List[Room]:
         """Perform AI analysis to identify rooms with validation"""
         try:
+            # First try GPT-4 Vision if available for maximum accuracy
+            import os
+            if os.getenv("OPENAI_API_KEY") and os.getenv("USE_GPT4_VISION", "true").lower() == "true":
+                try:
+                    logger.info("Attempting GPT-4 Vision analysis for maximum accuracy...")
+                    from services.gpt4v_blueprint_analyzer import get_gpt4v_analyzer
+                    
+                    # Get the PDF path from current processing
+                    pdf_path = self.current_pdf_path if hasattr(self, 'current_pdf_path') else None
+                    if pdf_path and os.path.exists(pdf_path):
+                        gpt4v = get_gpt4v_analyzer()
+                        analysis = gpt4v.analyze_blueprint(pdf_path, zip_code)
+                        
+                        if analysis and hasattr(analysis, 'total_area_sqft') and analysis.total_area_sqft and analysis.total_area_sqft > 100:
+                            logger.info(f"GPT-4 Vision successful: {len(analysis.rooms)} rooms, {analysis.total_area_sqft:.0f} sq ft")
+                            
+                            # Convert GPT-4V results to Room schema
+                            enhanced_rooms = []
+                            for gpt_room in analysis.rooms:
+                                room = Room(
+                                    name=gpt_room.name,
+                                    dimensions_ft=gpt_room.dimensions_ft,
+                                    floor=1,  # Default to first floor
+                                    windows=0,  # Extract from features if needed
+                                    orientation="unknown",
+                                    area=gpt_room.area_sqft,
+                                    room_type=gpt_room.room_type,
+                                    confidence=gpt_room.confidence,
+                                    center_position=(0.0, 0.0),
+                                    label_found=True,
+                                    dimensions_source="gpt4_vision"
+                                )
+                                enhanced_rooms.append(room)
+                            
+                            metadata.ai_status = ParsingStatus.SUCCESS
+                            return enhanced_rooms
+                except Exception as e:
+                    logger.warning(f"GPT-4 Vision analysis failed, falling back to traditional AI: {e}")
+            
+            # Fallback to original AI analysis
             # Convert back to schema objects for AI processing
             from app.parser.schema import RawGeometry, RawText
             

@@ -2,7 +2,10 @@ import os
 import logging
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load environment variables from .env files
+# Priority: .env.local (secrets) > .env (defaults)
+load_dotenv(".env.local")  # Load local secrets first (if exists)
+load_dotenv(".env")        # Load base config second (lower priority)
 
 logger = logging.getLogger(__name__)
 

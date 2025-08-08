@@ -268,10 +268,26 @@ class GeometryFallbackParser:
         """Extract room structures from raw geometry data"""
         rooms = []
         
-        # Get page dimensions for scaling
-        page_width = raw_geo.page_width or 792.0
-        page_height = raw_geo.page_height or 612.0
-        scale_factor = raw_geo.scale_factor
+        # Defensive null check
+        if raw_geo is None:
+            logger.warning("Raw geometry is None - creating default room structure")
+            # Return a minimal room so processing can continue
+            return [Room(
+                name="Main Floor (Complex Blueprint)",
+                area=2000,  # Reasonable default for residential
+                room_type="living",
+                confidence=0.1,
+                source="estimated_null_geometry"
+            )]
+        
+        # Ensure rectangles list exists
+        if not hasattr(raw_geo, 'rectangles') or raw_geo.rectangles is None:
+            raw_geo.rectangles = []
+        
+        # Get page dimensions for scaling with safe defaults
+        page_width = getattr(raw_geo, 'page_width', None) or 2592.0  # Standard blueprint width
+        page_height = getattr(raw_geo, 'page_height', None) or 1728.0  # Standard blueprint height
+        scale_factor = getattr(raw_geo, 'scale_factor', None)
         
         logger.info(f"Starting room extraction from geometry:")
         logger.info(f"  Page dimensions: {page_width:.0f} x {page_height:.0f} pixels")

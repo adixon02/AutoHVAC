@@ -1,295 +1,366 @@
 """
-Page Classification Module for Blueprint Analysis
-Identifies floor plan pages vs elevation/detail/schedule pages
+Intelligent page classification for blueprint PDFs
+Quickly identifies floor plan pages vs elevations/details
 """
 
-import cv2
-import numpy as np
 import logging
-from typing import Dict, Tuple, List, Optional
+import time
+from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
+from enum import Enum
+import fitz  # PyMuPDF
 
 logger = logging.getLogger(__name__)
 
 
+class PageType(Enum):
+    """Types of blueprint pages"""
+    FLOOR_PLAN = "floor_plan"
+    ELEVATION = "elevation"
+    SECTION = "section"
+    DETAIL = "detail"
+    SITE_PLAN = "site_plan"
+    TITLE = "title"
+    SCHEDULE = "schedule"
+    UNKNOWN = "unknown"
+
+
 @dataclass
 class PageClassification:
-    """Page classification result"""
-    page_type: str  # 'floor_plan', 'elevation', 'detail', 'schedule', 'title', 'unknown'
+    """Classification result for a PDF page"""
+    page_num: int
+    page_type: PageType
     confidence: float
-    features: Dict[str, float]
-    floor_level: Optional[str] = None  # 'first', 'second', 'basement', etc.
+    features: Dict[str, Any]
+    keywords_found: List[str]
+    processing_time: float
 
 
 class PageClassifier:
-    """Classify blueprint pages to identify floor plans"""
+    """
+    Fast page classification for blueprint PDFs
+    Goal: Identify floor plan pages in < 0.5s per page
+    """
     
-    def __init__(self):
-        """Initialize page classifier"""
-        self.min_line_length = 50  # Minimum line length to consider
-        self.min_contour_area = 1000  # Minimum contour area for rooms
+    # Keywords that strongly indicate page type
+    FLOOR_PLAN_KEYWORDS = [
+        "FLOOR PLAN", "FIRST FLOOR", "SECOND FLOOR", "GROUND FLOOR",
+        "LEVEL 1", "LEVEL 2", "LEVEL 3", "1ST FLOOR", "2ND FLOOR",
+        "MAIN FLOOR", "UPPER FLOOR", "LOWER FLOOR", "BASEMENT PLAN"
+    ]
     
-    def classify_page(self, image: np.ndarray, ocr_text: List[str] = None) -> PageClassification:
-        """Classify a blueprint page
+    ELEVATION_KEYWORDS = [
+        "ELEVATION", "NORTH ELEVATION", "SOUTH ELEVATION",
+        "EAST ELEVATION", "WEST ELEVATION", "FRONT ELEVATION",
+        "REAR ELEVATION", "SIDE ELEVATION", "LEFT ELEVATION", "RIGHT ELEVATION"
+    ]
+    
+    SECTION_KEYWORDS = [
+        "SECTION", "CROSS SECTION", "BUILDING SECTION",
+        "WALL SECTION", "DETAIL SECTION", "LONGITUDINAL SECTION"
+    ]
+    
+    DETAIL_KEYWORDS = [
+        "DETAIL", "TYPICAL DETAIL", "CONSTRUCTION DETAIL",
+        "ENLARGED DETAIL", "CONNECTION DETAIL", "FRAMING DETAIL"
+    ]
+    
+    SITE_KEYWORDS = [
+        "SITE PLAN", "PLOT PLAN", "LANDSCAPE PLAN",
+        "GRADING PLAN", "DRAINAGE PLAN", "SITE LAYOUT"
+    ]
+    
+    TITLE_KEYWORDS = [
+        "TITLE SHEET", "COVER SHEET", "INDEX", "PROJECT INFORMATION",
+        "GENERAL NOTES", "SHEET INDEX", "DRAWING LIST"
+    ]
+    
+    # Room-related keywords (weak indicators for floor plans)
+    ROOM_KEYWORDS = [
+        "BEDROOM", "BATHROOM", "KITCHEN", "LIVING", "DINING",
+        "CLOSET", "GARAGE", "ENTRY", "FOYER", "HALLWAY",
+        "MASTER", "GUEST", "OFFICE", "LAUNDRY", "PANTRY",
+        "FAMILY ROOM", "GREAT ROOM", "DEN", "STUDY"
+    ]
+    
+    def classify_pages(
+        self,
+        pdf_path: str,
+        quick_mode: bool = True
+    ) -> List[PageClassification]:
+        """
+        Classify all pages in a PDF
         
         Args:
-            image: OpenCV image array (BGR format)
-            ocr_text: Optional list of OCR text from the page
+            pdf_path: Path to PDF file
+            quick_mode: If True, use fast extraction (< 0.5s per page)
             
         Returns:
-            PageClassification object
+            List of page classifications sorted by confidence
         """
-        # Extract features from the image
-        features = self._extract_page_features(image)
+        classifications = []
         
-        # Add text-based features if available
-        if ocr_text:
-            text_features = self._extract_text_features(ocr_text)
-            features.update(text_features)
+        try:
+            doc = fitz.open(pdf_path)
+            total_pages = len(doc)
+            
+            logger.info(f"Classifying {total_pages} pages in {pdf_path}")
+            
+            for page_num in range(total_pages):
+                start_time = time.time()
+                
+                # Classify single page
+                classification = self._classify_page(
+                    doc[page_num],
+                    page_num,
+                    quick_mode
+                )
+                
+                classification.processing_time = time.time() - start_time
+                classifications.append(classification)
+                
+                logger.debug(f"Page {page_num + 1}: {classification.page_type.value} "
+                           f"(confidence: {classification.confidence:.2f}, "
+                           f"time: {classification.processing_time:.2f}s)")
+            
+            doc.close()
+            
+        except Exception as e:
+            logger.error(f"Failed to classify pages: {e}")
+            return []
         
-        # Classify based on features
-        page_type, confidence = self._classify_from_features(features)
+        # Sort by confidence for floor plans first, then other types
+        def sort_key(c):
+            if c.page_type == PageType.FLOOR_PLAN:
+                return (0, -c.confidence)  # Floor plans first, highest confidence
+            else:
+                return (1, -c.confidence)  # Others second
         
-        # Detect floor level if it's a floor plan
-        floor_level = None
-        if page_type == 'floor_plan' and ocr_text:
-            floor_level = self._detect_floor_level(ocr_text)
+        classifications.sort(key=sort_key)
+        
+        return classifications
+    
+    def _classify_page(
+        self,
+        page: fitz.Page,
+        page_num: int,
+        quick_mode: bool
+    ) -> PageClassification:
+        """
+        Classify a single page
+        
+        Args:
+            page: PyMuPDF page object
+            page_num: Page number (0-indexed)
+            quick_mode: Use fast extraction
+            
+        Returns:
+            PageClassification for the page
+        """
+        features = {}
+        keywords_found = []
+        
+        # Extract text (fast)
+        text = page.get_text().upper() if quick_mode else page.get_text("text").upper()
+        
+        # Extract basic features
+        features['text_length'] = len(text)
+        features['page_width'] = page.rect.width
+        features['page_height'] = page.rect.height
+        features['aspect_ratio'] = page.rect.width / page.rect.height if page.rect.height > 0 else 1
+        
+        # Count text blocks (fast indicator of content density)
+        text_blocks = page.get_text_blocks()
+        features['text_block_count'] = len(text_blocks)
+        
+        # Count drawings if not too many (indicator of complexity)
+        if quick_mode:
+            # Just get count, don't process
+            try:
+                drawings = page.get_drawings()
+                features['drawing_count'] = len(list(drawings)) if drawings else 0
+            except:
+                features['drawing_count'] = 0
+        else:
+            features['drawing_count'] = len(page.get_drawings())
+        
+        # Check for keywords
+        keyword_scores = {
+            PageType.FLOOR_PLAN: self._check_keywords(text, self.FLOOR_PLAN_KEYWORDS, keywords_found),
+            PageType.ELEVATION: self._check_keywords(text, self.ELEVATION_KEYWORDS, keywords_found),
+            PageType.SECTION: self._check_keywords(text, self.SECTION_KEYWORDS, keywords_found),
+            PageType.DETAIL: self._check_keywords(text, self.DETAIL_KEYWORDS, keywords_found),
+            PageType.SITE_PLAN: self._check_keywords(text, self.SITE_KEYWORDS, keywords_found),
+            PageType.TITLE: self._check_keywords(text, self.TITLE_KEYWORDS, keywords_found),
+        }
+        
+        # Check for room keywords (weak indicator for floor plans)
+        room_count = sum(1 for keyword in self.ROOM_KEYWORDS if keyword in text)
+        features['room_keyword_count'] = room_count
+        
+        # Determine page type and confidence
+        page_type, confidence = self._determine_page_type(
+            keyword_scores,
+            features,
+            text
+        )
         
         return PageClassification(
+            page_num=page_num,
             page_type=page_type,
             confidence=confidence,
             features=features,
-            floor_level=floor_level
+            keywords_found=keywords_found,
+            processing_time=0.0  # Will be set by caller
         )
     
-    def is_floor_plan(self, image: np.ndarray, ocr_text: List[str] = None) -> bool:
-        """Quick check if page is a floor plan
+    def _check_keywords(
+        self,
+        text: str,
+        keywords: List[str],
+        found_list: List[str]
+    ) -> float:
+        """
+        Check for keywords and return score
         
         Args:
-            image: OpenCV image array
-            ocr_text: Optional OCR text
+            text: Text to search in (already uppercase)
+            keywords: Keywords to look for
+            found_list: List to append found keywords to
             
         Returns:
-            True if page is likely a floor plan
+            Score based on keyword matches
         """
-        classification = self.classify_page(image, ocr_text)
-        return classification.page_type == 'floor_plan' and classification.confidence > 0.6
-    
-    def _extract_page_features(self, image: np.ndarray) -> Dict[str, float]:
-        """Extract visual features from page
-        
-        Args:
-            image: OpenCV image array
-            
-        Returns:
-            Dictionary of feature values
-        """
-        features = {}
-        
-        # Convert to grayscale
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
-        # 1. Line density (floor plans have many lines)
-        edges = cv2.Canny(gray, 50, 150)
-        lines = cv2.HoughLinesP(edges, 1, np.pi/180, 100, 
-                               minLineLength=self.min_line_length, maxLineGap=10)
-        features['line_count'] = len(lines) if lines is not None else 0
-        features['line_density'] = features['line_count'] / (image.shape[0] * image.shape[1] / 1000000)
-        
-        # 2. Horizontal/Vertical line ratio (floor plans have mostly H/V lines)
-        if lines is not None and len(lines) > 0:
-            h_lines, v_lines = self._count_hv_lines(lines)
-            features['hv_line_ratio'] = (h_lines + v_lines) / len(lines)
-        else:
-            features['hv_line_ratio'] = 0
-        
-        # 3. Closed contour count (rooms)
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        room_contours = [c for c in contours if cv2.contourArea(c) > self.min_contour_area]
-        features['room_count'] = len(room_contours)
-        
-        # 4. Text density (floor plans have moderate text)
-        # This will be updated with OCR results if available
-        features['text_density'] = 0.5  # Default placeholder
-        
-        # 5. Aspect ratio (floor plans are often square-ish)
-        features['aspect_ratio'] = image.shape[1] / image.shape[0]
-        
-        # 6. White space ratio (floor plans have less white space)
-        white_pixels = np.sum(gray > 240)
-        total_pixels = gray.size
-        features['white_space_ratio'] = white_pixels / total_pixels
-        
-        # 7. Rectangle detection (doors, windows)
-        rectangles = self._detect_rectangles(gray)
-        features['rectangle_count'] = len(rectangles)
-        
-        return features
-    
-    def _extract_text_features(self, ocr_text: List[str]) -> Dict[str, float]:
-        """Extract text-based features
-        
-        Args:
-            ocr_text: List of text strings from OCR
-            
-        Returns:
-            Dictionary of text features
-        """
-        features = {}
-        
-        all_text = ' '.join(ocr_text).lower()
-        
-        # Room name indicators
-        room_keywords = ['bedroom', 'bath', 'kitchen', 'living', 'dining', 
-                        'garage', 'closet', 'hall', 'entry', 'office']
-        features['room_keyword_count'] = sum(1 for keyword in room_keywords if keyword in all_text)
-        
-        # Dimension indicators
-        features['has_dimensions'] = 1.0 if any(x in all_text for x in ["'", '"', 'x']) else 0.0
-        
-        # Scale indicators
-        features['has_scale'] = 1.0 if 'scale' in all_text or '=' in all_text else 0.0
-        
-        # Floor plan specific terms
-        plan_terms = ['floor plan', 'first floor', 'second floor', 'level', 'sqft', 'sq ft']
-        features['has_plan_terms'] = 1.0 if any(term in all_text for term in plan_terms) else 0.0
-        
-        # Elevation/section terms (negative indicators)
-        elevation_terms = ['elevation', 'section', 'detail', 'schedule', 'diagram']
-        features['has_elevation_terms'] = 1.0 if any(term in all_text for term in elevation_terms) else 0.0
-        
-        # Update text density
-        features['text_density'] = len(ocr_text) / 100.0  # Normalized
-        
-        return features
-    
-    def _classify_from_features(self, features: Dict[str, float]) -> Tuple[str, float]:
-        """Classify page type from features
-        
-        Args:
-            features: Dictionary of feature values
-            
-        Returns:
-            Tuple of (page_type, confidence)
-        """
-        # Simple rule-based classification
-        # In production, could use ML model trained on labeled data
-        
         score = 0.0
         
-        # Positive indicators for floor plan
-        if features.get('line_density', 0) > 50:
-            score += 0.2
-        if features.get('hv_line_ratio', 0) > 0.7:
-            score += 0.15
-        if features.get('room_count', 0) >= 3:
-            score += 0.2
-        if features.get('room_keyword_count', 0) >= 3:
-            score += 0.15
-        if features.get('has_dimensions', 0) > 0:
-            score += 0.1
-        if features.get('has_plan_terms', 0) > 0:
-            score += 0.1
-        if features.get('white_space_ratio', 0) < 0.7:
-            score += 0.1
+        for keyword in keywords:
+            if keyword in text:
+                found_list.append(keyword)
+                # First keyword gets full point, subsequent get less
+                score += 1.0 / (len(found_list) ** 0.5)
         
-        # Negative indicators
-        if features.get('has_elevation_terms', 0) > 0:
-            score -= 0.3
-        if features.get('aspect_ratio', 1) > 2 or features.get('aspect_ratio', 1) < 0.5:
-            score -= 0.1  # Too narrow/wide for floor plan
-        
-        # Determine page type
-        if score >= 0.6:
-            return 'floor_plan', min(score, 0.95)
-        elif features.get('has_elevation_terms', 0) > 0:
-            return 'elevation', 0.8
-        elif features.get('text_density', 0) > 2.0:
-            return 'schedule', 0.7
-        else:
-            return 'unknown', 0.5
+        return min(score, 1.0)  # Cap at 1.0
     
-    def _count_hv_lines(self, lines: np.ndarray) -> Tuple[int, int]:
-        """Count horizontal and vertical lines
+    def _determine_page_type(
+        self,
+        keyword_scores: Dict[PageType, float],
+        features: Dict[str, Any],
+        text: str
+    ) -> Tuple[PageType, float]:
+        """
+        Determine page type and confidence based on scores and features
         
         Args:
-            lines: Array of lines from HoughLinesP
+            keyword_scores: Scores for each page type
+            features: Extracted page features
+            text: Page text
             
         Returns:
-            Tuple of (horizontal_count, vertical_count)
+            Tuple of (PageType, confidence)
         """
-        h_count = 0
-        v_count = 0
-        angle_threshold = 10  # degrees
+        # Find highest scoring type from keywords
+        best_type = PageType.UNKNOWN
+        best_score = 0.0
         
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
-            
-            # Calculate angle
-            angle = np.abs(np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi)
-            
-            if angle < angle_threshold or angle > 180 - angle_threshold:
-                h_count += 1
-            elif 90 - angle_threshold < angle < 90 + angle_threshold:
-                v_count += 1
+        for page_type, score in keyword_scores.items():
+            if score > best_score:
+                best_score = score
+                best_type = page_type
         
-        return h_count, v_count
+        # Calculate confidence
+        confidence = best_score
+        
+        # Boost confidence based on features
+        if best_type == PageType.FLOOR_PLAN:
+            # Floor plans typically have many room keywords
+            if features['room_keyword_count'] >= 3:
+                confidence = min(confidence + 0.2, 1.0)
+            
+            # Floor plans have moderate drawing complexity
+            if 1000 < features.get('drawing_count', 0) < 50000:
+                confidence = min(confidence + 0.1, 1.0)
+            
+            # Check for scale notation (strong indicator)
+            if "SCALE" in text and ("1/4" in text or "1/8" in text):
+                confidence = min(confidence + 0.2, 1.0)
+        
+        elif best_type == PageType.ELEVATION:
+            # Elevations have fewer room keywords
+            if features['room_keyword_count'] < 2:
+                confidence = min(confidence + 0.1, 1.0)
+        
+        elif best_type == PageType.TITLE:
+            # Title pages have less drawings
+            if features.get('drawing_count', 0) < 100:
+                confidence = min(confidence + 0.2, 1.0)
+        
+        # If no strong match, check heuristics
+        if best_score < 0.3:
+            # Use heuristics to guess
+            if features['room_keyword_count'] >= 5:
+                # Many room keywords -> likely floor plan
+                best_type = PageType.FLOOR_PLAN
+                confidence = 0.5
+            elif features.get('drawing_count', 0) < 100 and features['text_block_count'] > 20:
+                # Lots of text, few drawings -> likely title/schedule
+                best_type = PageType.TITLE
+                confidence = 0.4
+            elif "SECTION" in text:
+                best_type = PageType.SECTION
+                confidence = 0.4
+            else:
+                best_type = PageType.UNKNOWN
+                confidence = 0.2
+        
+        return best_type, confidence
     
-    def _detect_rectangles(self, gray: np.ndarray) -> List[Tuple[int, int, int, int]]:
-        """Detect rectangles (potential doors/windows)
+    def find_best_floor_plan_page(
+        self,
+        pdf_path: str
+    ) -> Optional[int]:
+        """
+        Quick method to find the most likely floor plan page
         
         Args:
-            gray: Grayscale image
+            pdf_path: Path to PDF file
             
         Returns:
-            List of rectangle bounding boxes
+            Page number (0-indexed) of best floor plan page, or None
         """
-        rectangles = []
+        classifications = self.classify_pages(pdf_path, quick_mode=True)
         
-        # Find contours
-        _, binary = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
-        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for classification in classifications:
+            if classification.page_type == PageType.FLOOR_PLAN and classification.confidence > 0.5:
+                logger.info(f"Best floor plan page: {classification.page_num + 1} "
+                          f"(confidence: {classification.confidence:.2f})")
+                return classification.page_num
         
-        for contour in contours:
-            # Approximate contour to polygon
-            peri = cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
-            
-            # Check if it's a rectangle (4 vertices)
-            if len(approx) == 4:
-                x, y, w, h = cv2.boundingRect(approx)
-                area = w * h
-                
-                # Filter by size (doors/windows are small-medium)
-                if 100 < area < 5000:
-                    rectangles.append((x, y, w, h))
-        
-        return rectangles
-    
-    def _detect_floor_level(self, ocr_text: List[str]) -> Optional[str]:
-        """Detect floor level from OCR text
-        
-        Args:
-            ocr_text: List of text strings
-            
-        Returns:
-            Floor level string or None
-        """
-        all_text = ' '.join(ocr_text).lower()
-        
-        # Floor level patterns
-        patterns = {
-            'first': ['first floor', '1st floor', 'ground floor', 'level 1', 'floor 1'],
-            'second': ['second floor', '2nd floor', 'upper floor', 'level 2', 'floor 2'],
-            'basement': ['basement', 'lower level', 'level b', 'floor b'],
-            'third': ['third floor', '3rd floor', 'level 3', 'floor 3']
-        }
-        
-        for level, terms in patterns.items():
-            if any(term in all_text for term in terms):
-                return level
-        
+        # No confident floor plan found
+        logger.warning("No confident floor plan page found")
         return None
+    
+    def get_pages_by_type(
+        self,
+        classifications: List[PageClassification],
+        page_type: PageType,
+        min_confidence: float = 0.5
+    ) -> List[int]:
+        """
+        Get page numbers of a specific type
+        
+        Args:
+            classifications: List of page classifications
+            page_type: Type to filter for
+            min_confidence: Minimum confidence threshold
+            
+        Returns:
+            List of page numbers (0-indexed)
+        """
+        return [
+            c.page_num
+            for c in classifications
+            if c.page_type == page_type and c.confidence >= min_confidence
+        ]
 
 
 # Create singleton instance

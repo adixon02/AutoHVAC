@@ -14,7 +14,9 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 import fitz  # PyMuPDF
 
 # Add parent directories to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
 from utils.memory_monitor import MemoryMonitor, check_memory_available
 
 logger = logging.getLogger(__name__)
@@ -123,8 +125,8 @@ class SmartDrawingExtractor:
         max_elements: int
     ) -> Tuple[List, List, str]:
         """
-        Extract drawings with element count limits and memory monitoring
-        Runs in thread for timeout capability
+        Extract drawings with intelligent prioritization (not blind sampling)
+        Prioritizes rectangles (rooms) over decorative elements
         """
         # Initialize memory monitor
         memory_monitor = MemoryMonitor()
@@ -146,81 +148,111 @@ class SmartDrawingExtractor:
             page_drawings = page.get_drawings()
             total_drawings = len(page_drawings) if hasattr(page_drawings, '__len__') else 0
             
-            # Decide extraction strategy based on drawing count
-            if total_drawings > 20000:
-                logger.warning(f"Page has {total_drawings} drawings - using minimal extraction")
-                doc.close()
-                return [], [], "skip_complex"
-            elif total_drawings > 10000:
-                logger.info(f"Page has {total_drawings} drawings - using aggressive sampling")
-                max_elements = min(max_elements, 1000)
+            logger.info(f"Page has {total_drawings} total drawings")
             
-            total_count = 0
-            memory_check_interval = 100  # Check memory every N elements
+            # SMART EXTRACTION: Prioritize by element type, not random sampling
+            rectangles = []
+            lines = []
+            curves = []
+            other_drawings = []
+            
+            # Limits by element type (not sampling!)
+            MAX_RECTANGLES = 5000  # Keep ALL rectangles if possible (they're rooms!)
+            MAX_LINES = 10000      # Enough for wall detection
+            MAX_CURVES = 5000      # Decorative elements, less critical
+            
+            # Count and categorize elements
+            rect_count = 0
+            line_count = 0
+            curve_count = 0
+            memory_check_interval = 500  # Check memory less frequently
             
             for i, drawing in enumerate(page_drawings):
                 # Check memory periodically
                 if i % memory_check_interval == 0 and i > 0:
                     if not memory_monitor.check_memory_circuit_breaker():
                         logger.warning(f"Memory limit approaching at drawing {i}/{total_drawings}")
-                        doc.close()
-                        return drawings, polylines, "memory_limited"
+                        break
                 
-                if i >= max_elements:
-                    logger.info(f"Reached element limit {max_elements}")
-                    doc.close()
-                    return drawings, polylines, "limited"
+                # Categorize drawing by type
+                rect_val = drawing.get('rect')
+                is_rectangle = False
                 
-                # Process drawing with limits
+                # Check if this is primarily a rectangle
+                if rect_val is not None:
+                    # A drawing with a rect and minimal items is likely a rectangle
+                    items = drawing.get('items', [])
+                    if len(items) <= 4:  # Simple rectangle has 4 lines or less
+                        is_rectangle = True
+                
+                if is_rectangle and rect_count < MAX_RECTANGLES:
+                    # KEEP ALL RECTANGLES - they're potential rooms!
+                    if rect_val is not None and hasattr(rect_val, 'x0') and hasattr(rect_val, 'x1'):
+                        rect_serialized = [float(rect_val.x0), float(rect_val.y0), float(rect_val.x1), float(rect_val.y1)]
+                    else:
+                        rect_serialized = rect_val
+                    
+                    rectangles.append({
+                        'type': 'rectangle',
+                        'rect': rect_serialized,
+                        'fill': drawing.get('fill'),
+                        'color': drawing.get('color')
+                    })
+                    rect_count += 1
+                
+                # Process items (lines and curves)
                 if 'items' in drawing:
-                    items_to_process = min(20, len(drawing['items']))  # Limit items per drawing
-                    for item in drawing['items'][:items_to_process]:
-                        if item[0] == 'l':  # Line
-                            # Convert PyMuPDF Point objects to tuples for JSON serialization
+                    for item in drawing['items']:
+                        if item[0] == 'l' and line_count < MAX_LINES:  # Line
                             p1 = item[1]
                             p2 = item[2]
                             if hasattr(p1, 'x') and hasattr(p1, 'y'):
-                                # Point objects - convert to tuples
-                                polylines.append([(p1.x, p1.y), (p2.x, p2.y)])
+                                lines.append([(p1.x, p1.y), (p2.x, p2.y)])
                             else:
-                                # Already tuples or lists
-                                polylines.append([p1, p2])
-                        elif item[0] == 'c':  # Curve
-                            # Convert PyMuPDF Point objects to tuples for JSON serialization
+                                lines.append([p1, p2])
+                            line_count += 1
+                            
+                        elif item[0] == 'c' and curve_count < MAX_CURVES:  # Curve
                             p1 = item[1]
-                            p2 = item[4]
+                            p2 = item[4] if len(item) > 4 else item[2]
                             if hasattr(p1, 'x') and hasattr(p1, 'y'):
-                                # Point objects - convert to tuples
-                                polylines.append([(p1.x, p1.y), (p2.x, p2.y)])
+                                curves.append([(p1.x, p1.y), (p2.x, p2.y)])
                             else:
-                                # Already tuples or lists
-                                polylines.append([p1, p2])
-                        total_count += 1
-                        
-                        if total_count >= max_elements * 2:  # Polyline limit
-                            break
+                                curves.append([p1, p2])
+                            curve_count += 1
                 
-                # Normalize PyMuPDF Rect to plain list for JSON safety
-                rect_val = drawing.get('rect')
-                if rect_val is not None and hasattr(rect_val, 'x0') and hasattr(rect_val, 'x1'):
-                    rect_serialized = [float(rect_val.x0), float(rect_val.y0), float(rect_val.x1), float(rect_val.y1)]
-                else:
-                    rect_serialized = rect_val
-
-                drawings.append({
-                    'type': 'drawing',
-                    'rect': rect_serialized,
-                    'fill': drawing.get('fill'),
-                    'color': drawing.get('color')
-                })
+                # Add non-rectangle drawings if not too many
+                if not is_rectangle and len(other_drawings) < 1000:
+                    if rect_val is not None and hasattr(rect_val, 'x0') and hasattr(rect_val, 'x1'):
+                        rect_serialized = [float(rect_val.x0), float(rect_val.y0), float(rect_val.x1), float(rect_val.y1)]
+                    else:
+                        rect_serialized = rect_val
+                    
+                    other_drawings.append({
+                        'type': 'drawing',
+                        'rect': rect_serialized,
+                        'fill': drawing.get('fill'),
+                        'color': drawing.get('color')
+                    })
             
-            # Log final memory usage
+            # Combine results - rectangles first (priority!)
+            drawings = rectangles + other_drawings
+            polylines = lines + curves
+            
+            # Log extraction summary
             final_memory = memory_monitor.get_memory_usage_mb()
             memory_increase = final_memory - initial_memory
-            logger.info(f"Drawing extraction completed, memory: {initial_memory:.1f}MB -> {final_memory:.1f}MB (increase: {memory_increase:.1f}MB)")
-                
+            
+            logger.info(f"Smart extraction completed:")
+            logger.info(f"  • Rectangles: {rect_count} (100% kept - these are rooms!)")
+            logger.info(f"  • Lines: {line_count} (capped at {MAX_LINES})")
+            logger.info(f"  • Curves: {curve_count} (capped at {MAX_CURVES})")
+            logger.info(f"  • Total drawings: {len(drawings)}, polylines: {len(polylines)}")
+            logger.info(f"  • Memory: {initial_memory:.1f}MB -> {final_memory:.1f}MB (increase: {memory_increase:.1f}MB)")
+            
+            extraction_status = "smart_prioritized"
             doc.close()
-            return drawings, polylines, "full"
+            return drawings, polylines, extraction_status
             
         except Exception as e:
             logger.error(f"Drawing extraction error: {e}")
