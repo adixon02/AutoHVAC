@@ -72,11 +72,13 @@ class GPT4VBlueprintAnalyzer:
             api_key=api_key,
             max_retries=3  # Retry failed requests up to 3 times
         )
-        # GPT-4o models for vision/multimodal tasks
+        # Vision-capable models (gpt-4o-mini does NOT support vision)
+        # Try specific versions if generic fails
         self.models_to_try = [
-            "gpt-4o",           # Primary multimodal model with vision
-            "gpt-4o-mini",      # Cheaper/faster multimodal with vision
-            "gpt-4-turbo",      # Legacy fallback with vision support
+            "gpt-4o",                 # Primary multimodal model with vision
+            "gpt-4o-2024-11-20",      # Specific version if generic fails
+            "gpt-4-turbo-2024-04-09", # Latest GPT-4 Turbo with vision
+            "gpt-4-turbo",            # Generic fallback
         ]
         self.model = self.models_to_try[0]  # Start with GPT-4o
         self.max_tokens = 8192  # GPT-4o supports large outputs
@@ -159,6 +161,14 @@ class GPT4VBlueprintAnalyzer:
         buffered = io.BytesIO()
         img.save(buffered, format="PNG")
         img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        
+        # Validate base64 was generated
+        if not img_base64:
+            doc.close()
+            raise ValueError(f"Failed to generate base64 image from page {page_num}")
+        
+        # Log base64 info for debugging
+        logger.debug(f"Generated base64 image: {len(img_base64)} chars, starts with: {img_base64[:100]}")
         
         doc.close()
         return img_base64
@@ -259,61 +269,52 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
             try:
                 logger.info(f"Attempting blueprint analysis with {model}...")
                 
-                # Build request based on model type
-                if model.startswith("gpt-4o"):
-                    # GPT-4o multimodal models
-                    logger.info(f"Using {self.gpt4o_timeout}s timeout for {model}")
-                    response = self.client.chat.completions.create(
-                        model=model,
-                        timeout=self.gpt4o_timeout,  # Configurable timeout for GPT-4o
-                        messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/png;base64,{image_base64}",
-                                        "detail": "high"
-                                    }
+                # Use consistent timeout - gpt-4o models need more time
+                timeout = self.gpt4o_timeout if model.startswith("gpt-4o") else self.gpt4_timeout
+                logger.info(f"Using {timeout}s timeout for {model}")
+                
+                # All vision models use the same format
+                response = self.client.chat.completions.create(
+                    model=model,
+                    timeout=timeout,
+                    messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{image_base64}",
+                                    "detail": "high"
                                 }
-                            ]
-                        }
-                        ],
-                        max_tokens=self.max_tokens,
-                        temperature=0.1  # Low temperature for consistent output
-                    )
-                else:
-                    # GPT-4 fallback with standard parameters
-                    logger.info(f"Using {self.gpt4_timeout}s timeout for {model}")
-                    response = self.client.chat.completions.create(
-                        model=model,
-                        timeout=self.gpt4_timeout,  # Configurable timeout for GPT-4
-                        messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/png;base64,{image_base64}",
-                                        "detail": "high"
-                                    }
-                                }
-                            ]
-                        }
-                        ],
-                        max_tokens=min(self.max_tokens, 4096),  # GPT-4 limit
-                        temperature=0.1
-                    )
+                            }
+                        ]
+                    }
+                    ],
+                    max_tokens=self.max_tokens,
+                    temperature=0.1  # Low temperature for consistent output
+                )
                 
                 # Successfully got a response with this model
                 logger.info(f"✅ {model} responded successfully")
                 
                 # Extract JSON from response
                 content = response.choices[0].message.content
+                
+                # Check if model claims it can't see images
+                if any(phrase in content.lower() for phrase in [
+                    "unable to analyze images",
+                    "can't analyze images",
+                    "cannot analyze images",
+                    "unable to view images",
+                    "can't see images"
+                ]):
+                    logger.error(f"❌ {model} claims no vision support despite being a vision model!")
+                    logger.error(f"Response: {content[:200]}")
+                    logger.debug(f"Request check - model: {model}, image size: {len(image_base64)} chars")
+                    last_error = f"{model} claims no vision support"
+                    continue
                 
                 # Try to parse JSON from the response
                 try:
