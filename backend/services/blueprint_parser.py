@@ -248,8 +248,20 @@ class BlueprintParser:
                 # Only skip if explicitly requested via BLUEPRINT_AI_ONLY env var
                 logger.info("[AI-ONLY MODE] BLUEPRINT_AI_ONLY=true, skipping traditional extraction")
                 selected_page = 1
-                raw_geometry = {}  # Empty but not None
-                raw_text = {}  # Empty but not None
+                raw_geometry = {
+                    'page_width': 2550,  # Standard letter size at 300 DPI
+                    'page_height': 3300,
+                    'lines': [],
+                    'rectangles': [],
+                    'polylines': [],
+                    'scale_factor': 48
+                }  # Empty but not None
+                raw_text = {
+                    'words': [],
+                    'room_labels': [],
+                    'dimensions': [],
+                    'notes': []
+                }  # Empty but not None
                 parsed_labels = []
                 parsed_dimensions = []
                 geometry_elements = []
@@ -295,8 +307,20 @@ class BlueprintParser:
                 # Traditional-only or other modes
                 logger.info("[TRADITIONAL] Using traditional extraction only")
                 selected_page = 1
-                raw_geometry = {}  # Empty but not None
-                raw_text = {}  # Empty but not None  
+                raw_geometry = {
+                    'page_width': 2550,  # Standard letter size at 300 DPI
+                    'page_height': 3300,
+                    'lines': [],
+                    'rectangles': [],
+                    'polylines': [],
+                    'scale_factor': 48
+                }  # Empty but not None
+                raw_text = {
+                    'words': [],
+                    'room_labels': [],
+                    'dimensions': [],
+                    'notes': []
+                }  # Empty but not None  
                 parsed_labels = []
                 parsed_dimensions = []
                 geometry_elements = []
@@ -1570,8 +1594,20 @@ class BlueprintParser:
     
     def _perform_lean_extraction(self, pdf_path: str, selected_page: int) -> tuple[Dict, Dict]:
         """Perform lean extraction using optimized components"""
-        raw_geometry = {}
-        raw_text = {}
+        raw_geometry = {
+            'page_width': 2550,
+            'page_height': 3300,
+            'lines': [],
+            'rectangles': [],
+            'polylines': [],
+            'scale_factor': 48
+        }
+        raw_text = {
+            'words': [],
+            'room_labels': [],
+            'dimensions': [],
+            'notes': []
+        }
         
         try:
             # Use page classifier for basic extraction
@@ -1584,7 +1620,9 @@ class BlueprintParser:
                 'page_text': page.get_text(),
                 'blocks': text_blocks.get('blocks', []),
                 'room_labels': [],
-                'dimensions': []
+                'dimensions': [],
+                'words': [],  # Required field
+                'notes': []   # Required field
             }
             
             # Extract basic geometry (lines and rectangles)
@@ -1592,27 +1630,64 @@ class BlueprintParser:
             lines = []
             rectangles = []
             
+            # Process drawings - handle different PyMuPDF versions
             for drawing in drawings:
-                if 'l' in drawing:  # Line
-                    lines.append({
-                        'x0': drawing['l'][0],
-                        'y0': drawing['l'][1],
-                        'x1': drawing['l'][2],
-                        'y1': drawing['l'][3]
-                    })
-                elif 'r' in drawing:  # Rectangle
-                    rect = drawing['r']
-                    rectangles.append({
-                        'x0': rect.x0,
-                        'y0': rect.y0,
-                        'x1': rect.x1,
-                        'y1': rect.y1,
-                        'area': rect.width * rect.height
-                    })
+                try:
+                    # Try to get items from drawing dict
+                    items = drawing.get('items', [])
+                    for item in items:
+                        if len(item) < 2:
+                            continue
+                        item_type = item[0]
+                        item_data = item[1]
+                        
+                        if item_type == 'l':  # Line
+                            # item_data is a Point object or tuple
+                            if hasattr(item_data, 'x0'):
+                                lines.append({
+                                    'x0': item_data.x0,
+                                    'y0': item_data.y0,
+                                    'x1': item_data.x1,
+                                    'y1': item_data.y1
+                                })
+                            elif len(item) >= 3:  # Line with two points
+                                p1 = item[1]
+                                p2 = item[2]
+                                lines.append({
+                                    'x0': p1.x if hasattr(p1, 'x') else p1[0],
+                                    'y0': p1.y if hasattr(p1, 'y') else p1[1],
+                                    'x1': p2.x if hasattr(p2, 'x') else p2[0],
+                                    'y1': p2.y if hasattr(p2, 'y') else p2[1]
+                                })
+                                
+                        elif item_type == 're':  # Rectangle
+                            # item_data is a Rect object
+                            if hasattr(item_data, 'x0'):
+                                width = abs(item_data.x1 - item_data.x0)
+                                height = abs(item_data.y1 - item_data.y0)
+                                rectangles.append({
+                                    'x0': item_data.x0,
+                                    'y0': item_data.y0,
+                                    'x1': item_data.x1,
+                                    'y1': item_data.y1,
+                                    'width_ft': width / 48,
+                                    'height_ft': height / 48,
+                                    'area_sqft': (width / 48) * (height / 48)
+                                })
+                except Exception as e:
+                    # Skip problematic drawing
+                    logger.debug(f"Skipped drawing item: {e}")
+                    continue
+            
+            # Get page dimensions
+            page_rect = page.rect
             
             raw_geometry = {
+                'page_width': page_rect.width,
+                'page_height': page_rect.height,
                 'lines': lines,
                 'rectangles': rectangles,
+                'polylines': [],  # Empty for lean extraction
                 'scale_factor': 48  # Default
             }
             
