@@ -49,14 +49,60 @@ Your failing example (85 rooms @ 26.8 sqft = 2,281 sqft total) will now:
 
 Result: **NeedsInputError** requesting SCALE_OVERRIDE instead of bogus 202,546 BTU/hr load
 
-## Remaining Work (Sprints 2-5)
+## Sprint 2 Complete: Deterministic Scale Detection ✅
 
-### Sprint 2: Deterministic Scale Detection
-- [ ] OCR title block for scale text (1/4" = 1'-0")
-- [ ] Parse dimension strings and verify distances
-- [ ] Require 2+ corroborating scale estimates
-- [ ] Vector-first geometry extraction
-- [ ] Room filters (MIN=40, MAX=1000 sqft)
+### What's Been Added
+
+1. **DeterministicScaleDetector** (`services/deterministic_scale_detector.py`)
+   - Title block OCR with comprehensive regex patterns
+   - Dimension text parsing with distance validation
+   - Known object detection (doors, hallways, grid)
+   - Requires 2+ corroborating estimates within 3%
+   - Returns confidence score and detailed evidence
+
+2. **RoomFilter** (`services/room_filter.py`)
+   - MIN_ROOM_SQFT=40, MAX_ROOM_SQFT=1000 enforcement
+   - Aspect ratio filtering (removes hallways)
+   - Duplicate/overlap detection
+   - Statistical outlier removal
+   - Total building validation (500-10,000 sqft)
+
+3. **Integration Module** (`services/blueprint_parser_integration.py`)
+   - Connects scale detector to parser pipeline
+   - Applies room filtering with proper error handling
+   - Updates metadata with detection statistics
+
+### How Scale Detection Now Works
+
+1. **User Override** (highest priority)
+   - SCALE_OVERRIDE environment variable
+
+2. **Title Block OCR**
+   - Patterns: "SCALE: 1/4\"=1'-0\"", "1:48", etc.
+   - Confidence: 0.95 with "SCALE" keyword
+
+3. **Dimension Text Cross-Validation**
+   - Finds "12'-6\"" text with anchor points
+   - Measures pixel distance between anchors
+   - Calculates scale: pixels/feet
+   - Validates against standard scales
+
+4. **Known Object Detection**
+   - Finds door-like rectangles (aspect 2.3-2.8)
+   - Assumes standard door width (2'8")
+   - Clusters similar sizes for consensus
+
+5. **Grid Analysis**
+   - Detects regular spacing in lines
+   - Matches to typical grid (10', 15', 20', etc.)
+
+### Consensus Requirements
+
+- Needs 2+ methods agreeing within 3%
+- If only 1 estimate: confidence halved, requests override
+- If no consensus: raises NeedsInputError
+
+## Remaining Work (Sprints 3-5)
 
 ### Sprint 3: Semantic Labeling
 - [ ] Restrict Vision to labels only (no measurements)

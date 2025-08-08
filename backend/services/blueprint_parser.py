@@ -30,6 +30,8 @@ from services.blueprint_validator import (
     BlueprintValidator, ValidationSeverity, BlueprintValidationError, 
     calculate_data_quality_score
 )
+from services.deterministic_scale_detector import deterministic_scale_detector, ScaleResult
+from services.room_filter import room_filter, RoomFilterConfig
 
 # Import our new lean components
 try:
@@ -135,6 +137,7 @@ class BlueprintParser:
         self.min_quality_score = int(os.getenv('MIN_QUALITY_SCORE', '40'))
         self.enable_fail_fast = os.getenv('FAIL_FAST', 'true').lower() == 'true'
         self.default_scale_override = int(os.getenv('SCALE_OVERRIDE', '48'))  # 1/4"=1'
+        self.page_context = PageContext()  # Track page/scale consistency
         
     def parse_pdf_to_json(
         self, 
