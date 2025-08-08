@@ -57,8 +57,8 @@ class GPTBlueprintAnalysis:
 
 class GPT4VBlueprintAnalyzer:
     """
-    GPT-5 Vision Blueprint Analyzer
-    Uses GPT-5 Vision API to interpret blueprints with high accuracy
+    GPT-4o Vision Blueprint Analyzer
+    Uses GPT-4o multimodal API to interpret blueprints with high accuracy
     """
     
     def __init__(self):
@@ -67,24 +67,24 @@ class GPT4VBlueprintAnalyzer:
         if not api_key:
             raise ValueError("OPENAI_API_KEY environment variable is required for GPT-4V analysis")
         
-        self.client = OpenAI(api_key=api_key)
-        # GPT-5 models - announced today with native vision support!
+        # Initialize client with retry configuration
+        self.client = OpenAI(
+            api_key=api_key,
+            max_retries=3  # Retry failed requests up to 3 times
+        )
+        # GPT-4o models for vision/multimodal tasks
         self.models_to_try = [
-            "gpt-5",            # Flagship GPT-5 with 400k context and vision
-            "gpt-5-mini",       # Cheaper/faster GPT-5 with vision
-            "gpt-4-turbo",      # Fallback to GPT-4 if needed
+            "gpt-4o",           # Primary multimodal model with vision
+            "gpt-4o-mini",      # Cheaper/faster multimodal with vision
+            "gpt-4-turbo",      # Legacy fallback with vision support
         ]
-        self.model = self.models_to_try[0]  # Start with GPT-5
-        self.max_tokens = 8192  # GPT-5 supports more tokens
-        
-        # GPT-5 specific parameters
-        self.reasoning_effort = "high"  # For complex blueprint analysis
-        self.verbosity = "low"  # We want concise JSON output
+        self.model = self.models_to_try[0]  # Start with GPT-4o
+        self.max_tokens = 8192  # GPT-4o supports large outputs
         
         # Configurable timeouts with sensible defaults
-        self.gpt5_timeout = float(os.getenv("GPT5_TIMEOUT", "120"))  # 120 seconds default
-        self.gpt4_timeout = float(os.getenv("GPT4_TIMEOUT", "90"))   # 90 seconds default
-        logger.info(f"GPT-5 timeout: {self.gpt5_timeout}s, GPT-4 timeout: {self.gpt4_timeout}s")
+        self.gpt4o_timeout = float(os.getenv("GPT4O_TIMEOUT", "120"))  # 120 seconds for GPT-4o
+        self.gpt4_timeout = float(os.getenv("GPT4_TIMEOUT", "90"))     # 90 seconds for GPT-4
+        logger.info(f"GPT-4o timeout: {self.gpt4o_timeout}s, GPT-4 timeout: {self.gpt4_timeout}s")
         
     def analyze_blueprint(
         self,
@@ -105,7 +105,7 @@ class GPT4VBlueprintAnalyzer:
             Complete blueprint analysis with all rooms and dimensions
         """
         start_time = time.time()
-        logger.info(f"Starting GPT-5 Vision analysis of {pdf_path}")
+        logger.info(f"Starting GPT-4o Vision analysis of {pdf_path}")
         
         # Use page from pipeline context if available, otherwise from parameter or auto-detect
         if pipeline_context:
@@ -129,15 +129,15 @@ class GPT4VBlueprintAnalyzer:
         # Prepare the analysis prompt - BE SPECIFIC!
         prompt = self._create_analysis_prompt(zip_code)
         
-        # Send to GPT-5 for analysis
-        logger.info("Sending blueprint to GPT-5 Vision for analysis...")
+        # Send to GPT-4o for analysis
+        logger.info("Sending blueprint to GPT-4o Vision for analysis...")
         response = self._analyze_with_gpt4v(image_base64, prompt)
         
         # Parse the response
         analysis = self._parse_gpt_response(response)
         
         processing_time = time.time() - start_time
-        logger.info(f"GPT-5 Vision analysis complete in {processing_time:.2f}s")
+        logger.info(f"GPT-4o Vision analysis complete in {processing_time:.2f}s")
         logger.info(f"Found {len(analysis.rooms)} rooms, total area: {analysis.total_area_sqft} sq ft")
         
         return analysis
@@ -164,8 +164,8 @@ class GPT4VBlueprintAnalyzer:
         return img_base64
     
     def _create_analysis_prompt(self, zip_code: str) -> str:
-        """Create enhanced prompt for GPT-5 blueprint analysis with superior vision AND HVAC calculation"""
-        return f"""You are an expert HVAC load calculation specialist using GPT-5's advanced vision capabilities.
+        """Create enhanced prompt for GPT-4o blueprint analysis with multimodal vision AND HVAC calculation"""
+        return f"""You are an expert HVAC load calculation specialist using GPT-4o's advanced multimodal vision capabilities.
         
 Analyze this residential blueprint AND calculate HVAC loads using ACCA Manual J methodology.
 
@@ -173,7 +173,7 @@ PROJECT LOCATION: ZIP CODE {zip_code}
 This is CRITICAL for determining climate zone, design temperatures, and accurate load calculations.
 
 ANALYSIS REQUIREMENTS:
-1. Room Detection (use GPT-5's enhanced vision):
+1. Room Detection (use GPT-4o's multimodal vision):
    - Identify EVERY room, closet, hallway, and space
    - Read ALL dimension annotations (e.g., 12'-6" x 10'-0")
    - Detect room labels and types from text
@@ -205,7 +205,7 @@ ANALYSIS REQUIREMENTS:
    - Include infiltration, ventilation, and duct losses
    - Size equipment properly with safety factors
 
-Use GPT-5's superior reasoning to:
+Use GPT-4o's vision capabilities to:
 - Cross-verify dimensions for accuracy
 - Detect partial/obscured text with context
 - Identify non-standard room shapes
@@ -244,14 +244,14 @@ Respond with a JSON object in this exact format:
       "winter_design_temp_f": <number for {zip_code}>,
       "summer_design_temp_f": <number for {zip_code}>
     }},
-    "calculation_method": "ACCA Manual J via GPT-5 Vision for ZIP {zip_code}"
+    "calculation_method": "ACCA Manual J via GPT-4o Vision for ZIP {zip_code}"
   }}
 }}
 
 REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
     
     def _analyze_with_gpt4v(self, image_base64: str, prompt: str) -> Dict[str, Any]:
-        """Send image to GPT-5V/GPT-4V and get analysis with model fallback"""
+        """Send image to GPT-4o/GPT-4V and get analysis with model fallback"""
         last_error = None
         
         # Try each model in order until one works
@@ -260,14 +260,12 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                 logger.info(f"Attempting blueprint analysis with {model}...")
                 
                 # Build request based on model type
-                if model.startswith("gpt-5"):
-                    # GPT-5 uses new parameters and direct image input
-                    # GPT-5 ONLY supports default temperature (1.0)
-                    logger.info(f"Using {self.gpt5_timeout}s timeout for {model}")
+                if model.startswith("gpt-4o"):
+                    # GPT-4o multimodal models
+                    logger.info(f"Using {self.gpt4o_timeout}s timeout for {model}")
                     response = self.client.chat.completions.create(
                         model=model,
-                        timeout=self.gpt5_timeout,  # Configurable timeout for GPT-5
-                        max_retries=3,  # Add retry logic for connection issues
+                        timeout=self.gpt4o_timeout,  # Configurable timeout for GPT-4o
                         messages=[
                         {
                             "role": "user",
@@ -283,13 +281,8 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                             ]
                         }
                         ],
-                        max_completion_tokens=self.max_tokens,  # GPT-5 uses max_completion_tokens
-                        # temperature=1.0,  # GPT-5 only supports default (1.0), omit for default
-                        # GPT-5 specific parameters
-                        extra_body={
-                            "reasoning_effort": self.reasoning_effort,
-                            "verbosity": self.verbosity
-                        }
+                        max_tokens=self.max_tokens,
+                        temperature=0.1  # Low temperature for consistent output
                     )
                 else:
                     # GPT-4 fallback with standard parameters
@@ -297,7 +290,6 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                     response = self.client.chat.completions.create(
                         model=model,
                         timeout=self.gpt4_timeout,  # Configurable timeout for GPT-4
-                        max_retries=3,  # Add retry logic for connection issues
                         messages=[
                         {
                             "role": "user",
@@ -418,7 +410,7 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
         return analysis
     
     def format_for_hvac(self, analysis: GPTBlueprintAnalysis) -> Dict[str, Any]:
-        """Format GPT-5 Vision analysis for HVAC load calculations"""
+        """Format GPT-4o Vision analysis for HVAC load calculations"""
         return {
             "success": True,
             "total_area": analysis.total_area_sqft,
@@ -437,7 +429,7 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                 for room in analysis.rooms
             ],
             "metadata": {
-                "method": "GPT-5 Vision Analysis with HVAC Calculation",
+                "method": "GPT-4o Vision Analysis with HVAC Calculation",
                 "building_type": analysis.building_type,
                 "num_floors": analysis.num_floors,
                 "special_features": analysis.special_features,

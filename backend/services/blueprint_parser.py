@@ -188,12 +188,12 @@ class BlueprintParser:
         )
         
         try:
-            # Check for GPT-5 only mode first
-            use_gpt5_only = os.getenv("USE_GPT5_ONLY", "false").lower() == "true"
+            # Check for GPT-4o only mode first
+            use_gpt4o_only = os.getenv("USE_GPT4O_ONLY", "false").lower() == "true"
             
-            if use_gpt5_only:
-                # Use the new modular GPT-5 pipeline
-                logger.info(f"[GPT-5 ONLY MODE] Using modular GPT-5 Vision pipeline for {filename}")
+            if use_gpt4o_only:
+                # Use the new modular GPT-4o pipeline
+                logger.info(f"[GPT-4O ONLY MODE] Using modular GPT-4o Vision pipeline for {filename}")
                 try:
                     from services.blueprint_pipeline import blueprint_pipeline
                     
@@ -213,12 +213,12 @@ class BlueprintParser:
                         })
                         return self._convert_pipeline_to_schema(result, project_id, filename, zip_code)
                     else:
-                        logger.error(f"GPT-5 pipeline failed: {result.get('error')}")
-                        raise BlueprintParsingError(f"GPT-5 Vision pipeline failed: {result.get('error')}")
+                        logger.error(f"GPT-4o pipeline failed: {result.get('error')}")
+                        raise BlueprintParsingError(f"GPT-4o Vision pipeline failed: {result.get('error')}")
                         
                 except Exception as e:
-                    logger.error(f"GPT-5 pipeline error: {e}")
-                    raise BlueprintParsingError(f"GPT-5 Vision processing failed: {str(e)}")
+                    logger.error(f"GPT-4o pipeline error: {e}")
+                    raise BlueprintParsingError(f"GPT-4o Vision processing failed: {str(e)}")
             
             # Check parsing mode from environment
             parsing_mode = os.getenv("PARSING_MODE", "traditional_first").lower()
@@ -443,11 +443,11 @@ class BlueprintParser:
                     parsed_dimensions = []
                     geometry_elements = []
                 
-                # Store PDF path for GPT-5 to use
+                # Store PDF path for GPT-4o to use
                 self.current_pdf_path = pdf_path
                 
-                # Stage 4: GPT-5 Vision analysis ONLY
-                logger.info("Stage 4: GPT-5 Vision analysis and HVAC calculation")
+                # Stage 4: GPT-4o Vision analysis OR GPT-5 text reasoning
+                logger.info("Stage 4: AI analysis (GPT-4o vision or GPT-5 text) and HVAC calculation")
                 with track_stage(PipelineStage.SEMANTIC_ANALYSIS):
                     rooms = self._perform_ai_analysis(raw_geometry, raw_text, zip_code, parsing_metadata)
                     metrics_collector.current_stage.output_data = {
@@ -806,7 +806,7 @@ class BlueprintParser:
             import os
             if os.getenv("OPENAI_API_KEY") and os.getenv("USE_GPT4_VISION", "true").lower() == "true":
                 try:
-                    logger.info("Attempting GPT-5 Vision analysis for complete blueprint parsing and HVAC calculation...")
+                    logger.info("Attempting GPT-4o Vision analysis for complete blueprint parsing and HVAC calculation...")
                     from services.gpt4v_blueprint_analyzer import get_gpt4v_analyzer
                     from services.pipeline_context import pipeline_context
                     
@@ -818,7 +818,7 @@ class BlueprintParser:
                         analysis = gpt4v.analyze_blueprint(pdf_path, zip_code, pipeline_context=pipeline_context)
                         
                         if analysis and hasattr(analysis, 'total_area_sqft') and analysis.total_area_sqft and analysis.total_area_sqft > 100:
-                            logger.info(f"GPT-5 Vision successful: {len(analysis.rooms)} rooms, {analysis.total_area_sqft:.0f} sq ft")
+                            logger.info(f"GPT-4o Vision successful: {len(analysis.rooms)} rooms, {analysis.total_area_sqft:.0f} sq ft")
                             
                             # Convert GPT-4V results to Room schema
                             enhanced_rooms = []
@@ -834,14 +834,14 @@ class BlueprintParser:
                                     confidence=gpt_room.confidence,
                                     center_position=(0.0, 0.0),
                                     label_found=True,
-                                    dimensions_source="gpt5_vision"
+                                    dimensions_source="gpt4o_vision"
                                 )
                                 enhanced_rooms.append(room)
                             
                             metadata.ai_status = ParsingStatus.SUCCESS
                             return enhanced_rooms
                 except Exception as e:
-                    logger.warning(f"GPT-4 Vision analysis failed, falling back to traditional AI: {e}")
+                    logger.warning(f"GPT-4o Vision analysis failed, falling back to GPT-5 text AI: {e}")
             
             # Fallback to original AI analysis
             # Convert back to schema objects for AI processing

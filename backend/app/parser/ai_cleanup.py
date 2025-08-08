@@ -53,9 +53,9 @@ async def cleanup(raw_geo: RawGeometry, raw_text: RawText, zip_code: str = "9021
     system_prompt = _generate_system_prompt()
     
     try:
-        # Call OpenAI API
+        # Call OpenAI API - Use GPT-5 for superior text reasoning
         response = await client.chat.completions.create(
-            model="gpt-4-1106-preview",
+            model="gpt-5-mini",  # GPT-5 for better text reasoning, mini for cost efficiency
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": context}
