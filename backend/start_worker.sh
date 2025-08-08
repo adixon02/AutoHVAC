@@ -1,9 +1,16 @@
 #!/bin/bash
 # Worker startup script with correct module path
 
-cd /app/backend
+# Fix: Use the actual project path on Render
+cd /opt/render/project/src/backend || {
+    echo "ERROR: Failed to change to backend directory"
+    echo "Current directory: $(pwd)"
+    echo "Looking for backend in: /opt/render/project/src/backend"
+    exit 1
+}
 
 echo "Starting Celery worker with calculate_hvac_loads module..."
+echo "Working directory: $(pwd)"
 
 celery -A tasks.calculate_hvac_loads worker \
   --loglevel=info \

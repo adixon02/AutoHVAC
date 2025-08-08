@@ -1,7 +1,7 @@
 """
-GPT-4V Blueprint Analyzer - THE WORLD'S SMARTEST BLUEPRINT PARSER
-Uses OpenAI's GPT-4 Vision to accurately interpret blueprints like a human would
-This is the ultimate solution for complex blueprint analysis
+GPT-5 Vision Blueprint Analyzer - Advanced Blueprint Analysis
+Uses OpenAI's GPT-5 Vision API to accurately interpret blueprints
+Provides comprehensive room detection and HVAC load calculations
 """
 
 import os
@@ -57,8 +57,8 @@ class GPTBlueprintAnalysis:
 
 class GPT4VBlueprintAnalyzer:
     """
-    THE ULTIMATE BLUEPRINT ANALYZER
-    Uses GPT-4 Vision to interpret blueprints with human-level accuracy
+    GPT-5 Vision Blueprint Analyzer
+    Uses GPT-5 Vision API to interpret blueprints with high accuracy
     """
     
     def __init__(self):
@@ -99,7 +99,7 @@ class GPT4VBlueprintAnalyzer:
             Complete blueprint analysis with all rooms and dimensions
         """
         start_time = time.time()
-        logger.info(f"Starting GPT-4V analysis of {pdf_path}")
+        logger.info(f"Starting GPT-5 Vision analysis of {pdf_path}")
         
         # Find the floor plan page
         if page_num is None:
@@ -112,21 +112,21 @@ class GPT4VBlueprintAnalyzer:
         # Prepare the analysis prompt - BE SPECIFIC!
         prompt = self._create_analysis_prompt(zip_code)
         
-        # Send to GPT-4V for analysis
-        logger.info("Sending blueprint to GPT-4V for analysis...")
+        # Send to GPT-5 for analysis
+        logger.info("Sending blueprint to GPT-5 Vision for analysis...")
         response = self._analyze_with_gpt4v(image_base64, prompt)
         
         # Parse the response
         analysis = self._parse_gpt_response(response)
         
         processing_time = time.time() - start_time
-        logger.info(f"GPT-4V analysis complete in {processing_time:.2f}s")
+        logger.info(f"GPT-5 Vision analysis complete in {processing_time:.2f}s")
         logger.info(f"Found {len(analysis.rooms)} rooms, total area: {analysis.total_area_sqft} sq ft")
         
         return analysis
     
     def _render_page_to_base64(self, pdf_path: str, page_num: int, dpi: int = 200) -> str:
-        """Render PDF page to base64 encoded image for GPT-4V"""
+        """Render PDF page to base64 encoded image for GPT-5 Vision"""
         doc = fitz.open(pdf_path)
         page = doc[page_num]
         
@@ -395,7 +395,7 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
         return analysis
     
     def format_for_hvac(self, analysis: GPTBlueprintAnalysis) -> Dict[str, Any]:
-        """Format GPT-4V analysis for HVAC load calculations"""
+        """Format GPT-5 Vision analysis for HVAC load calculations"""
         return {
             "success": True,
             "total_area": analysis.total_area_sqft,

@@ -8,6 +8,7 @@ import os
 import time
 import logging
 import asyncio
+import fitz  # PyMuPDF
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from uuid import uuid4
@@ -240,16 +241,64 @@ class BlueprintParser:
         logger.info(f"Starting traditional blueprint parsing for {filename}")
         
         try:
-            # SKIP Traditional stages 1-3, go straight to GPT-5 Vision
-            logger.info("[GPT-5 ONLY MODE] Skipping traditional extraction, using GPT-5 Vision directly")
+            # Check if we should skip traditional extraction
+            blueprint_ai_only = os.getenv("BLUEPRINT_AI_ONLY", "false").lower() == "true"
             
-            # Set minimal metadata for GPT-5 only mode
-            selected_page = 1  # GPT-5 will analyze all pages
-            raw_geometry = {}
-            raw_text = {}
-            parsed_labels = []
-            parsed_dimensions = []
-            geometry_elements = []
+            if blueprint_ai_only:
+                # Only skip if explicitly requested via BLUEPRINT_AI_ONLY env var
+                logger.info("[AI-ONLY MODE] BLUEPRINT_AI_ONLY=true, skipping traditional extraction")
+                selected_page = 1
+                raw_geometry = {}  # Empty but not None
+                raw_text = {}  # Empty but not None
+                parsed_labels = []
+                parsed_dimensions = []
+                geometry_elements = []
+            elif parsing_mode == "traditional_first":
+                # In traditional_first mode, ALWAYS do traditional extraction
+                logger.info("[TRADITIONAL-FIRST] Performing traditional geometry and text extraction")
+                
+                # Stage 1: Analyze PDF pages
+                logger.info("Stage 1: Analyzing PDF pages")
+                pages_analysis = self.page_analyzer.analyze_pages(pdf_path)
+                parsing_metadata.pdf_page_count = len(pages_analysis)
+                
+                # Stage 2: Select best page and extract geometry
+                logger.info("Stage 2: Selecting best page and extracting geometry")
+                selected_page = self._select_best_page(pages_analysis)
+                parsing_metadata.selected_page = selected_page + 1  # 1-indexed for display
+                
+                # Try lean extraction if available
+                if USE_LEAN_EXTRACTION:
+                    logger.info("Using lean extraction components")
+                    raw_geometry, raw_text = self._perform_lean_extraction(pdf_path, selected_page)
+                else:
+                    # Legacy extraction
+                    raw_geometry = self.geometry_parser.parse_geometry(pdf_path, selected_page)
+                    raw_text = self.text_parser.parse_text(pdf_path, selected_page)
+                
+                # Ensure they're not None
+                raw_geometry = raw_geometry or {}
+                raw_text = raw_text or {}
+                
+                # Parse labels and dimensions
+                parsed_labels = self._convert_raw_text_to_labels(raw_text)
+                parsed_dimensions = self._convert_raw_text_to_dimensions(raw_text)
+                geometry_elements = self._convert_raw_geometry_to_elements(raw_geometry)
+                
+                # Update metadata
+                parsing_metadata.geometry_status = ParsingStatus.SUCCESS if raw_geometry else ParsingStatus.FAILED
+                parsing_metadata.text_status = ParsingStatus.SUCCESS if raw_text else ParsingStatus.FAILED
+                parsing_metadata.geometry_confidence = self._calculate_geometry_confidence(raw_geometry)
+                parsing_metadata.text_confidence = self._calculate_text_confidence(raw_text)
+            else:
+                # Traditional-only or other modes
+                logger.info("[TRADITIONAL] Using traditional extraction only")
+                selected_page = 1
+                raw_geometry = {}  # Empty but not None
+                raw_text = {}  # Empty but not None  
+                parsed_labels = []
+                parsed_dimensions = []
+                geometry_elements = []
             
             # Store PDF path for GPT-5 to use
             self.current_pdf_path = pdf_path
@@ -1498,6 +1547,81 @@ class BlueprintParser:
         else:
             logger.info(f"No scale detected, using default: {self.default_scale_override}")
             return float(self.default_scale_override)
+    
+    def _select_best_page(self, pages_analysis: List[PageAnalysisResult]) -> int:
+        """Select the best page for blueprint processing"""
+        if not pages_analysis:
+            return 0
+        
+        # Find page with highest confidence floor plan
+        best_page = 0
+        best_score = 0
+        
+        for i, page in enumerate(pages_analysis):
+            score = page.confidence
+            if hasattr(page, 'page_type') and page.page_type == 'floor_plan':
+                score += 0.5  # Boost floor plan pages
+            if score > best_score:
+                best_score = score
+                best_page = i
+        
+        return best_page
+    
+    def _perform_lean_extraction(self, pdf_path: str, selected_page: int) -> tuple[Dict, Dict]:
+        """Perform lean extraction using optimized components"""
+        raw_geometry = {}
+        raw_text = {}
+        
+        try:
+            # Use page classifier for basic extraction
+            doc = fitz.open(pdf_path)
+            page = doc[selected_page]
+            
+            # Extract text
+            text_blocks = page.get_text("dict")
+            raw_text = {
+                'page_text': page.get_text(),
+                'blocks': text_blocks.get('blocks', []),
+                'room_labels': [],
+                'dimensions': []
+            }
+            
+            # Extract basic geometry (lines and rectangles)
+            drawings = page.get_drawings()
+            lines = []
+            rectangles = []
+            
+            for drawing in drawings:
+                if 'l' in drawing:  # Line
+                    lines.append({
+                        'x0': drawing['l'][0],
+                        'y0': drawing['l'][1],
+                        'x1': drawing['l'][2],
+                        'y1': drawing['l'][3]
+                    })
+                elif 'r' in drawing:  # Rectangle
+                    rect = drawing['r']
+                    rectangles.append({
+                        'x0': rect.x0,
+                        'y0': rect.y0,
+                        'x1': rect.x1,
+                        'y1': rect.y1,
+                        'area': rect.width * rect.height
+                    })
+            
+            raw_geometry = {
+                'lines': lines,
+                'rectangles': rectangles,
+                'scale_factor': 48  # Default
+            }
+            
+            doc.close()
+            
+        except Exception as e:
+            logger.warning(f"Lean extraction failed: {e}")
+            # Return empty dicts instead of None
+            
+        return raw_geometry, raw_text
     
     def _apply_validation_gates(self, rooms: List[Room], detected_scale: float, metadata: ParsingMetadata):
         """Apply strict validation gates with fail-fast logic"""

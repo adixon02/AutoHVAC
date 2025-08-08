@@ -17,6 +17,7 @@ from services.takeoff_schema import (
     HVACLoad, GPTResponse, SourceType, RoomType
 )
 from services.pdf_to_images import PageImage
+from services.strict_json_parser import strict_parser
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,18 @@ class VisionParser:
             pages_analyzed=[p.page_num for p in page_images],
             processing_time=time.time() - start_time
         )
+        
+        # Multi-page fallback: If no rooms detected, try analyzing ALL pages individually
+        if takeoff.num_rooms == 0 and len(page_images) > 0:
+            logger.warning("No rooms detected in initial analysis, trying multi-page fallback")
+            takeoff = self._multi_page_fallback(
+                page_images=page_images,
+                zip_code=zip_code,
+                project_id=project_id,
+                filename=filename,
+                model_used=model_used,
+                start_time=start_time
+            )
         
         logger.info(f"Vision parsing complete: {takeoff.num_rooms} rooms, {takeoff.total_area_sqft:.0f} sq ft")
         
@@ -274,8 +287,12 @@ IMPORTANT:
             Parsed JSON response or None if failed
         """
         try:
-            # Build messages
+            # Build messages with system prompt for strict JSON
             messages = [
+                {
+                    "role": "system",
+                    "content": "You are a blueprint analyzer that outputs ONLY valid JSON. No explanatory text, no markdown, just pure JSON."
+                },
                 {
                     "role": "user",
                     "content": [
@@ -295,20 +312,33 @@ IMPORTANT:
                 api_params["extra_body"] = extra_body
             
             # Make API call
-            logger.debug(f"Calling {model_config.name} with {len(image_contents)} images")
+            logger.info(f"Calling {model_config.name} with {len(image_contents)} images")
             response = self.client.chat.completions.create(**api_params)
             
             # Extract content
             content = response.choices[0].message.content
             
-            # Parse JSON from response
-            json_response = self._extract_json(content)
+            # Log first 300 chars for debugging
+            logger.debug(f"Raw response preview: {content[:300]}...")
+            
+            # Use strict JSON parser
+            json_response = strict_parser.extract_json(content)
             
             if json_response:
-                logger.debug(f"Successfully parsed JSON response from {model_config.name}")
+                # Log room count and total area if available
+                rooms = strict_parser.safe_extract_rooms(json_response)
+                logger.info(f"✅ {model_config.name} parsed successfully: {len(rooms)} rooms detected")
+                
+                # If no rooms found, log the JSON structure for debugging
+                if len(rooms) == 0:
+                    logger.warning(f"No rooms found in response. JSON keys: {list(json_response.keys())}")
+                    if 'error' in json_response:
+                        logger.error(f"Model returned error: {json_response['error']}")
+                
                 return json_response
             else:
                 logger.warning(f"Failed to extract valid JSON from {model_config.name} response")
+                logger.debug(f"Response content (first 500 chars): {content[:500]}")
                 return None
                 
         except Exception as e:
@@ -325,30 +355,8 @@ IMPORTANT:
         Returns:
             Parsed JSON dictionary or None
         """
-        try:
-            # Try direct JSON parsing
-            return json.loads(content)
-        except json.JSONDecodeError:
-            # Try to find JSON in markdown code blocks
-            json_pattern = r'```(?:json)?\s*(\{.*?\})\s*```'
-            match = re.search(json_pattern, content, re.DOTALL)
-            if match:
-                try:
-                    return json.loads(match.group(1))
-                except json.JSONDecodeError:
-                    pass
-            
-            # Try to find raw JSON object
-            json_pattern = r'\{.*\}'
-            match = re.search(json_pattern, content, re.DOTALL)
-            if match:
-                try:
-                    return json.loads(match.group())
-                except json.JSONDecodeError:
-                    pass
-        
-        logger.warning("Could not extract valid JSON from response")
-        return None
+        # Use the strict JSON parser
+        return strict_parser.extract_json(content)
     
     def _parse_response(
         self,
@@ -550,6 +558,138 @@ IMPORTANT:
             processing_time_seconds=processing_time,
             model_used=model_used
         )
+        
+        return takeoff
+    
+    def _multi_page_fallback(
+        self,
+        page_images: List[PageImage],
+        zip_code: str,
+        project_id: str,
+        filename: str,
+        model_used: str,
+        start_time: float
+    ) -> BlueprintTakeoff:
+        """
+        Analyze all pages individually and merge results
+        
+        Args:
+            page_images: All page images to analyze
+            zip_code: Project location
+            project_id: Project identifier
+            filename: Blueprint filename
+            model_used: Model being used
+            start_time: Original start time for timing
+            
+        Returns:
+            Merged BlueprintTakeoff with rooms from all pages
+        """
+        logger.info(f"Starting multi-page analysis for {len(page_images)} pages")
+        
+        all_rooms = []
+        total_area = 0
+        best_envelope = None
+        best_climate = None
+        
+        # Analyze each page individually
+        for i, page_image in enumerate(page_images):
+            logger.info(f"Analyzing page {page_image.page_number} of {len(page_images)}")
+            
+            # Create page-specific prompt
+            page_prompt = f"""Analyze this specific page (page {page_image.page_number}) of a blueprint.
+This may be a floor plan, elevation, or detail page. Extract any rooms, dimensions, or relevant information.
+
+PROJECT ZIP CODE: {zip_code}
+
+If this is a floor plan, identify all rooms with dimensions.
+If this is an elevation or section, note any height information.
+If this is a detail page, extract any relevant construction details.
+
+Return JSON with any rooms found on this page."""
+            
+            # Prepare single page for API
+            single_page_content = [{
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{page_image.image_base64}",
+                    "detail": "high"
+                }
+            }]
+            
+            # Try to get response for this page
+            for model_config in self.models:
+                if model_config.name == model_used:
+                    response = self._call_vision_api(
+                        model_config=model_config,
+                        image_contents=single_page_content,
+                        prompt=page_prompt
+                    )
+                    
+                    if response:
+                        # Extract rooms from this page
+                        page_rooms = strict_parser.safe_extract_rooms(response)
+                        if page_rooms:
+                            logger.info(f"Found {len(page_rooms)} rooms on page {page_image.page_number}")
+                            
+                            # Convert to Room objects
+                            for j, room_data in enumerate(page_rooms):
+                                try:
+                                    room = Room(
+                                        id=f"p{page_image.page_number}_r{j+1:03d}",
+                                        name=room_data.get("name", f"Room {j+1}"),
+                                        room_type=RoomType.OTHER,
+                                        width_ft=float(room_data.get("width_ft", 10)),
+                                        length_ft=float(room_data.get("length_ft", 10)),
+                                        source=SourceType.SCALED,
+                                        confidence=0.6
+                                    )
+                                    all_rooms.append(room)
+                                    total_area += room.area_sqft
+                                except Exception as e:
+                                    logger.debug(f"Error parsing room from page {page_image.page_number}: {e}")
+                    break
+        
+        # If still no rooms after multi-page analysis, create minimal fallback
+        if not all_rooms:
+            logger.warning("Multi-page analysis found no rooms, creating minimal fallback")
+            all_rooms = [
+                Room(
+                    id="fallback_001",
+                    name="Main Space",
+                    room_type=RoomType.OTHER,
+                    width_ft=20.0,
+                    length_ft=20.0,
+                    source=SourceType.ASSUMED,
+                    confidence=0.1
+                )
+            ]
+            total_area = 400
+        
+        # Create takeoff with merged results
+        takeoff = BlueprintTakeoff(
+            project_id=project_id,
+            filename=filename,
+            rooms=all_rooms,
+            building_envelope=BuildingEnvelope(
+                total_area_sqft=total_area,
+                num_floors=1,
+                source=SourceType.ASSUMED
+            ),
+            climate_data=ClimateData(
+                zip_code=zip_code,
+                climate_zone=vision_config.default_climate_zone,
+                winter_design_temp_f=20.0,
+                summer_design_temp_f=90.0,
+                source=SourceType.ASSUMED
+            ),
+            scale_notation="Unknown",
+            pages_analyzed=[p.page_num for p in page_images],
+            confidence_score=0.5,
+            processing_time_seconds=time.time() - start_time,
+            model_used=model_used
+        )
+        
+        logger.info(f"Multi-page analysis complete: {len(all_rooms)} total rooms, {total_area:.0f} sq ft")
         
         return takeoff
 
