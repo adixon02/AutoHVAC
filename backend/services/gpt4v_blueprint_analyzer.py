@@ -81,6 +81,11 @@ class GPT4VBlueprintAnalyzer:
         self.reasoning_effort = "high"  # For complex blueprint analysis
         self.verbosity = "low"  # We want concise JSON output
         
+        # Configurable timeouts with sensible defaults
+        self.gpt5_timeout = float(os.getenv("GPT5_TIMEOUT", "120"))  # 120 seconds default
+        self.gpt4_timeout = float(os.getenv("GPT4_TIMEOUT", "90"))   # 90 seconds default
+        logger.info(f"GPT-5 timeout: {self.gpt5_timeout}s, GPT-4 timeout: {self.gpt4_timeout}s")
+        
     def analyze_blueprint(
         self,
         pdf_path: str,
@@ -258,9 +263,10 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                 if model.startswith("gpt-5"):
                     # GPT-5 uses new parameters and direct image input
                     # GPT-5 ONLY supports default temperature (1.0)
+                    logger.info(f"Using {self.gpt5_timeout}s timeout for {model}")
                     response = self.client.chat.completions.create(
                         model=model,
-                        timeout=30.0,  # 30-second timeout for GPT-5
+                        timeout=self.gpt5_timeout,  # Configurable timeout for GPT-5
                         messages=[
                         {
                             "role": "user",
@@ -286,9 +292,10 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                     )
                 else:
                     # GPT-4 fallback with standard parameters
+                    logger.info(f"Using {self.gpt4_timeout}s timeout for {model}")
                     response = self.client.chat.completions.create(
                         model=model,
-                        timeout=30.0,  # 30-second timeout for GPT-4
+                        timeout=self.gpt4_timeout,  # Configurable timeout for GPT-4
                         messages=[
                         {
                             "role": "user",

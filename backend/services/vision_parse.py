@@ -5,6 +5,7 @@ Handles communication with OpenAI Vision API and response parsing
 
 import json
 import logging
+import os
 import time
 import re
 from typing import List, Dict, Any, Optional
@@ -33,6 +34,10 @@ class VisionParser:
         
         self.client = OpenAI(api_key=vision_config.openai_api_key)
         self.models = vision_config.models
+        
+        # Configurable timeout with sensible default
+        self.vision_timeout = float(os.getenv("VISION_API_TIMEOUT", "120"))  # 120 seconds default
+        logger.info(f"Vision API timeout: {self.vision_timeout}s")
         
     def parse_blueprint(
         self,
@@ -312,9 +317,9 @@ IMPORTANT:
             if extra_body:
                 api_params["extra_body"] = extra_body
             
-            # Make API call with 30-second timeout
-            logger.info(f"Calling {model_config.name} with {len(image_contents)} images")
-            api_params["timeout"] = 30.0  # 30-second timeout
+            # Make API call with configurable timeout
+            logger.info(f"Calling {model_config.name} with {len(image_contents)} images (timeout: {self.vision_timeout}s)")
+            api_params["timeout"] = self.vision_timeout  # Configurable timeout
             response = self.client.chat.completions.create(**api_params)
             
             # Extract content
