@@ -259,12 +259,13 @@ class BlueprintParser:
                 
                 # Stage 1: Analyze PDF pages
                 logger.info("Stage 1: Analyzing PDF pages")
-                pages_analysis = self.page_analyzer.analyze_pages(pdf_path)
+                best_page, pages_analysis = self.page_analyzer.analyze_pdf_pages(pdf_path)
                 parsing_metadata.pdf_page_count = len(pages_analysis)
                 
                 # Stage 2: Select best page and extract geometry
                 logger.info("Stage 2: Selecting best page and extracting geometry")
-                selected_page = self._select_best_page(pages_analysis)
+                # Use the best_page returned from analyzer (1-based, need to convert to 0-based)
+                selected_page = best_page - 1
                 parsing_metadata.selected_page = selected_page + 1  # 1-indexed for display
                 
                 # Try lean extraction if available
