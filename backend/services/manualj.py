@@ -959,7 +959,8 @@ def calculate_manualj_with_audit(schema: BlueprintSchema, duct_config: str = "du
         include_ventilation=include_ventilation,
         envelope_data=envelope_data,
         create_audit=create_audit,
-        user_id=user_id
+        user_id=user_id,
+        building_orientation=building_orientation
     )
     
     # Enhanced result validation for ACCA compliance
@@ -1039,7 +1040,7 @@ def _generate_missing_common_spaces(parsed_area: float, declared_area: float, ex
     return generated_rooms
 
 
-def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic", heating_fuel: str = "gas", construction_vintage: Optional[str] = None, include_ventilation: bool = True, envelope_data: Optional[EnvelopeExtraction] = None, create_audit: bool = True, user_id: Optional[str] = None) -> Dict[str, Any]:
+def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic", heating_fuel: str = "gas", construction_vintage: Optional[str] = None, include_ventilation: bool = True, envelope_data: Optional[EnvelopeExtraction] = None, create_audit: bool = True, user_id: Optional[str] = None, building_orientation: str = "unknown") -> Dict[str, Any]:
     """
     Calculate ACCA Manual J heating and cooling loads
     
