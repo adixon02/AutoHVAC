@@ -85,7 +85,8 @@ class GPT4VBlueprintAnalyzer:
         self,
         pdf_path: str,
         zip_code: str = "99006",
-        page_num: Optional[int] = None
+        page_num: Optional[int] = None,
+        pipeline_context=None
     ) -> GPTBlueprintAnalysis:
         """
         Analyze blueprint using GPT-4 Vision for maximum accuracy
@@ -101,10 +102,21 @@ class GPT4VBlueprintAnalyzer:
         start_time = time.time()
         logger.info(f"Starting GPT-5 Vision analysis of {pdf_path}")
         
-        # Find the floor plan page
-        if page_num is None:
+        # Use page from pipeline context if available, otherwise from parameter or auto-detect
+        if pipeline_context:
+            try:
+                page_num = pipeline_context.get_page()
+                logger.info(f"Using locked page {page_num + 1} from pipeline context")
+            except ValueError:
+                # Context doesn't have page set yet, fall back to other methods
+                if page_num is None:
+                    page_num = page_classifier.find_best_floor_plan_page(pdf_path) or 0
+                    logger.info(f"No context page, auto-detected page {page_num + 1}")
+        elif page_num is None:
             page_num = page_classifier.find_best_floor_plan_page(pdf_path) or 0
-            logger.info(f"Using page {page_num + 1} as floor plan")
+            logger.info(f"Using auto-detected page {page_num + 1}")
+        else:
+            logger.info(f"Using provided page {page_num + 1}")
         
         # Render page to high-quality image
         image_base64 = self._render_page_to_base64(pdf_path, page_num)
@@ -248,6 +260,7 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                     # GPT-5 ONLY supports default temperature (1.0)
                     response = self.client.chat.completions.create(
                         model=model,
+                        timeout=30.0,  # 30-second timeout for GPT-5
                         messages=[
                         {
                             "role": "user",
@@ -275,6 +288,7 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                     # GPT-4 fallback with standard parameters
                     response = self.client.chat.completions.create(
                         model=model,
+                        timeout=30.0,  # 30-second timeout for GPT-4
                         messages=[
                         {
                             "role": "user",

@@ -312,8 +312,9 @@ IMPORTANT:
             if extra_body:
                 api_params["extra_body"] = extra_body
             
-            # Make API call
+            # Make API call with 30-second timeout
             logger.info(f"Calling {model_config.name} with {len(image_contents)} images")
+            api_params["timeout"] = 30.0  # 30-second timeout
             response = self.client.chat.completions.create(**api_params)
             
             # Extract content

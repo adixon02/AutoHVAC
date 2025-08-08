@@ -33,6 +33,7 @@ from services.blueprint_validator import (
 from services.deterministic_scale_detector import deterministic_scale_detector, ScaleResult
 from services.room_filter import room_filter, RoomFilterConfig
 from services.metrics_collector import metrics_collector, PipelineStage, track_stage
+from services.pipeline_context import pipeline_context
 
 # Import our new lean components
 try:
@@ -165,6 +166,11 @@ class BlueprintParser:
         # Generate project ID if not provided
         if not project_id:
             project_id = str(uuid4())
+        
+        # Initialize pipeline context
+        pipeline_context.reset()
+        pipeline_context.set_project_info(project_id, zip_code)
+        pipeline_context.set_pdf_path(pdf_path)
         
         # Initialize metrics collection
         pdf_size_mb = os.path.getsize(pdf_path) / (1024 * 1024)
@@ -367,6 +373,11 @@ class BlueprintParser:
                     with track_stage(PipelineStage.PAGE_CLASSIFICATION):
                         best_page, pages_analysis = self.page_analyzer.analyze_pdf_pages(pdf_path)
                         parsing_metadata.pdf_page_count = len(pages_analysis)
+                        
+                        # Lock page selection in context (convert to 0-indexed)
+                        selected_page = best_page - 1
+                        pipeline_context.set_page(selected_page, source="traditional_analyzer")
+                        
                         metrics_collector.track_decision(
                             "page_selection",
                             "Selected best page for extraction",
@@ -375,10 +386,10 @@ class BlueprintParser:
                             reason="Highest score based on content analysis"
                         )
                     
-                    # Stage 2: Select best page and extract geometry
-                    logger.info("Stage 2: Selecting best page and extracting geometry")
-                    # Use the best_page returned from analyzer (1-based, need to convert to 0-based)
-                    selected_page = best_page - 1
+                    # Stage 2: Extract geometry from selected page
+                    logger.info("Stage 2: Extracting geometry from selected page")
+                    # Get the locked page from context
+                    selected_page = pipeline_context.get_page()
                     parsing_metadata.selected_page = selected_page + 1  # 1-indexed for display
                     
                     with track_stage(PipelineStage.GEOMETRY_EXTRACTION):
@@ -660,6 +671,9 @@ class BlueprintParser:
                     logger.info(f"Lean scale: {scale_result.pixels_per_foot:.1f} px/ft "
                               f"({scale_result.scale_notation}) confidence: {scale_result.confidence:.2f}")
                     
+                    # Lock the scale in pipeline context
+                    pipeline_context.set_scale(scale_result.pixels_per_foot, source="lean_scale_extraction")
+                    
                     # Parse geometry with detected scale
                     result = self.geometry_parser.parse(path, page_number=page_number)
                     
@@ -794,12 +808,14 @@ class BlueprintParser:
                 try:
                     logger.info("Attempting GPT-5 Vision analysis for complete blueprint parsing and HVAC calculation...")
                     from services.gpt4v_blueprint_analyzer import get_gpt4v_analyzer
+                    from services.pipeline_context import pipeline_context
                     
                     # Get the PDF path from current processing
                     pdf_path = self.current_pdf_path if hasattr(self, 'current_pdf_path') else None
                     if pdf_path and os.path.exists(pdf_path):
                         gpt4v = get_gpt4v_analyzer()
-                        analysis = gpt4v.analyze_blueprint(pdf_path, zip_code)
+                        # Pass pipeline context to use locked page
+                        analysis = gpt4v.analyze_blueprint(pdf_path, zip_code, pipeline_context=pipeline_context)
                         
                         if analysis and hasattr(analysis, 'total_area_sqft') and analysis.total_area_sqft and analysis.total_area_sqft > 100:
                             logger.info(f"GPT-5 Vision successful: {len(analysis.rooms)} rooms, {analysis.total_area_sqft:.0f} sq ft")
