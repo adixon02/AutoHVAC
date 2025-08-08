@@ -267,6 +267,7 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                     response = self.client.chat.completions.create(
                         model=model,
                         timeout=self.gpt5_timeout,  # Configurable timeout for GPT-5
+                        max_retries=3,  # Add retry logic for connection issues
                         messages=[
                         {
                             "role": "user",
@@ -296,6 +297,7 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                     response = self.client.chat.completions.create(
                         model=model,
                         timeout=self.gpt4_timeout,  # Configurable timeout for GPT-4
+                        max_retries=3,  # Add retry logic for connection issues
                         messages=[
                         {
                             "role": "user",

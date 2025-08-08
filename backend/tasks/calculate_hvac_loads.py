@@ -59,7 +59,7 @@ celery_app = Celery(
 MAX_PDF_SIZE_MB = 50
 MAX_PDF_PAGES = 100
 AI_TIMEOUT_SECONDS = 300
-MAX_PROCESSING_TIME = 300   # 5 minutes max as requested
+MAX_PROCESSING_TIME = 600   # 10 minutes to allow GPT-5 Vision to complete
 
 
 @celery_app.task(

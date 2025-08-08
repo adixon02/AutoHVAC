@@ -119,7 +119,7 @@ class Room(BaseModel):
         return v
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "name": "Living Room",
                 "dimensions_ft": [20.0, 15.0],
@@ -179,7 +179,7 @@ class BlueprintSchema(BaseModel):
             UUID: str,  # Automatically convert UUIDs to strings for JSON serialization
             datetime: lambda v: v.isoformat()
         }
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "project_id": "550e8400-e29b-41d4-a716-446655440000",
                 "zip_code": "90210",
