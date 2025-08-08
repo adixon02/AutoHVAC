@@ -139,7 +139,7 @@ class DeterministicScaleDetector:
         # Comprehensive regex patterns for scale notation
         patterns = [
             # SCALE: 1/4" = 1'-0"
-            (r'SCALE[:\s]+(\d+)/(\d+)["\']\s*=\s*1[\'"\-](?:0["\''])?', 
+            (r'SCALE[:\s]+(\d+)/(\d+)["\']\s*=\s*1[\'"\-](?:0["\'])?', 
              lambda m: f"{m.group(1)}/{m.group(2)}\"=1'"),
             # SCALE: 1/4 INCH = 1 FOOT
             (r'SCALE[:\s]+(\d+)/(\d+)\s*INCH(?:ES)?\s*=\s*1\s*FOOT',
@@ -391,7 +391,7 @@ class DeterministicScaleDetector:
         text = text.strip().upper()
         
         # Pattern: 12'-6" or 12'-6 1/2"
-        match = re.match(r'(\d+)[\''\-]+(\d+)(?:\s+(\d+)/(\d+))?["'']?', text)
+        match = re.match(r'(\d+)[\'\-]+(\d+)(?:\s+(\d+)/(\d+))?["\']?', text)
         if match:
             feet = int(match.group(1))
             inches = int(match.group(2))
@@ -403,7 +403,7 @@ class DeterministicScaleDetector:
             return feet + inches / 12.0
         
         # Pattern: 12' or 12.5'
-        match = re.match(r'(\d+(?:\.\d+)?)[\'']', text)
+        match = re.match(r'(\d+(?:\.\d+)?)[\']', text)
         if match:
             return float(match.group(1))
         

@@ -32,6 +32,7 @@ from services.blueprint_validator import (
 )
 from services.deterministic_scale_detector import deterministic_scale_detector, ScaleResult
 from services.room_filter import room_filter, RoomFilterConfig
+from services.metrics_collector import metrics_collector, PipelineStage, track_stage
 
 # Import our new lean components
 try:
@@ -161,138 +162,162 @@ class BlueprintParser:
         Raises:
             BlueprintParsingError: If parsing fails critically
         """
-        # Check for GPT-5 only mode first
-        use_gpt5_only = os.getenv("USE_GPT5_ONLY", "false").lower() == "true"
+        # Generate project ID if not provided
+        if not project_id:
+            project_id = str(uuid4())
         
-        if use_gpt5_only:
-            # Use the new modular GPT-5 pipeline
-            logger.info(f"[GPT-5 ONLY MODE] Using modular GPT-5 Vision pipeline for {filename}")
-            try:
-                from services.blueprint_pipeline import blueprint_pipeline
-                
-                # Process through the new pipeline
-                result = blueprint_pipeline.process_blueprint(
-                    pdf_path=pdf_path,
-                    zip_code=zip_code,
-                    project_id=project_id,
-                    filename=filename
-                )
-                
-                if result.get("success"):
-                    # Convert pipeline result to BlueprintSchema
-                    return self._convert_pipeline_to_schema(result, project_id, filename, zip_code)
-                else:
-                    logger.error(f"GPT-5 pipeline failed: {result.get('error')}")
-                    raise BlueprintParsingError(f"GPT-5 Vision pipeline failed: {result.get('error')}")
-                    
-            except Exception as e:
-                logger.error(f"GPT-5 pipeline error: {e}")
-                raise BlueprintParsingError(f"GPT-5 Vision processing failed: {str(e)}")
+        # Initialize metrics collection
+        pdf_size_mb = os.path.getsize(pdf_path) / (1024 * 1024)
+        try:
+            with fitz.open(pdf_path) as doc:
+                num_pages = len(doc)
+        except Exception:
+            num_pages = 0
         
-        # Check parsing mode from environment
-        parsing_mode = os.getenv("PARSING_MODE", "traditional_first").lower()
+        pipeline_metrics = metrics_collector.start_pipeline(
+            job_id=project_id,
+            pdf_filename=filename,
+            pdf_size_mb=pdf_size_mb,
+            num_pages=num_pages
+        )
         
-        # Legacy support for AI_PARSING_ENABLED
-        if os.getenv("AI_PARSING_ENABLED", "").lower() == "false":
-            parsing_mode = "traditional_only"
-        
-        logger.info(f"Using parsing mode: {parsing_mode}")
-        
-        # AI-first mode: Try GPT-4V first, fall back to traditional
-        if parsing_mode == "ai_first":
-            logger.info(f"[AI-FIRST] Using GPT-4V parsing for {filename}")
-            try:
-                # Use async context to run the AI parser
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+        try:
+            # Check for GPT-5 only mode first
+            use_gpt5_only = os.getenv("USE_GPT5_ONLY", "false").lower() == "true"
+            
+            if use_gpt5_only:
+                # Use the new modular GPT-5 pipeline
+                logger.info(f"[GPT-5 ONLY MODE] Using modular GPT-5 Vision pipeline for {filename}")
                 try:
-                    result = loop.run_until_complete(
-                        blueprint_ai_parser.parse_pdf_with_gpt4v(pdf_path, filename, zip_code, project_id)
+                    from services.blueprint_pipeline import blueprint_pipeline
+                    
+                    # Process through the new pipeline
+                    result = blueprint_pipeline.process_blueprint(
+                        pdf_path=pdf_path,
+                        zip_code=zip_code,
+                        project_id=project_id,
+                        filename=filename
                     )
-                    logger.info(f"[AI-FIRST] GPT-4V parsing completed successfully for {filename}")
-                    # Log metrics
-                    if hasattr(result, 'parsing_metadata'):
-                        logger.info(f"[METRICS] AI parsing: {result.parsing_metadata.processing_time_seconds:.2f}s, {len(result.rooms)} rooms found")
                     
-                    # Validate results
-                    try:
-                        validation_result = self.validator.validate_blueprint(result)
-                        quality_score = calculate_data_quality_score(result, validation_result.issues)
-                        
-                        # Add validation data to result
-                        result.parsing_metadata.validation_warnings = [w.to_dict() for w in validation_result.issues]
-                        result.parsing_metadata.data_quality_score = quality_score
-                        
-                        logger.info(f"[VALIDATION] Quality score: {quality_score:.0f}, Warnings: {len(validation_result.issues)}")
-                        for warning in validation_result.issues:
-                            logger.warning(f"[VALIDATION] {warning.category}: {warning.message}")
-                        
-                    except Exception as e:
-                        # Log validation error but don't fail - AI results are still valid
-                        logger.error(f"[VALIDATION] Validation error (non-critical): {type(e).__name__}: {str(e)}")
-                        logger.warning(f"Continuing with AI parsing results despite validation error")
-                        # Add error to metadata
-                        if hasattr(result, 'parsing_metadata'):
-                            result.parsing_metadata.warnings.append(f"Validation error: {str(e)}")
-                            result.parsing_metadata.data_quality_score = 75.0  # Default score when validation fails
-                    
-                    return result
-                finally:
-                    loop.close()
-            except BlueprintAIParsingError as e:
-                logger.error(f"AI parsing failed for {filename}: {str(e)}")
-                if "OPENAI_API_KEY" in str(e):
-                    logger.error("=" * 60)
-                    logger.error("CRITICAL: OpenAI API key not configured!")
-                    logger.error("AI blueprint parsing requires a valid OpenAI API key.")
-                    logger.error("Please set OPENAI_API_KEY in your .env file")
-                    logger.error("=" * 60)
-                elif "quota exceeded" in str(e).lower():
-                    logger.error("=" * 60)
-                    logger.error("CRITICAL: OpenAI API quota exceeded!")
-                    logger.error("Please add credits to your OpenAI account:")
-                    logger.error("https://platform.openai.com/account/billing")
-                    logger.error("=" * 60)
-                logger.warning(f"Falling back to traditional parsing. Results may be less accurate for complex blueprints.")
-                # Fall through to traditional parsing
-            except Exception as e:
-                logger.error(f"Unexpected error in AI parsing for {filename}: {type(e).__name__}: {str(e)}")
-                
-                # Check if we have partial AI results we can use
-                if 'result' in locals() and hasattr(locals()['result'], 'rooms') and len(locals()['result'].rooms) > 0:
-                    logger.warning(f"Using partial AI results with {len(locals()['result'].rooms)} rooms despite error")
-                    # Add error to metadata and return partial results
-                    if hasattr(locals()['result'], 'parsing_metadata'):
-                        locals()['result'].parsing_metadata.warnings.append(f"AI parsing error: {str(e)}")
-                        locals()['result'].parsing_metadata.errors_encountered.append({
-                            'stage': 'ai_validation',
-                            'error': str(e),
-                            'error_type': type(e).__name__,
-                            'timestamp': time.time()
+                    if result.get("success"):
+                        # Convert pipeline result to BlueprintSchema
+                        metrics_collector.end_pipeline(success=True, results={
+                            "total_area": result.get("total_area"),
+                            "num_rooms": result.get("num_rooms")
                         })
-                    return locals()['result']
-                
-                logger.warning(f"AI parsing temporarily unavailable, using traditional parsing as backup.")
-                # Fall through to traditional parsing
-        
-        # Traditional-first mode: Start with geometry/text, enhance with AI
-        elif parsing_mode == "traditional_first":
-            logger.info(f"[TRADITIONAL-FIRST] Starting with geometry/text extraction for {filename}")
-            # Will do traditional parsing below, then enhance with AI
-        
-        # Traditional-only mode: Skip AI entirely
-        elif parsing_mode == "traditional_only":
-            logger.info(f"[TRADITIONAL-ONLY] Using only geometry/text extraction for {filename}")
-            # Will do traditional parsing below without AI enhancement
-        
-        else:
-            logger.warning(f"Unknown parsing mode '{parsing_mode}', defaulting to traditional_first")
-            parsing_mode = "traditional_first"
-        
-        # Traditional parsing pipeline (fallback when AI fails or when in traditional mode)
-        logger.info(f"Using traditional parsing for {filename} (mode: {parsing_mode})")
-        start_time = time.time()
-        parsing_metadata = ParsingMetadata(
+                        return self._convert_pipeline_to_schema(result, project_id, filename, zip_code)
+                    else:
+                        logger.error(f"GPT-5 pipeline failed: {result.get('error')}")
+                        raise BlueprintParsingError(f"GPT-5 Vision pipeline failed: {result.get('error')}")
+                        
+                except Exception as e:
+                    logger.error(f"GPT-5 pipeline error: {e}")
+                    raise BlueprintParsingError(f"GPT-5 Vision processing failed: {str(e)}")
+            
+            # Check parsing mode from environment
+            parsing_mode = os.getenv("PARSING_MODE", "traditional_first").lower()
+            
+            # Legacy support for AI_PARSING_ENABLED
+            if os.getenv("AI_PARSING_ENABLED", "").lower() == "false":
+                parsing_mode = "traditional_only"
+            
+            logger.info(f"Using parsing mode: {parsing_mode}")
+            
+            # AI-first mode: Try GPT-4V first, fall back to traditional
+            if parsing_mode == "ai_first":
+                logger.info(f"[AI-FIRST] Using GPT-4V parsing for {filename}")
+                try:
+                    # Use async context to run the AI parser
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        result = loop.run_until_complete(
+                            blueprint_ai_parser.parse_pdf_with_gpt4v(pdf_path, filename, zip_code, project_id)
+                        )
+                        logger.info(f"[AI-FIRST] GPT-4V parsing completed successfully for {filename}")
+                        # Log metrics
+                        if hasattr(result, 'parsing_metadata'):
+                            logger.info(f"[METRICS] AI parsing: {result.parsing_metadata.processing_time_seconds:.2f}s, {len(result.rooms)} rooms found")
+                        
+                        # Validate results
+                        try:
+                            validation_result = self.validator.validate_blueprint(result)
+                            quality_score = calculate_data_quality_score(result, validation_result.issues)
+                            
+                            # Add validation data to result
+                            result.parsing_metadata.validation_warnings = [w.to_dict() for w in validation_result.issues]
+                            result.parsing_metadata.data_quality_score = quality_score
+                            
+                            logger.info(f"[VALIDATION] Quality score: {quality_score:.0f}, Warnings: {len(validation_result.issues)}")
+                            for warning in validation_result.issues:
+                                logger.warning(f"[VALIDATION] {warning.category}: {warning.message}")
+                            
+                        except Exception as e:
+                            # Log validation error but don't fail - AI results are still valid
+                            logger.error(f"[VALIDATION] Validation error (non-critical): {type(e).__name__}: {str(e)}")
+                            logger.warning(f"Continuing with AI parsing results despite validation error")
+                            # Add error to metadata
+                            if hasattr(result, 'parsing_metadata'):
+                                result.parsing_metadata.warnings.append(f"Validation error: {str(e)}")
+                                result.parsing_metadata.data_quality_score = 75.0  # Default score when validation fails
+                        
+                        return result
+                    finally:
+                        loop.close()
+                except BlueprintAIParsingError as e:
+                    logger.error(f"AI parsing failed for {filename}: {str(e)}")
+                    if "OPENAI_API_KEY" in str(e):
+                        logger.error("=" * 60)
+                        logger.error("CRITICAL: OpenAI API key not configured!")
+                        logger.error("AI blueprint parsing requires a valid OpenAI API key.")
+                        logger.error("Please set OPENAI_API_KEY in your .env file")
+                        logger.error("=" * 60)
+                    elif "quota exceeded" in str(e).lower():
+                        logger.error("=" * 60)
+                        logger.error("CRITICAL: OpenAI API quota exceeded!")
+                        logger.error("Please add credits to your OpenAI account:")
+                        logger.error("https://platform.openai.com/account/billing")
+                        logger.error("=" * 60)
+                    logger.warning(f"Falling back to traditional parsing. Results may be less accurate for complex blueprints.")
+                    # Fall through to traditional parsing
+                except Exception as e:
+                    logger.error(f"Unexpected error in AI parsing for {filename}: {type(e).__name__}: {str(e)}")
+                    
+                    # Check if we have partial AI results we can use
+                    if 'result' in locals() and hasattr(locals()['result'], 'rooms') and len(locals()['result'].rooms) > 0:
+                        logger.warning(f"Using partial AI results with {len(locals()['result'].rooms)} rooms despite error")
+                        # Add error to metadata and return partial results
+                        if hasattr(locals()['result'], 'parsing_metadata'):
+                            locals()['result'].parsing_metadata.warnings.append(f"AI parsing error: {str(e)}")
+                            locals()['result'].parsing_metadata.errors_encountered.append({
+                                'stage': 'ai_validation',
+                                'error': str(e),
+                                'error_type': type(e).__name__,
+                                'timestamp': time.time()
+                            })
+                        return locals()['result']
+                    
+                    logger.warning(f"AI parsing temporarily unavailable, using traditional parsing as backup.")
+                    # Fall through to traditional parsing
+            
+            # Traditional-first mode: Start with geometry/text, enhance with AI
+            elif parsing_mode == "traditional_first":
+                logger.info(f"[TRADITIONAL-FIRST] Starting with geometry/text extraction for {filename}")
+                # Will do traditional parsing below, then enhance with AI
+            
+            # Traditional-only mode: Skip AI entirely
+            elif parsing_mode == "traditional_only":
+                logger.info(f"[TRADITIONAL-ONLY] Using only geometry/text extraction for {filename}")
+                # Will do traditional parsing below without AI enhancement
+            
+            else:
+                logger.warning(f"Unknown parsing mode '{parsing_mode}', defaulting to traditional_first")
+                parsing_mode = "traditional_first"
+            
+            # Traditional parsing pipeline (fallback when AI fails or when in traditional mode)
+            logger.info(f"Using traditional parsing for {filename} (mode: {parsing_mode})")
+            start_time = time.time()
+            parsing_metadata = ParsingMetadata(
             parsing_timestamp=datetime.utcnow(),
             processing_time_seconds=0.0,  # Will be set at end
             pdf_filename=filename,
@@ -304,182 +329,223 @@ class BlueprintParser:
             overall_confidence=0.0,
             geometry_confidence=0.0,
             text_confidence=0.0
-        )
-        
-        logger.info(f"Starting traditional blueprint parsing for {filename}")
-        
-        try:
-            # Check if we should skip traditional extraction
-            blueprint_ai_only = os.getenv("BLUEPRINT_AI_ONLY", "false").lower() == "true"
-            
-            if blueprint_ai_only:
-                # Only skip if explicitly requested via BLUEPRINT_AI_ONLY env var
-                logger.info("[AI-ONLY MODE] BLUEPRINT_AI_ONLY=true, skipping traditional extraction")
-                selected_page = 1
-                raw_geometry = {
-                    'page_width': 2550,  # Standard letter size at 300 DPI
-                    'page_height': 3300,
-                    'lines': [],
-                    'rectangles': [],
-                    'polylines': [],
-                    'scale_factor': 48
-                }  # Empty but not None
-                raw_text = {
-                    'words': [],
-                    'room_labels': [],
-                    'dimensions': [],
-                    'notes': []
-                }  # Empty but not None
-                parsed_labels = []
-                parsed_dimensions = []
-                geometry_elements = []
-            elif parsing_mode == "traditional_first":
-                # In traditional_first mode, ALWAYS do traditional extraction
-                logger.info("[TRADITIONAL-FIRST] Performing traditional geometry and text extraction")
-                
-                # Stage 1: Analyze PDF pages
-                logger.info("Stage 1: Analyzing PDF pages")
-                best_page, pages_analysis = self.page_analyzer.analyze_pdf_pages(pdf_path)
-                parsing_metadata.pdf_page_count = len(pages_analysis)
-                
-                # Stage 2: Select best page and extract geometry
-                logger.info("Stage 2: Selecting best page and extracting geometry")
-                # Use the best_page returned from analyzer (1-based, need to convert to 0-based)
-                selected_page = best_page - 1
-                parsing_metadata.selected_page = selected_page + 1  # 1-indexed for display
-                
-                # Try lean extraction if available
-                if USE_LEAN_EXTRACTION:
-                    logger.info("Using lean extraction components")
-                    raw_geometry, raw_text = self._perform_lean_extraction(pdf_path, selected_page)
-                else:
-                    # Legacy extraction
-                    raw_geometry = self.geometry_parser.parse_geometry(pdf_path, selected_page)
-                    raw_text = self.text_parser.parse_text(pdf_path, selected_page)
-                
-                # Ensure they're not None
-                raw_geometry = raw_geometry or {}
-                raw_text = raw_text or {}
-                
-                # Parse labels and dimensions
-                parsed_labels = self._convert_raw_text_to_labels(raw_text)
-                parsed_dimensions = self._convert_raw_text_to_dimensions(raw_text)
-                geometry_elements = self._convert_raw_geometry_to_elements(raw_geometry)
-                
-                # Update metadata
-                parsing_metadata.geometry_status = ParsingStatus.SUCCESS if raw_geometry else ParsingStatus.FAILED
-                parsing_metadata.text_status = ParsingStatus.SUCCESS if raw_text else ParsingStatus.FAILED
-                parsing_metadata.geometry_confidence = self._calculate_geometry_confidence(raw_geometry)
-                parsing_metadata.text_confidence = self._calculate_text_confidence(raw_text)
-            else:
-                # Traditional-only or other modes
-                logger.info("[TRADITIONAL] Using traditional extraction only")
-                selected_page = 1
-                raw_geometry = {
-                    'page_width': 2550,  # Standard letter size at 300 DPI
-                    'page_height': 3300,
-                    'lines': [],
-                    'rectangles': [],
-                    'polylines': [],
-                    'scale_factor': 48
-                }  # Empty but not None
-                raw_text = {
-                    'words': [],
-                    'room_labels': [],
-                    'dimensions': [],
-                    'notes': []
-                }  # Empty but not None  
-                parsed_labels = []
-                parsed_dimensions = []
-                geometry_elements = []
-            
-            # Store PDF path for GPT-5 to use
-            self.current_pdf_path = pdf_path
-            
-            # Stage 4: GPT-5 Vision analysis ONLY
-            logger.info("Stage 4: GPT-5 Vision analysis and HVAC calculation")
-            rooms = self._perform_ai_analysis(raw_geometry, raw_text, zip_code, parsing_metadata)
-            
-            # Stage 5: Compile final blueprint schema
-            logger.info("Stage 5: Compiling final blueprint schema")
-            blueprint_schema = self._compile_blueprint_schema(
-                project_id=project_id or str(uuid4()),
-                zip_code=zip_code,
-                rooms=rooms,
-                raw_geometry=raw_geometry,
-                raw_text=raw_text,
-                parsed_labels=parsed_labels,
-                parsed_dimensions=parsed_dimensions,
-                geometry_elements=geometry_elements,
-                parsing_metadata=parsing_metadata
             )
             
-            # Update final metadata
-            parsing_metadata.processing_time_seconds = time.time() - start_time
-            parsing_metadata.overall_confidence = self._calculate_overall_confidence(parsing_metadata)
-            blueprint_schema.parsing_metadata = parsing_metadata
+            logger.info(f"Starting traditional blueprint parsing for {filename}")
             
-            logger.info(f"Blueprint parsing completed successfully in {parsing_metadata.processing_time_seconds:.2f}s")
-            logger.info(f"Identified {len(rooms)} rooms with overall confidence {parsing_metadata.overall_confidence:.2f}")
-            
-            # Validate results
             try:
-                validation_result = self.validator.validate_blueprint(blueprint_schema)
-                quality_score = calculate_data_quality_score(blueprint_schema, validation_result.issues)
+                # Check if we should skip traditional extraction
+                blueprint_ai_only = os.getenv("BLUEPRINT_AI_ONLY", "false").lower() == "true"
                 
-                # Add validation data to metadata
-                parsing_metadata.validation_warnings = [w.to_dict() for w in validation_result.issues]
-                parsing_metadata.data_quality_score = quality_score
+                if blueprint_ai_only:
+                    # Only skip if explicitly requested via BLUEPRINT_AI_ONLY env var
+                    logger.info("[AI-ONLY MODE] BLUEPRINT_AI_ONLY=true, skipping traditional extraction")
+                    selected_page = 1
+                    raw_geometry = {
+                        'page_width': 2550,  # Standard letter size at 300 DPI
+                        'page_height': 3300,
+                        'lines': [],
+                        'rectangles': [],
+                        'polylines': [],
+                        'scale_factor': 48
+                    }  # Empty but not None
+                    raw_text = {
+                        'words': [],
+                        'room_labels': [],
+                        'dimensions': [],
+                        'notes': []
+                    }  # Empty but not None
+                    parsed_labels = []
+                    parsed_dimensions = []
+                    geometry_elements = []
+                elif parsing_mode == "traditional_first":
+                    # In traditional_first mode, ALWAYS do traditional extraction
+                    logger.info("[TRADITIONAL-FIRST] Performing traditional geometry and text extraction")
                 
-                logger.info(f"[VALIDATION] Quality score: {quality_score:.0f}, Warnings: {len(validation_result.issues)}")
-                for warning in validation_result.issues:
-                    logger.warning(f"[VALIDATION] {warning.category}: {warning.message}")
-                
-                # Validation Gate 6: Final quality check
-                if quality_score < 50:
-                    logger.error(f"Data quality score too low: {quality_score:.0f}")
-                    critical_issues = [w.message for w in validation_result.issues if w.severity == 'critical']
+                    # Stage 1: Analyze PDF pages
+                    logger.info("Stage 1: Analyzing PDF pages")
+                    with track_stage(PipelineStage.PAGE_CLASSIFICATION):
+                        best_page, pages_analysis = self.page_analyzer.analyze_pdf_pages(pdf_path)
+                        parsing_metadata.pdf_page_count = len(pages_analysis)
+                        metrics_collector.track_decision(
+                            "page_selection",
+                            "Selected best page for extraction",
+                            best_page,
+                            alternatives=[p.page_number for p in pages_analysis],
+                            reason="Highest score based on content analysis"
+                        )
                     
-                    # Always raise error if quality score is too low, not just when critical issues exist
-                    from services.error_types import NeedsInputError
-                    raise NeedsInputError(
-                        input_type='plan_quality',
-                        message=f"Blueprint quality score ({quality_score:.0f}) below minimum threshold (50). Cannot proceed with load calculations.",
-                        details={
-                            'quality_score': quality_score,
-                            'threshold': 50,
-                            'issues': critical_issues if critical_issues else [w.message for w in validation_result.issues][:5],
-                            'recommendation': 'Please provide a clearer blueprint or use PARSING_MODE=traditional_first'
+                    # Stage 2: Select best page and extract geometry
+                    logger.info("Stage 2: Selecting best page and extracting geometry")
+                    # Use the best_page returned from analyzer (1-based, need to convert to 0-based)
+                    selected_page = best_page - 1
+                    parsing_metadata.selected_page = selected_page + 1  # 1-indexed for display
+                    
+                    with track_stage(PipelineStage.GEOMETRY_EXTRACTION):
+                        # Try lean extraction if available
+                        if USE_LEAN_EXTRACTION:
+                            logger.info("Using lean extraction components")
+                            raw_geometry, raw_text = self._perform_lean_extraction(pdf_path, selected_page)
+                        else:
+                            # Legacy extraction
+                            raw_geometry = self.geometry_parser.parse_geometry(pdf_path, selected_page)
+                            raw_text = self.text_parser.parse_text(pdf_path, selected_page)
+                        
+                        metrics_collector.current_stage.output_data = {
+                            "geometry_elements": len(raw_geometry.get('lines', [])) + len(raw_geometry.get('rectangles', [])),
+                            "text_elements": len(raw_text.get('words', [])) if raw_text else 0
                         }
-                    )
+                    
+                    # Ensure they're not None
+                    raw_geometry = raw_geometry or {}
+                    raw_text = raw_text or {}
+                    
+                    # Parse labels and dimensions
+                    parsed_labels = self._convert_raw_text_to_labels(raw_text)
+                    parsed_dimensions = self._convert_raw_text_to_dimensions(raw_text)
+                    geometry_elements = self._convert_raw_geometry_to_elements(raw_geometry)
+                    
+                    # Update metadata
+                    parsing_metadata.geometry_status = ParsingStatus.SUCCESS if raw_geometry else ParsingStatus.FAILED
+                    parsing_metadata.text_status = ParsingStatus.SUCCESS if raw_text else ParsingStatus.FAILED
+                    parsing_metadata.geometry_confidence = self._calculate_geometry_confidence(raw_geometry)
+                    parsing_metadata.text_confidence = self._calculate_text_confidence(raw_text)
+                else:
+                    # Traditional-only or other modes
+                    logger.info("[TRADITIONAL] Using traditional extraction only")
+                    selected_page = 1
+                    raw_geometry = {
+                        'page_width': 2550,  # Standard letter size at 300 DPI
+                        'page_height': 3300,
+                        'lines': [],
+                        'rectangles': [],
+                        'polylines': [],
+                        'scale_factor': 48
+                    }  # Empty but not None
+                    raw_text = {
+                        'words': [],
+                        'room_labels': [],
+                        'dimensions': [],
+                        'notes': []
+                    }  # Empty but not None  
+                    parsed_labels = []
+                    parsed_dimensions = []
+                    geometry_elements = []
                 
-            except BlueprintValidationError as e:
-                logger.error(f"[VALIDATION] Critical validation failure: {e.message}")
-                # Re-raise with parsing context
-                e.details['parsing_method'] = 'traditional'
-                e.details['filename'] = filename
-                raise
-            
-            return blueprint_schema
-            
-        except Exception as e:
-            # Record error in metadata
-            parsing_metadata.processing_time_seconds = time.time() - start_time
-            parsing_metadata.errors_encountered.append({
-                'stage': 'overall',
-                'error': str(e),
-                'error_type': type(e).__name__,
-                'timestamp': time.time()
-            })
-            
-            logger.error(f"Blueprint parsing failed for {filename}: {type(e).__name__}: {str(e)}")
-            
-            # Try to return partial results if any stages succeeded
-            if parsing_metadata.geometry_status == ParsingStatus.SUCCESS or parsing_metadata.text_status == ParsingStatus.SUCCESS:
-                logger.info("Returning partial results due to processing error")
-                return self._create_partial_blueprint(zip_code, project_id, parsing_metadata, str(e))
-            else:
-                raise BlueprintParsingError(f"Failed to parse blueprint {filename}: {str(e)}")
+                # Store PDF path for GPT-5 to use
+                self.current_pdf_path = pdf_path
+                
+                # Stage 4: GPT-5 Vision analysis ONLY
+                logger.info("Stage 4: GPT-5 Vision analysis and HVAC calculation")
+                with track_stage(PipelineStage.SEMANTIC_ANALYSIS):
+                    rooms = self._perform_ai_analysis(raw_geometry, raw_text, zip_code, parsing_metadata)
+                    metrics_collector.current_stage.output_data = {
+                        "num_rooms": len(rooms),
+                        "total_area": sum(r.area for r in rooms) if rooms else 0
+                    }
+                
+                # Stage 5: Compile final blueprint schema
+                logger.info("Stage 5: Compiling final blueprint schema")
+                with track_stage(PipelineStage.LOAD_CALCULATION):
+                    blueprint_schema = self._compile_blueprint_schema(
+                    project_id=project_id or str(uuid4()),
+                    zip_code=zip_code,
+                    rooms=rooms,
+                    raw_geometry=raw_geometry,
+                    raw_text=raw_text,
+                    parsed_labels=parsed_labels,
+                    parsed_dimensions=parsed_dimensions,
+                    geometry_elements=geometry_elements,
+                    parsing_metadata=parsing_metadata
+                    )
+                    if metrics_collector.current_stage:
+                        metrics_collector.current_stage.output_data = {
+                            "total_heating_load": sum(r.loads.heating_total for r in blueprint_schema.rooms if r.loads),
+                            "total_cooling_load": sum(r.loads.cooling_total for r in blueprint_schema.rooms if r.loads),
+                            "quality_score": parsing_metadata.data_quality_score
+                        }
+                
+                # Update final metadata
+                parsing_metadata.processing_time_seconds = time.time() - start_time
+                parsing_metadata.overall_confidence = self._calculate_overall_confidence(parsing_metadata)
+                blueprint_schema.parsing_metadata = parsing_metadata
+                
+                logger.info(f"Blueprint parsing completed successfully in {parsing_metadata.processing_time_seconds:.2f}s")
+                logger.info(f"Identified {len(rooms)} rooms with overall confidence {parsing_metadata.overall_confidence:.2f}")
+                
+                # Validate results
+                try:
+                    validation_result = self.validator.validate_blueprint(blueprint_schema)
+                    quality_score = calculate_data_quality_score(blueprint_schema, validation_result.issues)
+                    
+                    # Add validation data to metadata
+                    parsing_metadata.validation_warnings = [w.to_dict() for w in validation_result.issues]
+                    parsing_metadata.data_quality_score = quality_score
+                    
+                    logger.info(f"[VALIDATION] Quality score: {quality_score:.0f}, Warnings: {len(validation_result.issues)}")
+                    for warning in validation_result.issues:
+                        logger.warning(f"[VALIDATION] {warning.category}: {warning.message}")
+                    
+                    # Validation Gate 6: Final quality check
+                    if quality_score < 50:
+                        logger.error(f"Data quality score too low: {quality_score:.0f}")
+                        critical_issues = [w.message for w in validation_result.issues if w.severity == 'critical']
+                        
+                        # Always raise error if quality score is too low, not just when critical issues exist
+                        from services.error_types import NeedsInputError
+                        raise NeedsInputError(
+                            input_type='plan_quality',
+                            message=f"Blueprint quality score ({quality_score:.0f}) below minimum threshold (50). Cannot proceed with load calculations.",
+                            details={
+                                'quality_score': quality_score,
+                                'threshold': 50,
+                                'issues': critical_issues if critical_issues else [w.message for w in validation_result.issues][:5],
+                                'recommendation': 'Please provide a clearer blueprint or use PARSING_MODE=traditional_first'
+                            }
+                        )
+                    
+                except BlueprintValidationError as e:
+                    logger.error(f"[VALIDATION] Critical validation failure: {e.message}")
+                    # Re-raise with parsing context
+                    e.details['parsing_method'] = 'traditional'
+                    e.details['filename'] = filename
+                    raise
+                
+                # End pipeline with success
+                metrics_collector.end_pipeline(success=True, results={
+                    "total_area": blueprint_schema.sqft_total,
+                    "num_rooms": len(blueprint_schema.rooms),
+                    "heating_load": sum(r.loads.heating_total for r in blueprint_schema.rooms if r.loads),
+                    "cooling_load": sum(r.loads.cooling_total for r in blueprint_schema.rooms if r.loads),
+                    "confidence": parsing_metadata.overall_confidence,
+                    "quality_score": parsing_metadata.data_quality_score
+                })
+                
+                return blueprint_schema
+                
+            except Exception as e:
+                # Record error in metadata
+                parsing_metadata.processing_time_seconds = time.time() - start_time
+                parsing_metadata.errors_encountered.append({
+                    'stage': 'overall',
+                    'error': str(e),
+                    'error_type': type(e).__name__,
+                    'timestamp': time.time()
+                })
+                
+                logger.error(f"Blueprint parsing failed for {filename}: {type(e).__name__}: {str(e)}")
+                
+                # Try to return partial results if any stages succeeded
+                if parsing_metadata.geometry_status == ParsingStatus.SUCCESS or parsing_metadata.text_status == ParsingStatus.SUCCESS:
+                    logger.info("Returning partial results due to processing error")
+                    return self._create_partial_blueprint(zip_code, project_id, parsing_metadata, str(e))
+                else:
+                    raise BlueprintParsingError(f"Failed to parse blueprint {filename}: {str(e)}")
+        
+        finally:
+            # Always end the pipeline metrics, even on error
+            if metrics_collector.current_metrics and not metrics_collector.current_metrics.end_time:
+                metrics_collector.end_pipeline(success=False)
     
     def _analyze_pages(self, pdf_path: str, metadata: ParsingMetadata) -> tuple[List[PageAnalysisResult], int]:
         """Analyze all PDF pages and select the best one for processing"""

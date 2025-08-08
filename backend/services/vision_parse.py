@@ -18,6 +18,7 @@ from services.takeoff_schema import (
 )
 from services.pdf_to_images import PageImage
 from services.strict_json_parser import strict_parser
+from services.metrics_collector import metrics_collector, PipelineStage
 
 logger = logging.getLogger(__name__)
 
@@ -454,6 +455,27 @@ IMPORTANT:
             for key, value in envelope_defaults.items():
                 if key not in takeoff_data["building_envelope"]:
                     takeoff_data["building_envelope"][key] = value
+                    # Track provenance when using defaults
+                    if key in ["wall_r_value", "ceiling_r_value", "floor_r_value"]:
+                        metrics_collector.track_provenance(
+                            field=f"envelope.{key}",
+                            value=value,
+                            source="default",
+                            confidence=0.7,
+                            notes=f"Using code default for climate zone"
+                        )
+                        logger.info(f"[PROVENANCE] {key} = {value} (defaulted)")
+                else:
+                    # Track provenance for detected values
+                    if key in ["wall_r_value", "ceiling_r_value", "floor_r_value"]:
+                        metrics_collector.track_provenance(
+                            field=f"envelope.{key}",
+                            value=takeoff_data["building_envelope"][key],
+                            source="detected",
+                            confidence=0.95,
+                            notes=f"Extracted from blueprint by GPT-5 Vision"
+                        )
+                        logger.info(f"[PROVENANCE] {key} = {takeoff_data['building_envelope'][key]} (detected)")
             
             # Set default scale if missing
             if "scale_notation" not in takeoff_data:

@@ -176,14 +176,15 @@ class BlueprintAIParser:
                     logger.info(f"  - Room labels: {len(ocr_context.get('room_labels', []))}")
                     logger.info(f"  - Scale detected: {ocr_context.get('scale_notation', 'Not found')}")
                     
-                    # Classify page
-                    classification = page_classifier.classify_page(img_cv, ocr_text)
-                    page_classifications.append(classification)
-                    logger.info(f"Page {idx + 1}: {classification.page_type} (confidence: {classification.confidence:.2f})")
+                    # Skip page classification for now - method doesn't exist for images
+                    # TODO: Implement image-based page classification or use PDF directly
+                    # classification = page_classifier.classify_page(img_cv, ocr_text)
+                    # page_classifications.append(classification)
+                    logger.info(f"Page {idx + 1}: Assuming floor plan (classification skipped)")
                     
-                    # Log floor level if detected
-                    if classification.floor_level:
-                        logger.info(f"Page {idx + 1}: Detected floor level - {classification.floor_level}")
+                    # Log floor level if detected (skipped for now)
+                    # if classification.floor_level:
+                    #     logger.info(f"Page {idx + 1}: Detected floor level - {classification.floor_level}")
             else:
                 # Fallback to original images if enhanced parsing not available
                 preprocessed_images = images
