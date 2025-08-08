@@ -212,22 +212,22 @@ class BlueprintParser:
         logger.info(f"Starting traditional blueprint parsing for {filename}")
         
         try:
-            # Stage 1: Multi-page analysis and best page selection
-            logger.info("Stage 1: Analyzing PDF pages for best floor plan")
-            page_analyses, selected_page = self._analyze_pages(pdf_path, parsing_metadata)
+            # SKIP Traditional stages 1-3, go straight to GPT-5 Vision
+            logger.info("[GPT-5 ONLY MODE] Skipping traditional extraction, using GPT-5 Vision directly")
             
-            # Stage 2: Extract geometry from selected page
-            logger.info(f"Stage 2: Extracting geometry from page {selected_page}")
-            raw_geometry, geometry_elements = self._extract_geometry(pdf_path, selected_page - 1, parsing_metadata)
+            # Set minimal metadata for GPT-5 only mode
+            selected_page = 1  # GPT-5 will analyze all pages
+            raw_geometry = {}
+            raw_text = {}
+            parsed_labels = []
+            parsed_dimensions = []
+            geometry_elements = []
             
-            # Stage 3: Extract text from selected page
-            logger.info(f"Stage 3: Extracting text from page {selected_page}")
-            raw_text, parsed_labels, parsed_dimensions = self._extract_text(pdf_path, selected_page - 1, parsing_metadata)
-            
-            # Stage 4: AI analysis and room identification
-            logger.info("Stage 4: AI analysis and room identification")
-            # Store PDF path for GPT-4V to use
+            # Store PDF path for GPT-5 to use
             self.current_pdf_path = pdf_path
+            
+            # Stage 4: GPT-5 Vision analysis ONLY
+            logger.info("Stage 4: GPT-5 Vision analysis and HVAC calculation")
             rooms = self._perform_ai_analysis(raw_geometry, raw_text, zip_code, parsing_metadata)
             
             # Stage 5: Compile final blueprint schema
@@ -549,7 +549,7 @@ class BlueprintParser:
             import os
             if os.getenv("OPENAI_API_KEY") and os.getenv("USE_GPT4_VISION", "true").lower() == "true":
                 try:
-                    logger.info("Attempting GPT-4 Vision analysis for maximum accuracy...")
+                    logger.info("Attempting GPT-5 Vision analysis for complete blueprint parsing and HVAC calculation...")
                     from services.gpt4v_blueprint_analyzer import get_gpt4v_analyzer
                     
                     # Get the PDF path from current processing
@@ -559,7 +559,7 @@ class BlueprintParser:
                         analysis = gpt4v.analyze_blueprint(pdf_path, zip_code)
                         
                         if analysis and hasattr(analysis, 'total_area_sqft') and analysis.total_area_sqft and analysis.total_area_sqft > 100:
-                            logger.info(f"GPT-4 Vision successful: {len(analysis.rooms)} rooms, {analysis.total_area_sqft:.0f} sq ft")
+                            logger.info(f"GPT-5 Vision successful: {len(analysis.rooms)} rooms, {analysis.total_area_sqft:.0f} sq ft")
                             
                             # Convert GPT-4V results to Room schema
                             enhanced_rooms = []
@@ -575,7 +575,7 @@ class BlueprintParser:
                                     confidence=gpt_room.confidence,
                                     center_position=(0.0, 0.0),
                                     label_found=True,
-                                    dimensions_source="gpt4_vision"
+                                    dimensions_source="gpt5_vision"
                                 )
                                 enhanced_rooms.append(room)
                             

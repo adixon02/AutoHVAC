@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class GPTRoom:
-    """Room detected by GPT-4V"""
+    """Room detected by GPT-5 with HVAC loads"""
     name: str
     room_type: str  # bedroom, bathroom, kitchen, etc.
     dimensions_ft: Tuple[float, float]  # width x height in feet
@@ -32,11 +32,13 @@ class GPTRoom:
     location: str  # description of where in the blueprint
     features: List[str]  # windows, doors, closets, etc.
     confidence: float
+    heating_btu_hr: Optional[float] = None  # Heating load in BTU/hr
+    cooling_btu_hr: Optional[float] = None  # Cooling load in BTU/hr
 
 
 @dataclass
 class GPTBlueprintAnalysis:
-    """Complete blueprint analysis from GPT-4V"""
+    """Complete blueprint analysis from GPT-5 with HVAC loads"""
     total_area_sqft: float
     num_floors: int
     rooms: List[GPTRoom]
@@ -45,6 +47,12 @@ class GPTBlueprintAnalysis:
     scale: str
     confidence: float
     raw_response: Dict[str, Any]
+    zip_code: Optional[str] = None
+    climate_zone: Optional[str] = None
+    total_heating_btu_hr: Optional[float] = None
+    total_cooling_btu_hr: Optional[float] = None
+    heating_system_tons: Optional[float] = None
+    cooling_system_tons: Optional[float] = None
 
 
 class GPT4VBlueprintAnalyzer:
@@ -139,10 +147,13 @@ class GPT4VBlueprintAnalyzer:
         return img_base64
     
     def _create_analysis_prompt(self, zip_code: str) -> str:
-        """Create enhanced prompt for GPT-5 blueprint analysis with superior vision"""
-        return """You are an expert HVAC load calculation specialist using GPT-5's advanced vision capabilities.
+        """Create enhanced prompt for GPT-5 blueprint analysis with superior vision AND HVAC calculation"""
+        return f"""You are an expert HVAC load calculation specialist using GPT-5's advanced vision capabilities.
         
-Analyze this residential blueprint with maximum precision for Manual J HVAC calculations.
+Analyze this residential blueprint AND calculate HVAC loads using ACCA Manual J methodology.
+
+PROJECT LOCATION: ZIP CODE {zip_code}
+This is CRITICAL for determining climate zone, design temperatures, and accurate load calculations.
 
 ANALYSIS REQUIREMENTS:
 1. Room Detection (use GPT-5's enhanced vision):
@@ -169,6 +180,14 @@ ANALYSIS REQUIREMENTS:
    - Ceiling heights if noted
    - Any existing HVAC equipment shown
 
+5. HVAC Load Calculations (Using ZIP {zip_code} climate data):
+   - Calculate heating BTU/hr for each room
+   - Calculate cooling BTU/hr for each room
+   - Consider climate zone for ZIP {zip_code}
+   - Apply proper design temperatures for location
+   - Include infiltration, ventilation, and duct losses
+   - Size equipment properly with safety factors
+
 Use GPT-5's superior reasoning to:
 - Cross-verify dimensions for accuracy
 - Detect partial/obscured text with context
@@ -177,6 +196,8 @@ Use GPT-5's superior reasoning to:
 
 Respond with a JSON object in this exact format:
 {
+  "zip_code": "{zip_code}",
+  "climate_zone": "<climate zone for {zip_code}>",
   "total_area_sqft": <number>,
   "num_floors": <number>,
   "building_type": "<residential/commercial/other>",
@@ -190,14 +211,27 @@ Respond with a JSON object in this exact format:
       "area_sqft": <number>,
       "location": "<description>",
       "features": ["<feature1>", "<feature2>"],
-      "confidence": <0.0-1.0>
+      "confidence": <0.0-1.0>,
+      "heating_btu_hr": <number>,
+      "cooling_btu_hr": <number>
     }
   ],
   "special_features": ["<garage>", "<basement>", "<deck>", etc],
-  "confidence": <overall confidence 0.0-1.0>
+  "confidence": <overall confidence 0.0-1.0>,
+  "hvac_loads": {
+    "total_heating_btu_hr": <number>,
+    "total_cooling_btu_hr": <number>,
+    "heating_system_tons": <number>,
+    "cooling_system_tons": <number>,
+    "design_temps": {
+      "winter_design_temp_f": <number for {zip_code}>,
+      "summer_design_temp_f": <number for {zip_code}>
+    },
+    "calculation_method": "ACCA Manual J via GPT-5 Vision for ZIP {zip_code}"
+  }
 }
 
-Location: """ + f"Zip code {zip_code} (for climate considerations)"
+REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"
     
     def _analyze_with_gpt4v(self, image_base64: str, prompt: str) -> Dict[str, Any]:
         """Send image to GPT-5V/GPT-4V and get analysis with model fallback"""
@@ -211,6 +245,7 @@ Location: """ + f"Zip code {zip_code} (for climate considerations)"
                 # Build request based on model type
                 if model.startswith("gpt-5"):
                     # GPT-5 uses new parameters and direct image input
+                    # GPT-5 ONLY supports default temperature (1.0)
                     response = self.client.chat.completions.create(
                         model=model,
                         messages=[
@@ -229,7 +264,7 @@ Location: """ + f"Zip code {zip_code} (for climate considerations)"
                         }
                         ],
                         max_completion_tokens=self.max_tokens,  # GPT-5 uses max_completion_tokens
-                        temperature=0.1,
+                        # temperature=1.0,  # GPT-5 only supports default (1.0), omit for default
                         # GPT-5 specific parameters
                         extra_body={
                             "reasoning_effort": self.reasoning_effort,
@@ -320,7 +355,9 @@ Location: """ + f"Zip code {zip_code} (for climate considerations)"
                     area_sqft=float(room_data.get("area_sqft", 100) or 100),
                     location=room_data.get("location", "") or "",
                     features=room_data.get("features", []) or [],
-                    confidence=float(room_data.get("confidence", 0.5) or 0.5)
+                    confidence=float(room_data.get("confidence", 0.5) or 0.5),
+                    heating_btu_hr=float(room_data.get("heating_btu_hr", 0)) if "heating_btu_hr" in room_data else None,
+                    cooling_btu_hr=float(room_data.get("cooling_btu_hr", 0)) if "cooling_btu_hr" in room_data else None
                 )
                 rooms.append(room)
             except Exception as e:
@@ -335,6 +372,9 @@ Location: """ + f"Zip code {zip_code} (for climate considerations)"
             except (ValueError, TypeError):
                 total_area_value = sum(r.area_sqft for r in rooms) if rooms else 0
         
+        # Extract HVAC loads if provided by GPT-5
+        hvac_loads = response.get("hvac_loads", {})
+        
         analysis = GPTBlueprintAnalysis(
             total_area_sqft=float(total_area_value) if total_area_value else sum(r.area_sqft for r in rooms),
             num_floors=response.get("num_floors", 1),
@@ -343,7 +383,13 @@ Location: """ + f"Zip code {zip_code} (for climate considerations)"
             special_features=response.get("special_features", []),
             scale=response.get("scale", "1/4\"=1'-0\""),
             confidence=float(response.get("confidence", 0.7)) if response.get("confidence") else 0.7,
-            raw_response=response
+            raw_response=response,
+            zip_code=response.get("zip_code"),
+            climate_zone=response.get("climate_zone"),
+            total_heating_btu_hr=hvac_loads.get("total_heating_btu_hr"),
+            total_cooling_btu_hr=hvac_loads.get("total_cooling_btu_hr"),
+            heating_system_tons=hvac_loads.get("heating_system_tons"),
+            cooling_system_tons=hvac_loads.get("cooling_system_tons")
         )
         
         return analysis
@@ -361,17 +407,27 @@ Location: """ + f"Zip code {zip_code} (for climate considerations)"
                     "width": room.dimensions_ft[0],
                     "height": room.dimensions_ft[1],
                     "features": room.features,
-                    "confidence": room.confidence
+                    "confidence": room.confidence,
+                    "heating_btu_hr": room.heating_btu_hr,
+                    "cooling_btu_hr": room.cooling_btu_hr
                 }
                 for room in analysis.rooms
             ],
             "metadata": {
-                "method": "GPT-4V Vision Analysis",
+                "method": "GPT-5 Vision Analysis with HVAC Calculation",
                 "building_type": analysis.building_type,
                 "num_floors": analysis.num_floors,
                 "special_features": analysis.special_features,
                 "scale": analysis.scale,
-                "confidence": analysis.confidence
+                "confidence": analysis.confidence,
+                "zip_code": analysis.zip_code,
+                "climate_zone": analysis.climate_zone
+            },
+            "hvac_totals": {
+                "total_heating_btu_hr": analysis.total_heating_btu_hr,
+                "total_cooling_btu_hr": analysis.total_cooling_btu_hr,
+                "heating_system_tons": analysis.heating_system_tons,
+                "cooling_system_tons": analysis.cooling_system_tons
             }
         }
 
