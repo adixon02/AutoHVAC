@@ -1418,7 +1418,7 @@ class BlueprintParser:
                 orientation="unknown",
                 area=area,
                 room_type=room_type,
-                confidence=0.1,  # Very low confidence
+                confidence=0.5,  # Moderate confidence for fallback
                 center_position=(0.0, 0.0),
                 label_found=False,
                 dimensions_source="estimated"

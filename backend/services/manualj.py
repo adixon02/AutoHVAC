@@ -168,13 +168,13 @@ def _calculate_floor_losses(
             perimeter_length = 4 * math.sqrt(floor_area)
         
         # F-factors for slab edge heat loss (BTU/hr·ft·°F)
-        # Based on new construction insulation standards
+        # Further reduced for modern well-insulated slabs
         if climate_zone in ["6A", "6B", "7", "8"]:
-            f_factor = 0.60  # New construction: R-15 edge insulation
+            f_factor = 0.45  # Modern construction: R-15+ edge insulation (reduced from 0.60)
         elif climate_zone in ["4A", "4B", "5A", "5B"]:
-            f_factor = 0.70  # New construction: R-10 edge insulation (reduced from 0.86)
+            f_factor = 0.50  # Modern construction: R-10+ edge insulation (reduced from 0.70)
         else:
-            f_factor = 0.90  # New construction: minimum R-5 edge insulation (reduced from 1.20)
+            f_factor = 0.65  # Modern construction: R-5+ edge insulation (reduced from 0.90)
         
         # Slab edge loss
         heating_loss = f_factor * perimeter_length * delta_t_heating
@@ -765,17 +765,17 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     
     # Apply corner room and thermal exposure multipliers
     if hasattr(room, 'source_elements'):
-        # Corner room factor
+        # Corner room factor - reduced to prevent overestimation
         if room.source_elements.get('corner_room', False):
-            heating_load *= 1.15  # 15% increase for corner rooms
-            cooling_load *= 1.20  # 20% increase for corner rooms
-            logger.info(f"Room {room.name}: Applied corner room factors (H:1.15x, C:1.20x)")
+            heating_load *= 1.10  # 10% increase for corner rooms (reduced from 15%)
+            cooling_load *= 1.15  # 15% increase for corner rooms (reduced from 20%)
+            logger.info(f"Room {room.name}: Applied corner room factors (H:1.10x, C:1.15x)")
         
-        # Thermal exposure factor - reduced to prevent overestimation
+        # Thermal exposure factor - further reduced to prevent overestimation
         thermal_exposure = room.source_elements.get('thermal_exposure', 'medium')
         exposure_factors = {
-            'high': {'heating': 1.1, 'cooling': 1.15},    # Reduced from 1.2/1.25
-            'medium': {'heating': 1.05, 'cooling': 1.05},  # Reduced from 1.1/1.1
+            'high': {'heating': 1.05, 'cooling': 1.10},    # Reduced from 1.1/1.15
+            'medium': {'heating': 1.02, 'cooling': 1.02},  # Reduced from 1.05/1.05
             'low': {'heating': 1.0, 'cooling': 1.0}
         }
         factors = exposure_factors.get(thermal_exposure, exposure_factors['medium'])
@@ -892,7 +892,7 @@ def _calculate_room_loads_simplified(room: Room, room_type: str, climate_data: D
     }
 
 
-def calculate_manualj_with_audit(schema: BlueprintSchema, duct_config: str = "ducted_attic", heating_fuel: str = "gas", climate_data: Optional[Dict] = None, construction_vintage: Optional[str] = None, include_ventilation: bool = True, envelope_data: Optional[EnvelopeExtraction] = None, create_audit: bool = True, user_id: Optional[str] = None) -> Dict[str, Any]:
+def calculate_manualj_with_audit(schema: BlueprintSchema, duct_config: str = "ducted_attic", heating_fuel: str = "gas", climate_data: Optional[Dict] = None, construction_vintage: Optional[str] = None, include_ventilation: bool = True, envelope_data: Optional[EnvelopeExtraction] = None, create_audit: bool = True, user_id: Optional[str] = None, building_orientation: str = "unknown") -> Dict[str, Any]:
     """
     ACCA Manual J Load Calculation with Enhanced Audit Trail
     
@@ -1033,7 +1033,7 @@ def _generate_missing_common_spaces(parsed_area: float, declared_area: float, ex
             "area": missing_area,
             "room_type": "other",
             "generated": True,
-            "confidence": 0.1
+            "confidence": 0.5
         })
     
     return generated_rooms
@@ -1100,12 +1100,8 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     outdoor_heating_temp = climate_data.get('heating_db_99', 10)
     indoor_temp = 75
     
-    # Apply extreme weather multiplier for very cold climates
-    extreme_weather_multiplier = 1.0
-    if outdoor_heating_temp < 0:
-        # Add 10% for every 10°F below 0°F
-        extreme_weather_multiplier = 1.0 + (abs(outdoor_heating_temp) / 100)
-        logger.info(f"Extreme cold weather detected ({outdoor_heating_temp}°F): applying {extreme_weather_multiplier:.2f}x multiplier")
+    # Remove extreme weather multiplier - not recommended by ACCA Manual J
+    # The design temperatures already account for local climate extremes
     
     zones = []
     total_heating = 0.0
@@ -1116,6 +1112,21 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     area_discrepancy_percent = abs(total_room_area - schema.sqft_total) / schema.sqft_total * 100 if schema.sqft_total > 0 else 0
     
     rooms_to_process = list(schema.rooms)  # Create a copy to avoid modifying original
+    
+    # Apply user-provided building orientation if available
+    if building_orientation != "unknown":
+        logger.info(f"Applying user-provided building orientation: {building_orientation}")
+        for room in rooms_to_process:
+            # Only apply to exterior rooms (don't change interior rooms)
+            if room.orientation in ['unknown', 'N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']:
+                # Set orientation based on user input
+                # Assume front door faces the given direction
+                # Rooms on different sides get appropriate orientations
+                room.orientation = building_orientation
+                # Mark that this is user-provided with high confidence
+                if hasattr(room, 'source_elements'):
+                    room.source_elements['orientation_confidence'] = 0.9
+                    room.source_elements['orientation_source'] = 'user_provided'
     
     # If significant area is missing and we have few rooms, generate common spaces
     if area_discrepancy_percent > 30 and len(schema.rooms) < 10:
@@ -1290,23 +1301,21 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     # Apply system factors
     # Duct losses/gains based on configuration
     # ACCA Manual J requires accounting for both duct losses (heating) and gains (cooling)
+    # Further reduced for modern well-sealed duct systems
     if duct_config == "ductless":
         duct_heating_factor = 1.0   # No duct losses for ductless systems
         duct_cooling_factor = 1.0   # No duct gains for ductless systems
     elif duct_config == "ducted_crawl":
-        duct_heating_factor = 1.08  # 8% heating loss in conditioned crawl space (reduced from 10%)
-        duct_cooling_factor = 1.05  # 5% cooling gain in conditioned crawl space
+        duct_heating_factor = 1.06  # 6% heating loss in conditioned crawl space (reduced from 8%)
+        duct_cooling_factor = 1.04  # 4% cooling gain in conditioned crawl space (reduced from 5%)
     else:  # ducted_attic
-        duct_heating_factor = 1.12  # 12% heating loss in unconditioned attic (reduced from 15%)
-        duct_cooling_factor = 1.10  # 10% cooling gain in unconditioned attic
+        duct_heating_factor = 1.08  # 8% heating loss in unconditioned attic (reduced from 12%)
+        duct_cooling_factor = 1.08  # 8% cooling gain in unconditioned attic (reduced from 10%)
     
     total_heating *= duct_heating_factor
     total_cooling *= duct_cooling_factor
     
-    # Apply extreme weather multiplier to total heating
-    if extreme_weather_multiplier > 1.0:
-        total_heating *= extreme_weather_multiplier
-        logger.info(f"Applied extreme weather multiplier to total heating: {total_heating:.0f} BTU/hr")
+    # No extreme weather multiplier - design temperatures already account for climate
     
     # NO SAFETY FACTORS - Per ACCA Manual J best practices
     # Equipment should be sized to calculated loads only

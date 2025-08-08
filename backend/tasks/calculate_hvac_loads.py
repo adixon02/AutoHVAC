@@ -74,7 +74,8 @@ def calculate_hvac_loads(
     email: str,
     zip_code: str,
     duct_config: str = "ducted_attic",
-    heating_fuel: str = "gas"
+    heating_fuel: str = "gas",
+    building_orientation: str = "unknown"
 ) -> Dict[str, Any]:
     """
     Complete HVAC load calculation pipeline with ACCA Manual J compliance
@@ -86,6 +87,7 @@ def calculate_hvac_loads(
         zip_code: Project location for climate data
         duct_config: Duct system configuration
         heating_fuel: Heating system fuel type
+        building_orientation: Building front door orientation (N/NE/E/SE/S/SW/W/NW/unknown)
         
     Returns:
         Dict with complete calculation results and audit information
@@ -423,7 +425,8 @@ def calculate_hvac_loads(
                 construction_vintage='1980-2000',  # Default construction vintage
                 envelope_data=envelope_data,
                 create_audit=True,
-                user_id=email
+                user_id=email,
+                building_orientation=building_orientation
             )
             
             # Validate calculation results

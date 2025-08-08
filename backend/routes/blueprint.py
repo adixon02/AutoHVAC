@@ -168,6 +168,7 @@ async def upload_blueprint(
     file: UploadFile = File(...),
     duct_config: str = Form("ducted_attic"),
     heating_fuel: str = Form("gas"),
+    building_orientation: str = Form("unknown"),
     request: Request = None,
     session: AsyncSession = Depends(get_async_session)
 ):
@@ -189,6 +190,7 @@ async def upload_blueprint(
         logger.info("🔍 Step 2: Starting assumption validation")
         valid_duct_configs = {"ducted_attic", "ducted_crawl", "ductless"}
         valid_heating_fuels = {"gas", "heat_pump", "electric"}
+        valid_orientations = {"N", "NE", "E", "SE", "S", "SW", "W", "NW", "unknown"}
         
         if duct_config not in valid_duct_configs:
             raise HTTPException(
@@ -200,6 +202,12 @@ async def upload_blueprint(
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid heating_fuel. Must be one of: {valid_heating_fuels}"
+            )
+        
+        if building_orientation not in valid_orientations:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid building_orientation. Must be one of: {valid_orientations}"
             )
         logger.info("🔍 Step 2 PASSED: Assumption validation successful")
         
@@ -585,7 +593,8 @@ async def upload_blueprint(
                         email=email, 
                         zip_code=zip_code,
                         duct_config=duct_config,
-                        heating_fuel=heating_fuel
+                        heating_fuel=heating_fuel,
+                        building_orientation=building_orientation
                     )
                     
                     # Log file state after Celery task dispatch

@@ -10,6 +10,7 @@ interface ProjectData {
   ductConfig: 'ducted_attic' | 'ducted_crawl' | 'ductless' | ''
   heatingFuel: 'gas' | 'heat_pump' | 'electric' | ''
   zipCode: string
+  buildingOrientation: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW' | ''
   email: string
 }
 
@@ -34,10 +35,11 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
     ductConfig: 'ducted_attic', // Pre-selected default
     heatingFuel: 'gas', // Pre-selected default
     zipCode: '',
+    buildingOrientation: '', // Will be selected in step 5
     email: savedEmail // Pre-fill email if we have it
   })
 
-  const totalSteps = 6 // 6 steps with email moved to the end
+  const totalSteps = 7 // 7 steps including building orientation
 
   const nextStep = () => {
     if (currentStep < totalSteps) {
@@ -61,6 +63,7 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
       ductConfig: 'ducted_attic',
       heatingFuel: 'gas',
       zipCode: '',
+      buildingOrientation: '',
       email: ''
     })
     setError(null)
@@ -86,16 +89,18 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
               {currentStep === 2 && 'What type of ductwork?'}
               {currentStep === 3 && 'What heating system will you use?'}
               {currentStep === 4 && 'What\'s the project location?'}
-              {currentStep === 5 && 'Almost done!'}
-              {currentStep === 6 && 'Where should we send your analysis?'}
+              {currentStep === 5 && 'Building Orientation'}
+              {currentStep === 6 && 'Almost done!'}
+              {currentStep === 7 && 'Where should we send your analysis?'}
             </h2>
             <p className="text-gray-600 mt-1">
               {currentStep === 1 && 'Upload your blueprint and give your project a name'}
               {currentStep === 2 && 'This affects your system efficiency calculations'}
               {currentStep === 3 && 'This determines equipment recommendations'}
               {currentStep === 4 && 'We need the ZIP code for accurate climate data'}
-              {currentStep === 5 && 'Review your selections'}
-              {currentStep === 6 && 'Enter your email to receive your HVAC analysis report'}
+              {currentStep === 5 && 'Which direction does the front of your building face?'}
+              {currentStep === 6 && 'Review your selections'}
+              {currentStep === 7 && 'Enter your email to receive your HVAC analysis report'}
             </p>
           </div>
           <button
@@ -171,18 +176,28 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
             />
           )}
 
-          {/* Step 5: Review */}
+          {/* Step 5: Building Orientation */}
           {currentStep === 5 && (
-            <Step5Review
+            <Step5Orientation
+              projectData={projectData}
+              updateProjectData={updateProjectData}
+              onNext={nextStep}
+              onPrev={prevStep}
+            />
+          )}
+
+          {/* Step 6: Review */}
+          {currentStep === 6 && (
+            <Step6Review
               projectData={projectData}
               onNext={nextStep}
               onPrev={prevStep}
             />
           )}
 
-          {/* Step 6: Email Collection (moved to end for micro-engagement) */}
-          {currentStep === 6 && (
-            <Step6EmailCollection
+          {/* Step 7: Email Collection (moved to end for micro-engagement) */}
+          {currentStep === 7 && (
+            <Step7EmailCollection
               projectData={projectData}
               updateProjectData={updateProjectData}
               onPrev={prevStep}
@@ -210,6 +225,7 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
       formData.append('zip_code', projectData.zipCode)
       formData.append('duct_config', projectData.ductConfig)
       formData.append('heating_fuel', projectData.heatingFuel)
+      formData.append('building_orientation', projectData.buildingOrientation || 'unknown')
 
       // Use the existing API helper that has proper endpoint and error handling
       const result = await apiHelpers.uploadBlueprint(formData)
@@ -392,7 +408,7 @@ function Step1ProjectSetup({ projectData, updateProjectData, onNext, error, setE
   )
 }
 
-function Step6EmailCollection({ projectData, updateProjectData, onPrev, onSubmit, isLoading, error, setError }: any) {
+function Step7EmailCollection({ projectData, updateProjectData, onPrev, onSubmit, isLoading, error, setError }: any) {
   const savedEmail = typeof window !== 'undefined' ? Cookies.get('user_email') || '' : ''
   const isReturningUser = savedEmail && savedEmail === projectData.email
   
@@ -701,7 +717,78 @@ function Step4ZipCode({ projectData, updateProjectData, onNext, onPrev, error, s
   )
 }
 
-function Step5Review({ projectData, onNext, onPrev }: any) {
+function Step5Orientation({ projectData, updateProjectData, onNext, onPrev }: any) {
+  const orientations = [
+    { value: 'N', label: 'North', icon: '⬆️' },
+    { value: 'NE', label: 'Northeast', icon: '↗️' },
+    { value: 'E', label: 'East', icon: '➡️' },
+    { value: 'SE', label: 'Southeast', icon: '↘️' },
+    { value: 'S', label: 'South', icon: '⬇️' },
+    { value: 'SW', label: 'Southwest', icon: '↙️' },
+    { value: 'W', label: 'West', icon: '⬅️' },
+    { value: 'NW', label: 'Northwest', icon: '↖️' }
+  ]
+
+  const handleNext = () => {
+    if (!projectData.buildingOrientation) {
+      // Default to unknown if not selected
+      updateProjectData({ buildingOrientation: 'N' })
+    }
+    onNext()
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="text-sm text-gray-600 mb-6">
+          Knowing your building's orientation helps us calculate accurate solar heat gains for each room, 
+          improving system sizing by up to 20%.
+        </p>
+        
+        <div className="grid grid-cols-2 gap-3">
+          {orientations.map(orientation => (
+            <button
+              key={orientation.value}
+              onClick={() => updateProjectData({ buildingOrientation: orientation.value })}
+              className={`p-4 border-2 rounded-xl transition-all ${
+                projectData.buildingOrientation === orientation.value 
+                  ? 'border-brand-600 bg-brand-50 shadow-md' 
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center justify-center">
+                <span className="text-2xl mr-2">{orientation.icon}</span>
+                <span className="font-medium">{orientation.label}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+        
+        <p className="mt-4 text-xs text-gray-500 text-center">
+          Tip: Face the front door and note which compass direction you're looking at
+        </p>
+      </div>
+
+      {/* Navigation Buttons */}
+      <div className="flex space-x-4">
+        <button
+          onClick={onPrev}
+          className="flex-1 btn-secondary text-lg py-4"
+        >
+          Back
+        </button>
+        <button
+          onClick={handleNext}
+          className="flex-1 btn-primary text-lg py-4"
+        >
+          Continue
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function Step6Review({ projectData, onNext, onPrev }: any) {
   return (
     <div className="space-y-6">
       {/* Review Summary */}
@@ -737,9 +824,24 @@ function Step5Review({ projectData, onNext, onPrev }: any) {
             </span>
           </div>
           
-          <div className="flex justify-between items-center py-2">
+          <div className="flex justify-between items-center py-2 border-b border-gray-200">
             <span className="text-sm text-gray-600">ZIP Code</span>
             <span className="text-sm font-medium text-gray-900">{projectData.zipCode}</span>
+          </div>
+          
+          <div className="flex justify-between items-center py-2">
+            <span className="text-sm text-gray-600">Building Orientation</span>
+            <span className="text-sm font-medium text-gray-900">
+              {projectData.buildingOrientation === 'N' && 'North'}
+              {projectData.buildingOrientation === 'NE' && 'Northeast'}
+              {projectData.buildingOrientation === 'E' && 'East'}
+              {projectData.buildingOrientation === 'SE' && 'Southeast'}
+              {projectData.buildingOrientation === 'S' && 'South'}
+              {projectData.buildingOrientation === 'SW' && 'Southwest'}
+              {projectData.buildingOrientation === 'W' && 'West'}
+              {projectData.buildingOrientation === 'NW' && 'Northwest'}
+              {!projectData.buildingOrientation && 'Not specified'}
+            </span>
           </div>
         </div>
       </div>
