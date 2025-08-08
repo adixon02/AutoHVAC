@@ -92,6 +92,34 @@ class BlueprintParser:
         Raises:
             BlueprintParsingError: If parsing fails critically
         """
+        # Check for GPT-5 only mode first
+        use_gpt5_only = os.getenv("USE_GPT5_ONLY", "false").lower() == "true"
+        
+        if use_gpt5_only:
+            # Use the new modular GPT-5 pipeline
+            logger.info(f"[GPT-5 ONLY MODE] Using modular GPT-5 Vision pipeline for {filename}")
+            try:
+                from services.blueprint_pipeline import blueprint_pipeline
+                
+                # Process through the new pipeline
+                result = blueprint_pipeline.process_blueprint(
+                    pdf_path=pdf_path,
+                    zip_code=zip_code,
+                    project_id=project_id,
+                    filename=filename
+                )
+                
+                if result.get("success"):
+                    # Convert pipeline result to BlueprintSchema
+                    return self._convert_pipeline_to_schema(result, project_id, filename, zip_code)
+                else:
+                    logger.error(f"GPT-5 pipeline failed: {result.get('error')}")
+                    raise BlueprintParsingError(f"GPT-5 Vision pipeline failed: {result.get('error')}")
+                    
+            except Exception as e:
+                logger.error(f"GPT-5 pipeline error: {e}")
+                raise BlueprintParsingError(f"GPT-5 Vision processing failed: {str(e)}")
+        
         # Check parsing mode from environment
         parsing_mode = os.getenv("PARSING_MODE", "traditional_first").lower()
         
@@ -858,6 +886,73 @@ class BlueprintParser:
             return 0.5
         else:
             return 0.2
+    
+    def _convert_pipeline_to_schema(self, result: Dict[str, Any], project_id: str, filename: str, zip_code: str) -> BlueprintSchema:
+        """Convert new pipeline result to BlueprintSchema format"""
+        from datetime import datetime
+        
+        # Extract rooms
+        rooms = []
+        for room_data in result.get("rooms", []):
+            room = Room(
+                name=room_data.get("name", "Unknown"),
+                dimensions_ft=(room_data.get("width", 10), room_data.get("length", 10)),
+                floor=1,
+                windows=0,
+                orientation="unknown",
+                area=room_data.get("area", 100),
+                room_type=room_data.get("type", "unknown"),
+                confidence=room_data.get("confidence", 0.8),
+                center_position=(0.0, 0.0),
+                label_found=True,
+                dimensions_source=room_data.get("source", "gpt5_vision")
+            )
+            rooms.append(room)
+        
+        # Create metadata
+        metadata = ParsingMetadata(
+            parsing_timestamp=datetime.utcnow(),
+            processing_time_seconds=result.get("processing_time", 0),
+            pdf_filename=filename,
+            pdf_page_count=len(result.get("metadata", {}).get("pages_analyzed", [1])),
+            selected_page=1,
+            geometry_status=ParsingStatus.SUCCESS if result.get("success") else ParsingStatus.FAILED,
+            text_status=ParsingStatus.SUCCESS if result.get("success") else ParsingStatus.FAILED,
+            ai_status=ParsingStatus.SUCCESS if result.get("success") else ParsingStatus.FAILED,
+            overall_confidence=result.get("confidence", 0.8),
+            geometry_confidence=0.9,
+            text_confidence=0.9,
+            data_quality_score=85.0,
+            warnings=[],
+            errors_encountered=[]
+        )
+        
+        # Add HVAC data if available
+        hvac_data = result.get("hvac", {})
+        if hvac_data:
+            metadata.warnings.append(f"HVAC: {hvac_data.get('heating_tons', 0):.1f} tons heating, {hvac_data.get('cooling_tons', 0):.1f} tons cooling")
+        
+        # Create BlueprintSchema
+        schema = BlueprintSchema(
+            version="3.0",
+            blueprint_id=project_id,
+            project_address=f"ZIP: {zip_code}",
+            created_at=datetime.utcnow(),
+            rooms=rooms,
+            raw_geometry={},
+            raw_text={},
+            parsed_labels=[],
+            parsed_dimensions=[],
+            geometry_elements=[],
+            pages_analysis=[],
+            parsing_metadata=metadata,
+            scale_ratio=48.0,  # Default 1/4"=1'
+            unit="ft",
+            status="completed" if result.get("success") else "failed",
+            error_message=result.get("error") if not result.get("success") else None
+        )
+        
+        return schema
     
     def _calculate_overall_confidence(self, metadata: ParsingMetadata) -> float:
         """Calculate overall parsing confidence"""
