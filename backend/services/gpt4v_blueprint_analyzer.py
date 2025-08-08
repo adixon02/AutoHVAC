@@ -195,7 +195,7 @@ Use GPT-5's superior reasoning to:
 - Calculate accurate total square footage
 
 Respond with a JSON object in this exact format:
-{
+{{
   "zip_code": "{zip_code}",
   "climate_zone": "<climate zone for {zip_code}>",
   "total_area_sqft": <number>,
@@ -203,7 +203,7 @@ Respond with a JSON object in this exact format:
   "building_type": "<residential/commercial/other>",
   "scale": "<scale notation from blueprint>",
   "rooms": [
-    {
+    {{
       "name": "<room name from blueprint>",
       "room_type": "<bedroom/bathroom/kitchen/etc>",
       "width_ft": <number>,
@@ -214,24 +214,24 @@ Respond with a JSON object in this exact format:
       "confidence": <0.0-1.0>,
       "heating_btu_hr": <number>,
       "cooling_btu_hr": <number>
-    }
+    }}
   ],
   "special_features": ["<garage>", "<basement>", "<deck>", etc],
   "confidence": <overall confidence 0.0-1.0>,
-  "hvac_loads": {
+  "hvac_loads": {{
     "total_heating_btu_hr": <number>,
     "total_cooling_btu_hr": <number>,
     "heating_system_tons": <number>,
     "cooling_system_tons": <number>,
-    "design_temps": {
+    "design_temps": {{
       "winter_design_temp_f": <number for {zip_code}>,
       "summer_design_temp_f": <number for {zip_code}>
-    },
+    }},
     "calculation_method": "ACCA Manual J via GPT-5 Vision for ZIP {zip_code}"
-  }
-}
+  }}
+}}
 
-REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"
+REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
     
     def _analyze_with_gpt4v(self, image_base64: str, prompt: str) -> Dict[str, Any]:
         """Send image to GPT-5V/GPT-4V and get analysis with model fallback"""
