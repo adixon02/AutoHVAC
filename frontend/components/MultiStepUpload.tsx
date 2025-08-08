@@ -726,13 +726,14 @@ function Step5Orientation({ projectData, updateProjectData, onNext, onPrev }: an
     { value: 'S', label: 'South', icon: '⬇️' },
     { value: 'SW', label: 'Southwest', icon: '↙️' },
     { value: 'W', label: 'West', icon: '⬅️' },
-    { value: 'NW', label: 'Northwest', icon: '↖️' }
+    { value: 'NW', label: 'Northwest', icon: '↖️' },
+    { value: 'unknown', label: 'Not sure', icon: '🧭', subtitle: "We'll estimate for you" }
   ]
 
   const handleNext = () => {
     if (!projectData.buildingOrientation) {
       // Default to unknown if not selected
-      updateProjectData({ buildingOrientation: 'N' })
+      updateProjectData({ buildingOrientation: 'unknown' })
     }
     onNext()
   }
@@ -746,7 +747,7 @@ function Step5Orientation({ projectData, updateProjectData, onNext, onPrev }: an
         </p>
         
         <div className="grid grid-cols-2 gap-3">
-          {orientations.map(orientation => (
+          {orientations.slice(0, 8).map(orientation => (
             <button
               key={orientation.value}
               onClick={() => updateProjectData({ buildingOrientation: orientation.value })}
@@ -762,11 +763,34 @@ function Step5Orientation({ projectData, updateProjectData, onNext, onPrev }: an
               </div>
             </button>
           ))}
+          
+          {/* Not sure option - spans 2 columns */}
+          <button
+            onClick={() => updateProjectData({ buildingOrientation: 'unknown' })}
+            className={`col-span-2 p-4 border-2 rounded-xl transition-all ${
+              projectData.buildingOrientation === 'unknown' 
+                ? 'border-brand-600 bg-brand-50 shadow-md' 
+                : 'border-gray-200 hover:border-gray-300 bg-gray-50'
+            }`}
+          >
+            <div className="flex flex-col items-center justify-center">
+              <div className="flex items-center">
+                <span className="text-2xl mr-2">{orientations[8].icon}</span>
+                <span className="font-medium">{orientations[8].label}</span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">{orientations[8].subtitle}</p>
+            </div>
+          </button>
         </div>
         
-        <p className="mt-4 text-xs text-gray-500 text-center">
-          Tip: Face the front door and note which compass direction you're looking at
-        </p>
+        <div className="mt-4 space-y-2">
+          <p className="text-xs text-gray-500 text-center">
+            Tip: Face the front door and note which compass direction you're looking at
+          </p>
+          <p className="text-xs text-gray-400 text-center">
+            Selecting "Not sure" will use climate-based estimates, affecting accuracy by ~5-10%
+          </p>
+        </div>
       </div>
 
       {/* Navigation Buttons */}
@@ -840,6 +864,7 @@ function Step6Review({ projectData, onNext, onPrev }: any) {
               {projectData.buildingOrientation === 'SW' && 'Southwest'}
               {projectData.buildingOrientation === 'W' && 'West'}
               {projectData.buildingOrientation === 'NW' && 'Northwest'}
+              {projectData.buildingOrientation === 'unknown' && '🧭 Not sure (will estimate)'}
               {!projectData.buildingOrientation && 'Not specified'}
             </span>
           </div>

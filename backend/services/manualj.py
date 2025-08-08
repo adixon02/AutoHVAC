@@ -1040,6 +1040,46 @@ def _generate_missing_common_spaces(parsed_area: float, declared_area: float, ex
     return generated_rooms
 
 
+def get_smart_orientation_default(zip_code: str, climate_zone: str) -> str:
+    """
+    Determine optimal default orientation based on climate zone
+    
+    Args:
+        zip_code: Project ZIP code
+        climate_zone: ASHRAE climate zone (e.g., "4A", "5B")
+        
+    Returns:
+        Optimal default orientation for unknown cases
+        
+    Logic:
+        - Cold climates (zones 5-8): Default to 'S' or 'SE' to maximize solar gain
+        - Moderate climates (zones 3-4): Default to 'SE' for balanced performance
+        - Hot climates (zones 1-2): Default to 'E' to minimize afternoon cooling load
+    """
+    try:
+        # Extract numeric zone
+        zone_num = int(climate_zone[0]) if climate_zone and climate_zone[0].isdigit() else 4
+    except (ValueError, IndexError):
+        zone_num = 4  # Default to moderate climate
+        
+    if zone_num >= 6:
+        # Very cold climates - maximize winter solar gain
+        logger.info(f"Cold climate zone {climate_zone}: defaulting to South orientation for max solar gain")
+        return 'S'
+    elif zone_num == 5:
+        # Cold climates - good solar gain with some afternoon shading
+        logger.info(f"Cool climate zone {climate_zone}: defaulting to Southeast orientation")
+        return 'SE'
+    elif zone_num >= 3:
+        # Moderate climates - balanced approach
+        logger.info(f"Moderate climate zone {climate_zone}: defaulting to Southeast orientation")
+        return 'SE'
+    else:
+        # Hot climates (1-2) - minimize afternoon heat gain
+        logger.info(f"Hot climate zone {climate_zone}: defaulting to East orientation to reduce cooling load")
+        return 'E'
+
+
 def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic", heating_fuel: str = "gas", construction_vintage: Optional[str] = None, include_ventilation: bool = True, envelope_data: Optional[EnvelopeExtraction] = None, create_audit: bool = True, user_id: Optional[str] = None, building_orientation: str = "unknown") -> Dict[str, Any]:
     """
     Calculate ACCA Manual J heating and cooling loads
@@ -1114,8 +1154,23 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     
     rooms_to_process = list(schema.rooms)  # Create a copy to avoid modifying original
     
-    # Apply user-provided building orientation if available
-    if building_orientation != "unknown":
+    # Apply building orientation
+    if building_orientation == "unknown":
+        # Use smart climate-based default
+        smart_default = get_smart_orientation_default(
+            schema.zip_code, 
+            climate_data.get('climate_zone', '4A')
+        )
+        logger.info(f"User selected 'Not sure' for orientation - using climate-based default: {smart_default}")
+        for room in rooms_to_process:
+            # Only apply to exterior rooms (don't change interior rooms)
+            if room.orientation in ['unknown', 'N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']:
+                room.orientation = smart_default
+                # Mark that this is an intelligent estimate
+                if hasattr(room, 'source_elements'):
+                    room.source_elements['orientation_confidence'] = 0.7
+                    room.source_elements['orientation_source'] = 'climate_based_estimate'
+    elif building_orientation != "unknown":
         logger.info(f"Applying user-provided building orientation: {building_orientation}")
         for room in rooms_to_process:
             # Only apply to exterior rooms (don't change interior rooms)
