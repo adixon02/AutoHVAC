@@ -133,6 +133,94 @@ function EducationalFact({ fact, icon }: { fact: string; icon: string }) {
   )
 }
 
+// Helper functions for intelligent error handling
+function getErrorMessage(error: string | undefined): string {
+  if (!error) return "The analysis couldn't be completed due to an unexpected issue."
+  
+  const errorLower = error.toLowerCase()
+  
+  if (errorLower.includes('pdf') || errorLower.includes('file')) {
+    return "There was an issue reading your blueprint file. The file might be corrupted or in an unsupported format."
+  }
+  if (errorLower.includes('timeout')) {
+    return "The analysis took longer than expected. This usually happens with very large or complex files."
+  }
+  if (errorLower.includes('dimension') || errorLower.includes('room')) {
+    return "We couldn't extract enough information from your blueprint to complete the analysis."
+  }
+  if (errorLower.includes('quality') || errorLower.includes('resolution')) {
+    return "The blueprint quality is too low for accurate analysis. We need clearer images to identify rooms and dimensions."
+  }
+  if (errorLower.includes('api') || errorLower.includes('gpt')) {
+    return "Our AI service is temporarily unavailable. This is usually resolved quickly."
+  }
+  
+  // Default message
+  return "The analysis encountered an unexpected issue. Our team has been notified."
+}
+
+function getErrorSuggestions(error: string | undefined): string[] {
+  if (!error) return [
+    "Try uploading a different blueprint",
+    "Ensure your file is a PDF under 10MB",
+    "Contact support if the issue persists"
+  ]
+  
+  const errorLower = error.toLowerCase()
+  
+  if (errorLower.includes('pdf') || errorLower.includes('file')) {
+    return [
+      "Ensure your file is a valid PDF document",
+      "Try re-saving the PDF from the original source",
+      "Check that the file isn't password-protected",
+      "Make sure the file is under 10MB"
+    ]
+  }
+  
+  if (errorLower.includes('timeout')) {
+    return [
+      "Try uploading a smaller file (under 5MB works best)",
+      "Split multi-floor plans into separate files",
+      "Remove unnecessary pages from the PDF",
+      "Try again during off-peak hours"
+    ]
+  }
+  
+  if (errorLower.includes('dimension') || errorLower.includes('room')) {
+    return [
+      "Ensure room labels and dimensions are clearly visible",
+      "Upload architectural floor plans rather than 3D renders",
+      "Include a scale or dimension reference",
+      "Avoid heavily stylized or artistic blueprints"
+    ]
+  }
+  
+  if (errorLower.includes('quality') || errorLower.includes('resolution')) {
+    return [
+      "Scan blueprints at 300 DPI or higher",
+      "Ensure text and lines are sharp and clear",
+      "Avoid photos of blueprints - use scans instead",
+      "Check that the PDF isn't heavily compressed"
+    ]
+  }
+  
+  if (errorLower.includes('api') || errorLower.includes('gpt')) {
+    return [
+      "Wait a few minutes and try again",
+      "Check our status page for service updates",
+      "Try during off-peak hours if the issue persists"
+    ]
+  }
+  
+  // Default suggestions
+  return [
+    "Ensure your blueprint is a clear, standard floor plan",
+    "Check that room labels and dimensions are visible",
+    "Try a different file or format",
+    "Contact support with your Job ID for assistance"
+  ]
+}
+
 export default function AnalyzingPage() {
   const router = useRouter()
   const { jobId } = router.query
@@ -420,17 +508,94 @@ export default function AnalyzingPage() {
             {/* Content */}
             <div className="p-8">
               {jobStatus.status === 'failed' ? (
-                <div className="text-center">
-                  <div className="p-6 bg-red-50 rounded-lg mb-6">
-                    <h3 className="text-lg font-semibold text-red-800 mb-2">Analysis Failed</h3>
-                    <p className="text-red-600">{jobStatus.error || 'An unknown error occurred'}</p>
+                <div className="space-y-6">
+                  {/* Friendly Error Message */}
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
+                    <div className="flex items-start space-x-4">
+                      <div className="flex-shrink-0">
+                        <svg className="w-6 h-6 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-lg font-semibold text-amber-900 mb-2">
+                          We couldn't complete the analysis
+                        </h3>
+                        <p className="text-amber-800 mb-4">
+                          {getErrorMessage(jobStatus.error)}
+                        </p>
+                        
+                        {/* Helpful suggestions based on error type */}
+                        <div className="bg-white bg-opacity-50 rounded-lg p-4 space-y-2">
+                          <p className="text-sm font-medium text-amber-900">Here's what you can try:</p>
+                          <ul className="text-sm text-amber-700 space-y-1 ml-4">
+                            {getErrorSuggestions(jobStatus.error).map((suggestion, idx) => (
+                              <li key={idx} className="flex items-start">
+                                <span className="text-amber-500 mr-2">•</span>
+                                <span>{suggestion}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <button 
-                    onClick={() => router.push('/')}
-                    className="btn-primary"
-                  >
-                    Try Again
-                  </button>
+
+                  {/* Technical Details (Collapsible) */}
+                  {jobStatus.error && (
+                    <details className="bg-gray-50 rounded-lg p-4">
+                      <summary className="cursor-pointer text-sm text-gray-600 font-medium hover:text-gray-800">
+                        Technical details for support
+                      </summary>
+                      <div className="mt-3 p-3 bg-white rounded border border-gray-200">
+                        <code className="text-xs text-gray-600 break-all">
+                          Error: {jobStatus.error}
+                          <br />
+                          Job ID: {jobId}
+                          <br />
+                          Time: {new Date().toISOString()}
+                        </code>
+                      </div>
+                    </details>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                    <button 
+                      onClick={() => router.push('/')}
+                      className="btn-primary"
+                    >
+                      <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      Upload New Blueprint
+                    </button>
+                    <button 
+                      onClick={() => router.push('/dashboard')}
+                      className="btn-secondary"
+                    >
+                      View Dashboard
+                    </button>
+                    <button 
+                      onClick={() => window.open('mailto:support@autohvac.ai?subject=Analysis Failed - ' + jobId, '_blank')}
+                      className="btn-text text-gray-600"
+                    >
+                      Contact Support
+                    </button>
+                  </div>
+
+                  {/* Educational Note */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-start space-x-3">
+                      <svg className="w-5 h-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <div className="text-sm text-blue-800">
+                        <p className="font-medium mb-1">Pro tip for best results:</p>
+                        <p>Upload clear, high-resolution floor plans (300+ DPI) with visible room labels and dimensions. Avoid 3D renders, photos, or heavily compressed images.</p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               ) : jobStatus.status === 'completed' ? (
                 <div>

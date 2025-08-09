@@ -92,13 +92,6 @@ async def get_job_status(
                     "limited_time_offer": "20% OFF - Limited Time"
                 }
         
-        # Return appropriate status codes
-        if project.status == JobStatus.FAILED:
-            return JSONResponse(
-                content=response_data,
-                status_code=500
-            )
-        
         # Return 202 for in-progress jobs
         if project.status in [JobStatus.PENDING, JobStatus.PROCESSING]:
             return JSONResponse(
@@ -106,7 +99,7 @@ async def get_job_status(
                 status_code=202
             )
         
-        # Return 200 for completed
+        # Return 200 for both completed and failed (they are valid application states)
         return response_data
     
     except HTTPException:

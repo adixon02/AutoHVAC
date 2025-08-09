@@ -180,8 +180,11 @@ export default function ProjectCard({ project, userEmail, onDownload }: ProjectC
               </div>
             </div>
           ) : project.status === 'failed' ? (
-            <div className="flex-1 text-center">
-              <span className="text-sm text-red-600">Analysis failed - Click to view details</span>
+            <div className="flex-1">
+              <div className="bg-red-50 rounded-lg px-3 py-2">
+                <p className="text-sm text-red-800 font-medium">Analysis unsuccessful</p>
+                <p className="text-xs text-red-600 mt-0.5">Click to see details & retry options</p>
+              </div>
             </div>
           ) : null}
 
