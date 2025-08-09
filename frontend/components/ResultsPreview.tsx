@@ -84,30 +84,6 @@ export default function ResultsPreview({ result, userEmail, onCreateAccount }: R
         </div>
       </div>
 
-      {/* Room Breakdown */}
-      <div className="bg-gray-50 rounded-xl p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Room-by-Room Breakdown</h3>
-        <div className="space-y-2">
-          {result.zones.slice(0, 5).map((zone, index) => (
-            <div key={index} className="flex items-center justify-between py-2 border-b border-gray-200 last:border-0">
-              <div>
-                <p className="font-medium text-gray-900">{zone.name}</p>
-                <p className="text-sm text-gray-500">{zone.area} sq ft</p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm text-gray-600">
-                  <span className="text-blue-600">{zone.heating_btu.toLocaleString()}</span> / 
-                  <span className="text-cyan-600"> {zone.cooling_btu.toLocaleString()}</span> BTU/hr
-                </p>
-              </div>
-            </div>
-          ))}
-          {result.zones.length > 5 && (
-            <p className="text-sm text-gray-500 pt-2">+ {result.zones.length - 5} more rooms</p>
-          )}
-        </div>
-      </div>
-
       {/* Equipment Recommendations */}
       {result.equipment_recommendations && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
