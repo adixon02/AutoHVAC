@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 import { NextApiRequest, NextApiResponse } from 'next'
-import { getCookie, setCookie } from 'nookies'
+import { parseCookies, setCookie } from 'nookies'
 
 const CSRF_TOKEN_COOKIE = 'csrf-token'
 const CSRF_HEADER = 'x-csrf-token'
@@ -19,7 +19,7 @@ export function getOrCreateCSRFToken(
   req: NextApiRequest,
   res: NextApiResponse
 ): string {
-  const cookies = getCookie({ req })
+  const cookies = parseCookies({ req })
   let token = cookies[CSRF_TOKEN_COOKIE]
   
   if (!token) {
@@ -47,7 +47,7 @@ export function verifyCSRFToken(
     return true
   }
   
-  const cookies = getCookie({ req })
+  const cookies = parseCookies({ req })
   const cookieToken = cookies[CSRF_TOKEN_COOKIE]
   const headerToken = req.headers[CSRF_HEADER] as string
   
@@ -84,6 +84,6 @@ export function withCSRFProtection(
  * Get CSRF token for client-side use
  */
 export function getCSRFTokenForClient(req: NextApiRequest): string | null {
-  const cookies = getCookie({ req })
+  const cookies = parseCookies({ req })
   return cookies[CSRF_TOKEN_COOKIE] || null
 }

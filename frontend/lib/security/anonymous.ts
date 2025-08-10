@@ -1,5 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next'
-import { getCookie, setCookie } from 'nookies'
+import { parseCookies, setCookie } from 'nookies'
 import crypto from 'crypto'
 
 const ANON_ID_COOKIE = 'anon_id'
@@ -18,7 +18,7 @@ export function getOrCreateAnonymousId(
   req: NextApiRequest,
   res: NextApiResponse
 ): string {
-  const cookies = getCookie({ req })
+  const cookies = parseCookies({ req })
   let anonId = cookies[ANON_ID_COOKIE]
   
   if (!anonId) {
@@ -59,6 +59,6 @@ export function clearAnonymousId(res: NextApiResponse): void {
  * Get anonymous ID from request
  */
 export function getAnonymousId(req: NextApiRequest): string | null {
-  const cookies = getCookie({ req })
+  const cookies = parseCookies({ req })
   return cookies[ANON_ID_COOKIE] || null
 }
