@@ -188,14 +188,11 @@ export default async function handler(
       
       // Always return success to prevent enumeration
       if (user && !user.emailVerified) {
-        // Check for recent token
+        // Check for recent token (we check if one exists and is not expired)
         const recentToken = await prisma.verificationToken.findFirst({
           where: {
             identifier: normalizedEmail,
-            expires: { gt: new Date() },
-            createdAt: { 
-              gt: new Date(Date.now() - 5 * 60 * 1000) // Within last 5 minutes
-            }
+            expires: { gt: new Date() }
           }
         })
         

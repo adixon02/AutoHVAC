@@ -42,7 +42,7 @@ export default async function handler(
       event: 'stripe_webhook_failed',
       metadata: { 
         error: err instanceof Error ? err.message : 'Unknown error',
-        signature: sig.substring(0, 20) + '...'
+        signature: typeof sig === 'string' ? sig.substring(0, 20) + '...' : 'invalid'
       },
       ip: req.headers['x-forwarded-for'] as string || 'unknown',
       userAgent: req.headers['user-agent'] || ''
@@ -115,10 +115,12 @@ export default async function handler(
       case 'invoice.payment_succeeded': {
         const invoice = event.data.object as Stripe.Invoice
         
-        if (invoice.subscription && invoice.billing_reason === 'subscription_cycle') {
+        // In Stripe API 2025-07-30.basil, subscription is under parent field
+        const subscriptionId = (invoice as any).parent?.subscription || (invoice as any).subscription
+        if (subscriptionId && invoice.billing_reason === 'subscription_cycle') {
           // Regular subscription payment
           const subscription = await stripe.subscriptions.retrieve(
-            invoice.subscription as string
+            subscriptionId as string
           )
           await syncSubscriptionFromStripe(subscription)
           
@@ -141,9 +143,11 @@ export default async function handler(
       case 'invoice.payment_failed': {
         const invoice = event.data.object as Stripe.Invoice
         
-        if (invoice.subscription) {
+        // In Stripe API 2025-07-30.basil, subscription is under parent field
+        const subscriptionId = (invoice as any).parent?.subscription || (invoice as any).subscription
+        if (subscriptionId) {
           const subscription = await stripe.subscriptions.retrieve(
-            invoice.subscription as string
+            subscriptionId as string
           )
           
           // Update subscription status
