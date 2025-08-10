@@ -21,14 +21,14 @@ export default function Billing() {
   
   // Fetch subscription status
   const { data: subscription, mutate: mutateSubscription } = useSWR(
-    session?.user?.id ? `/api/subscription/status` : null,
+    session?.user ? `/api/subscription/status` : null,
     () => axios.get('/api/subscription/status').then(res => res.data),
     { refreshInterval: 5000 }
   )
   
   // Fetch usage stats
   const { data: usageStats } = useSWR(
-    session?.user?.email ? `/api/user/usage` : null,
+    session?.user ? `/api/user/usage` : null,
     () => axios.get('/api/user/usage').then(res => res.data).catch(() => ({
       projectsThisMonth: 0,
       totalProjects: 0,

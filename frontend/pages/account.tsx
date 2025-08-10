@@ -41,7 +41,7 @@ export default function Account() {
   
   // Fetch subscription status
   const { data: subscription } = useSWR(
-    session?.user?.id ? `/api/subscription/status` : null,
+    session?.user ? `/api/subscription/status` : null,
     () => axios.get('/api/subscription/status').then(res => res.data)
   )
   
