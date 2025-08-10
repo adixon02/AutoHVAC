@@ -387,8 +387,9 @@ export async function getUserSubscription(userId: string) {
       // Get upcoming invoice for next payment amount
       if (stripeSubscription.status === 'active') {
         try {
-          const upcomingInvoice = await stripe.invoices.retrieveUpcoming({
-            customer: stripeSubscription.customer as string
+          const upcomingInvoice = await stripe.invoices.createPreview({
+            customer: stripeSubscription.customer as string,
+            subscription: stripeSubscription.id
           })
           stripeDetails.nextInvoiceAmount = upcomingInvoice.amount_due / 100
         } catch (e) {
