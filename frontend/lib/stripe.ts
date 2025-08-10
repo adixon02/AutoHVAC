@@ -223,13 +223,27 @@ export async function syncSubscriptionFromStripe(
     where: { stripeSubscriptionId: stripeSubscription.id }
   })
   
+  // Get the period end from the first subscription item (most subscriptions have one item)
+  // If there are multiple items, we use the latest period end
+  let currentPeriodEnd = new Date()
+  if (stripeSubscription.items.data.length > 0) {
+    const latestPeriodEnd = Math.max(
+      ...stripeSubscription.items.data.map(item => 
+        (item as any).current_period_end || 0
+      )
+    )
+    if (latestPeriodEnd > 0) {
+      currentPeriodEnd = new Date(latestPeriodEnd * 1000)
+    }
+  }
+  
   const subscriptionData = {
     userId,
     stripeCustomerId: stripeSubscription.customer as string,
     stripeSubscriptionId: stripeSubscription.id,
     stripePriceId: stripeSubscription.items.data[0]?.price.id,
     status: stripeSubscription.status,
-    currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
+    currentPeriodEnd,
     cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
   }
   
