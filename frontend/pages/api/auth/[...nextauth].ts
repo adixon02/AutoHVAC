@@ -170,6 +170,9 @@ export const authOptions: NextAuthOptions = {
           email: user.email,
           name: user.name,
           image: user.image,
+          emailVerified: user.emailVerified,
+          freeReportUsed: user.freeReportUsed,
+          stripeCustomerId: user.stripeCustomerId,
         }
       }
     }),
