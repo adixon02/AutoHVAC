@@ -4,7 +4,7 @@ from typing import Optional, Literal
 from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_
-from database import get_db
+from database import get_sync_session as get_db
 from models.db_models import User, Project, JobStatus
 import bcrypt
 import uuid
