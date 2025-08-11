@@ -120,19 +120,21 @@ export default function Hero({ onGetStarted }: HeroProps) {
             </div>
           </div>
           
-          {/* Right Column - Upload Zone */}
+          {/* Right Column - Upload Zone with Animated Elements */}
           <div className="relative animate-slide-up">
-            <div 
-              className={`relative bg-white rounded-2xl border-2 border-dashed transition-all duration-200 p-12 text-center cursor-pointer ${
-                isDragging 
-                  ? 'border-brand-500 bg-brand-50 shadow-lg scale-[1.02]' 
-                  : 'border-gray-300 hover:border-gray-400 hover:shadow-md'
-              }`}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={handleFileClick}
-            >
+            {/* Main Upload Card */}
+            <div className="card p-8 max-w-md mx-auto">
+              <div 
+                className={`border-2 border-dashed rounded-xl transition-all duration-200 p-8 text-center cursor-pointer ${
+                  isDragging 
+                    ? 'border-brand-500 bg-brand-50 shadow-lg scale-[1.02]' 
+                    : 'border-gray-200 hover:border-brand-400 hover:bg-gray-50'
+                }`}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onClick={handleFileClick}
+              >
               <input
                 ref={fileInputRef}
                 type="file"
@@ -141,53 +143,107 @@ export default function Hero({ onGetStarted }: HeroProps) {
                 className="hidden"
               />
               
-              {/* Upload icon with animation */}
-              <div className="mx-auto w-20 h-20 bg-gradient-to-br from-brand-100 to-brand-200 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                <svg className="w-10 h-10 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
+                {/* Upload icon with animation */}
+                <div className="mx-auto w-16 h-16 bg-gradient-to-br from-brand-100 to-brand-200 rounded-xl flex items-center justify-center mb-4">
+                  <svg className="w-8 h-8 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                </div>
+                
+                <h3 className="text-base font-semibold text-gray-900 mb-2">
+                  Drop your blueprint here
+                </h3>
+                <p className="text-sm text-gray-500">
+                  or click to browse from your computer
+                </p>
+              
+                <div className="flex items-center justify-center gap-4 text-xs text-gray-400 mt-4">
+                  <span className="flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    PDF format
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                    Max 100MB
+                  </span>
+                </div>
               </div>
               
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                Drop your blueprint here
-              </h3>
-              <p className="text-sm text-gray-600 mb-4">
-                or click to browse from your computer
-              </p>
-              
-              <div className="flex items-center justify-center gap-4 text-xs text-gray-500">
-                <span className="flex items-center gap-1">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  PDF format
-                </span>
-                <span className="flex items-center gap-1">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                  </svg>
-                  Max 100MB
-                </span>
-              </div>
-              
-              {/* Animated border gradient */}
-              <div className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
-                <div className="absolute inset-0 bg-gradient-to-r from-brand-500 via-accent-orange to-brand-500 opacity-0 group-hover:opacity-10 transition-opacity duration-500"></div>
+              {/* Animated Progress Indicators */}
+              <div className="mt-6 space-y-3">
+                <div className="flex items-center justify-between p-3 bg-success-50 rounded-lg border border-success-100 animate-fade-in" style={{animationDelay: '0.5s'}}>
+                  <div className="flex items-center">
+                    <div className="w-2 h-2 bg-success-500 rounded-full mr-3 animate-pulse"></div>
+                    <span className="text-sm font-medium text-success-800">Manual J Complete</span>
+                  </div>
+                  <span className="text-success-600 text-xs font-medium">2.1s</span>
+                </div>
+                
+                <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg border border-blue-100 animate-fade-in" style={{animationDelay: '0.7s'}}>
+                  <div className="flex items-center">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full mr-3 animate-pulse" style={{animationDelay: '0.2s'}}></div>
+                    <span className="text-sm font-medium text-blue-800">Duct Layout Generated</span>
+                  </div>
+                  <span className="text-blue-600 text-xs font-medium">Ready</span>
+                </div>
+                
+                <div className="flex items-center justify-between p-3 bg-brand-50 rounded-lg border border-brand-100 animate-fade-in" style={{animationDelay: '0.9s'}}>
+                  <div className="flex items-center">
+                    <div className="w-2 h-2 bg-brand-500 rounded-full mr-3 animate-pulse" style={{animationDelay: '0.4s'}}></div>
+                    <span className="text-sm font-medium text-brand-800">Equipment Sized</span>
+                  </div>
+                  <span className="text-brand-600 text-xs font-medium">Optimized</span>
+                </div>
               </div>
             </div>
             
-            {/* Sample blueprints */}
-            <div className="mt-6 flex items-center justify-center gap-4">
-              <span className="text-sm text-gray-500">No blueprint? Try our</span>
-              <button className="text-sm font-medium text-brand-600 hover:text-brand-700 underline underline-offset-4">
-                sample files
-              </button>
+            {/* Floating Animated Elements */}
+            <div className="absolute -top-4 -right-4 bg-white rounded-xl shadow-lg p-3 animate-float" style={{animationDelay: '0.2s'}}>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg flex items-center justify-center">
+                  <span className="text-white text-xs font-bold">5T</span>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-gray-900">5-Ton Unit</div>
+                  <div className="text-xs text-gray-500">Auto-Selected</div>
+                </div>
+              </div>
             </div>
+            
+            <div className="absolute -bottom-4 -left-4 bg-white rounded-xl shadow-lg p-3 animate-float" style={{animationDelay: '0.8s'}}>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-gradient-to-br from-success-500 to-success-600 rounded-lg flex items-center justify-center">
+                  <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-gray-900">Code Compliant</div>
+                  <div className="text-xs text-gray-500">California Title 24</div>
+                </div>
+              </div>
+            </div>
+            
           </div>
         </div>
       </div>
       
       <style jsx>{`
+        @keyframes float {
+          0%, 100% {
+            transform: translateY(0px);
+          }
+          50% {
+            transform: translateY(-10px);
+          }
+        }
+        .animate-float {
+          animation: float 3s ease-in-out infinite;
+        }
         @keyframes blob {
           0% {
             transform: translate(0px, 0px) scale(1);
