@@ -465,32 +465,36 @@ function Step7EmailCollection({ projectData, updateProjectData, onPrev, onSubmit
       
       switch (emailCheck.status) {
         case 'new':
-          // New lead - capture and continue
+          // New user - capture as lead and let them get their free report
           await apiClient.captureLead({
             email: projectData.email,
             marketing_consent: true,
             project_id: undefined // Will be set after upload
           })
           Cookies.set('user_email', projectData.email, { expires: 365 })
-          onSubmit()
+          onSubmit() // Continue to upload and analysis
           break
           
         case 'lead':
-          // Returning lead - needs to create account
+          // Returning lead who used free report - needs to create account
           setShowAccountModal(true)
           break
           
         case 'user':
-          // Existing user - check subscription
-          if (emailCheck.has_subscription) {
-            // Has subscription, continue
+          // Existing user - check if they have a password
+          if (!emailCheck.has_password) {
+            // User without password (likely created via old system) - needs to set password
+            setShowAccountModal(true)
+          } else if (emailCheck.has_subscription) {
+            // Has password and subscription - continue
             Cookies.set('user_email', projectData.email, { expires: 365 })
             onSubmit()
           } else if (!emailCheck.free_report_used) {
-            // User but hasn't used free report
+            // Has password but hasn't used free report yet
+            Cookies.set('user_email', projectData.email, { expires: 365 })
             onSubmit()
           } else {
-            // Needs to upgrade
+            // Has password, used free report, needs subscription
             Cookies.set('user_email', projectData.email, { expires: 30 })
             router.push('/upgrade')
           }

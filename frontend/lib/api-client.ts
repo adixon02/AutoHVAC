@@ -59,6 +59,7 @@ export interface CheckEmailResponse {
   status: 'new' | 'lead' | 'user'
   free_report_used: boolean
   has_account: boolean
+  has_password: boolean
   has_subscription: boolean
 }
 

@@ -35,6 +35,7 @@ class CheckEmailResponse(BaseModel):
     status: Literal["new", "lead", "user"]
     free_report_used: bool
     has_account: bool
+    has_password: bool = False
     has_subscription: bool = False
 
 
@@ -72,11 +73,14 @@ async def check_email_status(
         if user:
             # Check for active subscription (simplified - actual subscription check would use Stripe API)
             has_subscription = user.active_subscription if hasattr(user, 'active_subscription') else False
+            # Check if user has password
+            has_password = bool(user.password) if hasattr(user, 'password') else False
             
             return CheckEmailResponse(
                 status="user",
                 free_report_used=user.free_report_used,
                 has_account=True,
+                has_password=has_password,
                 has_subscription=has_subscription
             )
         
@@ -90,6 +94,7 @@ async def check_email_status(
                 status="lead",
                 free_report_used=True,
                 has_account=False,
+                has_password=False,
                 has_subscription=False
             )
         
@@ -98,6 +103,7 @@ async def check_email_status(
             status="new",
             free_report_used=False,
             has_account=False,
+            has_password=False,
             has_subscription=False
         )
         
