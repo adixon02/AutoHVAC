@@ -137,31 +137,7 @@ export const authOptions: NextAuthOptions = {
     error: '/auth/error',
   },
   
-  events: {
-    async signIn({ user }) {
-      // Log sign in event
-      await prisma.auditLog.create({
-        data: {
-          userId: user.id,
-          event: 'login',
-          metadata: { method: 'credentials' },
-        }
-      })
-    },
-    
-    async signOut({ token }) {
-      if (token?.id) {
-        // Log sign out event
-        await prisma.auditLog.create({
-          data: {
-            userId: token.id as string,
-            event: 'logout',
-            metadata: {},
-          }
-        })
-      }
-    }
-  },
+  // Events are handled by backend for audit logging
   
   debug: process.env.NODE_ENV === 'development',
 }
