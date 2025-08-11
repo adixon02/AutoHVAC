@@ -9,6 +9,8 @@ import stripe
 from services.user_service import user_service
 from database import get_async_session
 from models.schemas import SubscribeRequest, SubscribeResponse
+from routes.auth import get_current_user
+from models.db_models import User
 import json
 
 logger = logging.getLogger(__name__)
@@ -107,6 +109,171 @@ async def create_subscription(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create checkout session: {str(e)}"
+        )
+
+@router.post("/checkout")
+async def create_checkout_session(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """
+    Create a Stripe checkout session for the authenticated user
+    """
+    try:
+        logger.info(f"Creating checkout session for user: {current_user.email}")
+        
+        # Validate Stripe configuration
+        config_issues = validate_stripe_config()
+        if config_issues:
+            logger.error(f"Stripe configuration issues found: {config_issues}")
+            raise HTTPException(
+                status_code=503,
+                detail=f"Payment system configuration error: {', '.join(config_issues)}. Please contact support."
+            )
+        
+        # Check if email is verified
+        if not current_user.email_verified:
+            raise HTTPException(
+                status_code=403,
+                detail="Please verify your email before subscribing"
+            )
+        
+        # Get environment URLs or use defaults
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        success_url = f"{frontend_url}/dashboard?subscription=success&session_id={{CHECKOUT_SESSION_ID}}"
+        cancel_url = f"{frontend_url}/pricing"
+        
+        logger.info(f"Creating Stripe checkout session with URLs - Success: {success_url}, Cancel: {cancel_url}")
+        
+        # Create or get Stripe customer ID
+        if current_user.stripe_customer_id:
+            customer_id = current_user.stripe_customer_id
+        else:
+            # Create new Stripe customer
+            customer = stripe.Customer.create(
+                email=current_user.email,
+                metadata={
+                    'user_id': str(current_user.id),
+                    'user_email': current_user.email
+                }
+            )
+            customer_id = customer.id
+            
+            # Update user with customer ID
+            current_user.stripe_customer_id = customer_id
+            await session.commit()
+        
+        # Create Stripe checkout session
+        checkout_session = stripe.checkout.Session.create(
+            customer=customer_id,
+            payment_method_types=['card'],
+            line_items=[{
+                'price': STRIPE_PRICE_ID,
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={
+                'user_id': str(current_user.id),
+                'user_email': current_user.email
+            },
+            allow_promotion_codes=True,
+            billing_address_collection='auto',
+            customer_update={
+                'address': 'auto'
+            }
+        )
+        
+        logger.info(f"Successfully created Stripe checkout session for {current_user.email}: {checkout_session.id}")
+        
+        return {
+            "success": True,
+            "checkout_url": checkout_session.url
+        }
+        
+    except HTTPException:
+        raise
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe error creating checkout session: {str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Payment system error: {str(e)}. Please try again later."
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error creating checkout session: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create checkout session: {str(e)}"
+        )
+
+@router.post("/billing-portal")
+async def create_billing_portal_session(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Create a Stripe billing portal session for the authenticated user
+    """
+    try:
+        logger.info(f"Creating billing portal session for user: {current_user.email}")
+        
+        if not current_user.stripe_customer_id:
+            raise HTTPException(
+                status_code=404,
+                detail="No billing account found. Please subscribe first."
+            )
+        
+        # Get return URL
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        return_url = f"{frontend_url}/account"
+        
+        # Create billing portal session
+        portal_session = stripe.billing_portal.Session.create(
+            customer=current_user.stripe_customer_id,
+            return_url=return_url,
+        )
+        
+        logger.info(f"Successfully created billing portal session for {current_user.email}")
+        
+        return {
+            "success": True,
+            "portal_url": portal_session.url
+        }
+        
+    except HTTPException:
+        raise
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe error creating billing portal session: {str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Payment system error: {str(e)}. Please try again later."
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error creating billing portal session: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create billing portal session: {str(e)}"
+        )
+
+@router.get("/subscription-status")
+async def get_subscription_status(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get the subscription status for the authenticated user
+    """
+    try:
+        return {
+            "has_active_subscription": current_user.active_subscription,
+            "free_report_used": current_user.free_report_used,
+            "stripe_customer_id": current_user.stripe_customer_id,
+            "email_verified": current_user.email_verified
+        }
+    except Exception as e:
+        logger.error(f"Error getting subscription status: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get subscription status: {str(e)}"
         )
 
 @router.post("/webhook")

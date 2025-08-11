@@ -69,7 +69,7 @@ const technicalStatusMessages = [
 
 function ProcessingStage({ title, description, status, stats }: ProcessingStage) {
   return (
-    <div className={`p-4 rounded-lg border-l-4 transition-all duration-500 ${
+    <div className={`p-4 rounded-xl border-l-4 transition-all duration-500 ${
       status === 'completed' ? 'bg-green-50 border-green-400' :
       status === 'active' ? 'bg-blue-50 border-blue-400' :
       'bg-gray-50 border-gray-300'
@@ -122,7 +122,7 @@ function ProcessingStage({ title, description, status, stats }: ProcessingStage)
 
 function EducationalFact({ fact, icon }: { fact: string; icon: string }) {
   return (
-    <div className="p-4 bg-gradient-to-r from-brand-50 to-blue-50 rounded-lg border border-brand-100">
+    <div className="p-4 bg-gradient-to-r from-brand-50 to-brand-25 rounded-xl border border-brand-200">
       <div className="flex items-start space-x-3">
         <div className="text-2xl">{icon}</div>
         <div>
@@ -408,8 +408,8 @@ export default function AnalyzingPage() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center max-w-2xl">
-          <h1 className="text-2xl font-bold text-red-600 mb-4">Analysis Error</h1>
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <h1 className="display-xs text-red-600 mb-4">Analysis Error</h1>
+          <div className="alert alert-error mb-6">
             <p className="text-sm font-mono text-red-800 mb-2">
               {isBackendError ? 'Backend 500 –' : 'Error –'} {errorMessage}
             </p>
@@ -457,9 +457,9 @@ export default function AnalyzingPage() {
         <meta name="description" content="Your HVAC blueprint is being analyzed" />
       </Head>
       
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-25">
         {/* Header */}
-        <nav className="bg-white shadow-sm border-b border-gray-100">
+        <nav className="bg-white/80 backdrop-blur-xl shadow-sm border-b border-gray-100">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center h-16">
               <div className="flex items-center">
@@ -475,9 +475,9 @@ export default function AnalyzingPage() {
         </nav>
         
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+          <div className="card glass overflow-hidden">
             {/* Status Header */}
-            <div className="text-center p-8 bg-gradient-to-r from-brand-50 to-blue-50">
+            <div className="text-center p-8 bg-gradient-to-r from-brand-50 to-brand-25">
               <div className="mb-6">
                 <div className="w-20 h-20 mx-auto mb-4 relative">
                   {jobStatus.status === 'completed' ? (
@@ -502,7 +502,7 @@ export default function AnalyzingPage() {
                 </div>
               </div>
               
-              <h1 className="text-3xl font-bold text-brand-700 mb-4">
+              <h1 className="display-md text-brand-700 mb-4">
                 {jobStatus.status === 'completed' ? 'Analysis Complete!' :
                  jobStatus.status === 'failed' ? 'Analysis Failed' :
                  'Analyzing Your Blueprint'}
@@ -532,7 +532,7 @@ export default function AnalyzingPage() {
               {jobStatus.status === 'failed' ? (
                 <div className="space-y-6">
                   {/* Friendly Error Message */}
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
+                  <div className="alert alert-warning">
                     <div className="flex items-start space-x-4">
                       <div className="flex-shrink-0">
                         <svg className="w-6 h-6 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -540,7 +540,7 @@ export default function AnalyzingPage() {
                         </svg>
                       </div>
                       <div className="flex-1">
-                        <h3 className="text-lg font-semibold text-amber-900 mb-2">
+                        <h3 className="display-xs text-amber-900 mb-2">
                           We couldn't complete the analysis
                         </h3>
                         <p className="text-amber-800 mb-4">
@@ -548,7 +548,7 @@ export default function AnalyzingPage() {
                         </p>
                         
                         {/* Helpful suggestions based on error type */}
-                        <div className="bg-white bg-opacity-50 rounded-lg p-4 space-y-2">
+                        <div className="bg-white bg-opacity-50 rounded-xl p-4 space-y-2">
                           <p className="text-sm font-medium text-amber-900">Here's what you can try:</p>
                           <ul className="text-sm text-amber-700 space-y-1 ml-4">
                             {getErrorSuggestions(jobStatus.error).map((suggestion, idx) => (
@@ -565,11 +565,11 @@ export default function AnalyzingPage() {
 
                   {/* Technical Details (Collapsible) */}
                   {jobStatus.error && (
-                    <details className="bg-gray-50 rounded-lg p-4">
+                    <details className="bg-gray-50 rounded-xl p-4">
                       <summary className="cursor-pointer text-sm text-gray-600 font-medium hover:text-gray-800">
                         Technical details for support
                       </summary>
-                      <div className="mt-3 p-3 bg-white rounded border border-gray-200">
+                      <div className="mt-3 p-3 bg-white rounded-xl border border-gray-200">
                         <code className="text-xs text-gray-600 break-all">
                           Error: {jobStatus.error}
                           <br />
@@ -607,7 +607,7 @@ export default function AnalyzingPage() {
                   </div>
 
                   {/* Educational Note */}
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="alert alert-info">
                     <div className="flex items-start space-x-3">
                       <svg className="w-5 h-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -681,7 +681,7 @@ export default function AnalyzingPage() {
                   <div className="space-y-2">
                     <div className="bg-gray-200 rounded-full h-3 overflow-hidden">
                       <div 
-                        className="bg-gradient-to-r from-brand-500 to-blue-500 h-3 rounded-full transition-all duration-300 ease-out"
+                        className="bg-gradient-to-r from-brand-600 to-brand-700 h-3 rounded-full transition-all duration-300 ease-out"
                         style={{ width: `${displayProgress}%` }}
                       />
                     </div>

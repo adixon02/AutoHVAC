@@ -4,9 +4,9 @@ export default function PaymentCancel() {
   const router = useRouter()
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-25 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md mx-auto">
-        <div className="bg-white shadow rounded-lg p-6 text-center">
+        <div className="card glass p-6 text-center">
           <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
             <svg
               className="h-6 w-6 text-red-600"
@@ -22,7 +22,7 @@ export default function PaymentCancel() {
               />
             </svg>
           </div>
-          <h2 className="text-lg font-medium text-gray-900 mb-2">
+          <h2 className="display-xs text-gray-900 mb-2">
             Payment Cancelled
           </h2>
           <p className="text-sm text-gray-600 mb-4">

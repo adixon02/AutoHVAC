@@ -29,6 +29,9 @@ export default function Home() {
     <div className="min-h-screen">
       {/* Navigation */}
       <NavBar onGetStarted={handleGetStarted} />
+      
+      {/* Spacer for fixed navbar */}
+      <div className="h-16"></div>
 
       {/* Welcome Back Banner */}
       {savedEmail && (

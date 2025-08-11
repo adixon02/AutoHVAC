@@ -1,8 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { getServerSession } from 'next-auth/next'
 import { authOptions } from '../auth/[...nextauth]'
-import { createBillingPortalSession } from '@/lib/stripe'
-import { createAuditLog } from '@/lib/security/audit'
 
 export default async function handler(
   req: NextApiRequest,
@@ -20,48 +18,36 @@ export default async function handler(
       return res.status(401).json({ error: 'Unauthorized' })
     }
     
-    const { returnUrl } = req.body
+    // Get backend JWT token
+    const accessToken = (session as any).accessToken
+    if (!accessToken) {
+      return res.status(401).json({ error: 'No backend authentication token' })
+    }
     
-    // Use default return URL if not provided
-    const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
-    const finalReturnUrl = returnUrl || `${baseUrl}/dashboard`
-    
-    // Create billing portal session
-    const portalUrl = await createBillingPortalSession({
-      userId: session.user.id,
-      returnUrl: finalReturnUrl
+    // Call backend billing portal endpoint
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const response = await fetch(`${backendUrl}/api/v1/billing/billing-portal`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+      }
     })
     
-    // Log the action
-    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || 
-               req.headers['x-real-ip'] as string || 
-               'unknown'
-    const userAgent = req.headers['user-agent'] || ''
+    if (!response.ok) {
+      const error = await response.json()
+      return res.status(response.status).json(error)
+    }
     
-    await createAuditLog({
-      userId: session.user.id,
-      event: 'billing_portal_requested',
-      metadata: {},
-      ip,
-      userAgent
-    })
-    
-    return res.status(200).json({ 
-      success: true,
-      portalUrl 
+    const data = await response.json()
+    // Map backend response to frontend expected format
+    return res.status(200).json({
+      success: data.success,
+      portalUrl: data.portal_url  // Frontend expects portalUrl
     })
     
   } catch (error) {
     console.error('Billing portal error:', error)
-    
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    
-    // Special handling for no customer error
-    if (errorMessage.includes('No Stripe customer')) {
-      return res.status(400).json({ 
-        error: 'No billing information found. Please subscribe first.' 
-      })
-    }
     
     return res.status(500).json({ 
       error: 'Failed to access billing portal' 

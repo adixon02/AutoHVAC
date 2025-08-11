@@ -8,10 +8,14 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'sans-serif'],
+        display: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'sans-serif'],
+        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', 'monospace'],
       },
       colors: {
+        // Your brand colors remain
         brand: {
+          25: '#FAFBFC',
           50: '#F8FAFC',
           100: '#E8ECF2',
           200: '#D1DAE6',
@@ -22,6 +26,7 @@ module.exports = {
           700: '#052047',
           800: '#031633',
           900: '#020D1F',
+          950: '#010814',
         },
         accent: {
           DEFAULT: '#FF9C5F',
@@ -29,13 +34,94 @@ module.exports = {
           light: '#FFB584',
           dark: '#E67A3A',
         },
+        // Sophisticated gray scale from Untitled UI
+        gray: {
+          25: '#FCFCFD',
+          50: '#F9FAFB',
+          100: '#F2F4F7',
+          200: '#EAECF0',
+          300: '#D0D5DD',
+          400: '#98A2B3',
+          500: '#667085',
+          600: '#475467',
+          700: '#344054',
+          800: '#1D2939',
+          900: '#101828',
+          950: '#0C111D',
+        },
+        // Success colors
+        success: {
+          25: '#F6FEF9',
+          50: '#ECFDF3',
+          100: '#D1FADF',
+          200: '#A6F4C5',
+          300: '#6CE9A6',
+          400: '#32D583',
+          500: '#12B76A',
+          600: '#039855',
+          700: '#027A48',
+          800: '#05603A',
+          900: '#054F31',
+        },
+        // Error colors
+        error: {
+          25: '#FFFBFA',
+          50: '#FEF3F2',
+          100: '#FEE4E2',
+          200: '#FECDCA',
+          300: '#FDA29B',
+          400: '#F97066',
+          500: '#F04438',
+          600: '#D92D20',
+          700: '#B42318',
+          800: '#912018',
+          900: '#7A271A',
+        },
+        // Warning colors
+        warning: {
+          25: '#FFFCF5',
+          50: '#FFFAEB',
+          100: '#FEF0C7',
+          200: '#FEDF89',
+          300: '#FEC84B',
+          400: '#FDB022',
+          500: '#F79009',
+          600: '#DC6803',
+          700: '#B54708',
+          800: '#93370D',
+          900: '#7A2E0E',
+        },
+      },
+      fontSize: {
+        'display-2xl': ['4.5rem', { lineHeight: '5.625rem', letterSpacing: '-0.02em' }],
+        'display-xl': ['3.75rem', { lineHeight: '4.5rem', letterSpacing: '-0.02em' }],
+        'display-lg': ['3rem', { lineHeight: '3.75rem', letterSpacing: '-0.02em' }],
+        'display-md': ['2.25rem', { lineHeight: '2.75rem', letterSpacing: '-0.02em' }],
+        'display-sm': ['1.875rem', { lineHeight: '2.375rem', letterSpacing: '-0.01em' }],
+        'display-xs': ['1.5rem', { lineHeight: '2rem', letterSpacing: '-0.01em' }],
       },
       animation: {
-        'fade-in': 'fadeIn 0.5s ease-in-out',
-        'slide-up': 'slideUp 0.6s ease-out',
+        'fade-in': 'fadeIn 0.3s ease-out',
+        'slide-up': 'slideUp 0.4s ease-out',
+        'slide-down': 'slideDown 0.4s ease-out',
+        'scale-in': 'scaleIn 0.2s ease-out',
+        'spin-slow': 'spin 3s linear infinite',
+        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
       },
-      scale: {
-        '102': '1.02',
+      backdropBlur: {
+        xs: '2px',
+      },
+      boxShadow: {
+        'xs': '0px 1px 2px 0px rgba(16, 24, 40, 0.05)',
+        'sm': '0px 1px 2px 0px rgba(16, 24, 40, 0.06), 0px 1px 3px 0px rgba(16, 24, 40, 0.10)',
+        'md': '0px 2px 4px -2px rgba(16, 24, 40, 0.06), 0px 4px 8px -2px rgba(16, 24, 40, 0.10)',
+        'lg': '0px 4px 6px -2px rgba(16, 24, 40, 0.03), 0px 12px 16px -4px rgba(16, 24, 40, 0.08)',
+        'xl': '0px 8px 8px -4px rgba(16, 24, 40, 0.03), 0px 20px 24px -4px rgba(16, 24, 40, 0.08)',
+        '2xl': '0px 24px 48px -12px rgba(16, 24, 40, 0.18)',
+        '3xl': '0px 32px 64px -12px rgba(16, 24, 40, 0.14)',
+        'ring-brand': '0px 0px 0px 4px rgba(5, 32, 71, 0.12)',
+        'ring-gray': '0px 0px 0px 4px rgba(152, 162, 179, 0.14)',
+        'ring-error': '0px 0px 0px 4px rgba(254, 228, 226, 1)',
       },
       keyframes: {
         fadeIn: {
@@ -43,9 +129,20 @@ module.exports = {
           '100%': { opacity: '1' },
         },
         slideUp: {
-          '0%': { opacity: '0', transform: 'translateY(20px)' },
+          '0%': { opacity: '0', transform: 'translateY(10px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
+        slideDown: {
+          '0%': { opacity: '0', transform: 'translateY(-10px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        scaleIn: {
+          '0%': { opacity: '0', transform: 'scale(0.95)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+      },
+      transitionTimingFunction: {
+        'bounce-in': 'cubic-bezier(0.68, -0.55, 0.265, 1.55)',
       },
     },
   },

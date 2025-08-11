@@ -32,9 +32,9 @@ export default function PaymentSuccess() {
         <title>Welcome to AutoHVAC Pro! - AutoHVAC</title>
       </Head>
       
-      <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-blue-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-25 flex items-center justify-center p-4">
         <div className="max-w-md w-full">
-          <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
+          <div className="card glass p-8 text-center">
             {/* Success Icon */}
             <div className="w-20 h-20 bg-gradient-to-r from-green-400 to-green-600 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
               <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -43,7 +43,7 @@ export default function PaymentSuccess() {
             </div>
             
             {/* Success Message */}
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            <h1 className="display-md text-gray-900 mb-2">
               Welcome to AutoHVAC Pro!
             </h1>
             <p className="text-gray-600 mb-8">
@@ -51,7 +51,7 @@ export default function PaymentSuccess() {
             </p>
             
             {/* What's Included */}
-            <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg p-6 mb-6">
+            <div className="bg-gradient-to-r from-brand-50 to-brand-25 rounded-xl p-6 mb-6">
               <h2 className="font-semibold text-gray-900 mb-3">What you can do now:</h2>
               <ul className="space-y-2 text-left">
                 {[
@@ -76,8 +76,8 @@ export default function PaymentSuccess() {
               <p className="text-sm text-gray-600 mb-2">
                 Redirecting to your dashboard in
               </p>
-              <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-100 rounded-full">
-                <span className="text-2xl font-bold text-indigo-600">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-100 rounded-full">
+                <span className="text-2xl font-bold text-brand-600">
                   {countdown}
                 </span>
               </div>
@@ -86,7 +86,7 @@ export default function PaymentSuccess() {
             {/* CTA Button */}
             <button
               onClick={() => router.push('/dashboard')}
-              className="w-full py-3 px-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg font-medium hover:from-indigo-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all"
+              className="w-full btn-primary btn-lg"
             >
               Go to Dashboard Now
             </button>
@@ -97,14 +97,14 @@ export default function PaymentSuccess() {
               <div className="flex justify-center space-x-4">
                 <button
                   onClick={() => router.push('/dashboard?upload=true')}
-                  className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                  className="text-sm text-brand-600 hover:text-brand-700 font-medium"
                 >
                   Upload Blueprint
                 </button>
                 <span className="text-gray-300">|</span>
                 <button
                   onClick={() => router.push('/billing')}
-                  className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                  className="text-sm text-brand-600 hover:text-brand-700 font-medium"
                 >
                   View Billing
                 </button>

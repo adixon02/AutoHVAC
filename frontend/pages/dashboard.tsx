@@ -157,28 +157,36 @@ export default function Dashboard() {
         <meta name="description" content="Your HVAC project dashboard" />
       </Head>
 
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-25">
         {/* Header */}
-        <nav className="bg-white shadow-sm border-b border-gray-100">
+        <nav className="bg-white/70 backdrop-blur-xl shadow-sm border-b border-gray-100">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center h-16">
               <div className="flex items-center">
-                <div className="text-2xl font-bold text-brand-700">
-                  AutoHVAC
+                <div className="flex items-center space-x-2 group cursor-pointer" onClick={() => router.push('/')}>
+                  <div className="w-8 h-8 bg-gradient-to-br from-brand-600 to-brand-700 rounded-lg flex items-center justify-center shadow-sm group-hover:shadow-md transition-all duration-200">
+                    <span className="text-white font-bold text-sm">AH</span>
+                  </div>
+                  <span className="text-xl font-semibold text-gray-900 group-hover:text-brand-700 transition-colors">
+                    AutoHVAC
+                  </span>
                 </div>
               </div>
               <div className="flex items-center space-x-4">
                 {/* Subscription Badge */}
                 {uploadEligibility?.has_subscription && (
-                  <span className="px-2 py-1 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-xs font-semibold rounded-full">
+                  <span className="px-3 py-1 bg-gradient-to-r from-brand-600 to-brand-700 text-white text-xs font-semibold rounded-full shadow-sm">
                     PRO
                   </span>
                 )}
                 
                 <button 
                   onClick={handleNewAnalysis}
-                  className="btn-primary"
+                  className="btn-primary group"
                 >
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+                  </svg>
                   New Analysis
                 </button>
                 
@@ -186,20 +194,18 @@ export default function Dashboard() {
                 <div className="relative user-menu-container">
                   <button
                     onClick={() => setShowUserMenu(!showUserMenu)}
-                    className="flex items-center space-x-2 text-gray-700 hover:text-gray-900 focus:outline-none"
+                    className="flex items-center space-x-2 px-3 py-2 rounded-lg hover:bg-gray-50 transition-all"
                   >
-                    <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center">
-                      <span className="text-indigo-600 font-semibold text-sm">
-                        {userEmail?.charAt(0).toUpperCase()}
-                      </span>
+                    <div className="w-8 h-8 bg-gradient-to-br from-brand-500 to-brand-600 rounded-full flex items-center justify-center text-white text-xs font-medium shadow-sm">
+                      {userEmail?.charAt(0).toUpperCase()}
                     </div>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                   </button>
                   
                   {showUserMenu && (
-                    <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg py-1 z-50">
+                    <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-50 animate-scale-in">
                       <div className="px-4 py-2 border-b">
                         <p className="text-sm font-medium text-gray-900">{session?.user?.name || 'User'}</p>
                         <p className="text-xs text-gray-500">{userEmail}</p>
@@ -253,10 +259,10 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Header Section */}
           <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            <h1 className="display-sm text-gray-900 mb-2">
               Your HVAC Projects
             </h1>
-            <p className="text-gray-600">
+            <p className="text-lg text-gray-600">
               Manage and track your blueprint analyses
             </p>
           </div>
@@ -265,138 +271,168 @@ export default function Dashboard() {
 
           {/* Usage Indicator */}
           {uploadEligibility && (
-            <div className={`mb-8 p-4 rounded-xl border ${
+            <div className={`mb-8 rounded-xl glass border ${
               uploadEligibility.can_upload 
-                ? 'bg-green-50 border-green-200' 
-                : 'bg-yellow-50 border-yellow-200'
+                ? 'border-success-200 bg-success-50/50' 
+                : 'border-warning-200 bg-warning-50/50'
             }`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  {uploadEligibility.can_upload ? (
-                    <>
-                      <h3 className="font-medium text-green-900">
-                        {uploadEligibility.has_subscription ? 'Pro Subscription Active' : 'Free Upload Available'}
-                      </h3>
-                      <p className="text-sm text-green-700 mt-1">
-                        {uploadEligibility.has_subscription 
-                          ? 'You have unlimited blueprint analyses'
-                          : 'You have 1 free blueprint analysis available'}
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <h3 className="font-medium text-yellow-900">Free Upload Used</h3>
-                      <p className="text-sm text-yellow-700 mt-1">
-                        Upgrade to Pro for unlimited blueprint analyses
-                      </p>
-                    </>
+              <div className="p-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                      uploadEligibility.can_upload ? 'bg-success-100' : 'bg-warning-100'
+                    }`}>
+                      <svg className={`w-5 h-5 ${
+                        uploadEligibility.can_upload ? 'text-success-600' : 'text-warning-600'
+                      }`} fill="currentColor" viewBox="0 0 24 24">
+                        {uploadEligibility.can_upload ? (
+                          <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        ) : (
+                          <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        )}
+                      </svg>
+                    </div>
+                    <div>
+                      {uploadEligibility.can_upload ? (
+                        <>
+                          <h3 className="font-semibold text-gray-900">
+                            {uploadEligibility.has_subscription ? 'Pro Subscription Active' : 'Free Upload Available'}
+                          </h3>
+                          <p className="text-sm text-gray-600 mt-0.5">
+                            {uploadEligibility.has_subscription 
+                              ? 'You have unlimited blueprint analyses'
+                              : 'You have 1 free blueprint analysis available'}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <h3 className="font-semibold text-gray-900">Free Upload Used</h3>
+                          <p className="text-sm text-gray-600 mt-0.5">
+                            Upgrade to Pro for unlimited blueprint analyses
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {!uploadEligibility.has_subscription && !uploadEligibility.can_upload && (
+                    <button
+                      onClick={() => router.push('/upgrade')}
+                      className="btn-primary btn-sm"
+                    >
+                      Upgrade to Pro
+                    </button>
                   )}
                 </div>
-                {!uploadEligibility.has_subscription && !uploadEligibility.can_upload && (
-                  <button
-                    onClick={() => router.push('/upgrade')}
-                    className="btn-primary text-sm"
-                  >
-                    Upgrade to Pro
-                  </button>
-                )}
               </div>
             </div>
           )}
 
           {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-brand-100 rounded-lg">
-                  <svg className="w-6 h-6 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                  </svg>
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total Projects</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-green-100 rounded-lg">
-                  <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Completed</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.completed}</p>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+            <div className="card hover:shadow-md transition-all duration-200">
+              <div className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-500">Total Projects</p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">{stats.total}</p>
+                  </div>
+                  <div className="w-12 h-12 bg-gradient-to-br from-brand-50 to-brand-100 rounded-xl flex items-center justify-center">
+                    <svg className="w-6 h-6 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                    </svg>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Processing</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.processing}</p>
+            <div className="card hover:shadow-md transition-all duration-200">
+              <div className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-500">Completed</p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">{stats.completed}</p>
+                  </div>
+                  <div className="w-12 h-12 bg-gradient-to-br from-success-50 to-success-100 rounded-xl flex items-center justify-center">
+                    <svg className="w-6 h-6 text-success-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-red-100 rounded-lg">
-                  <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
+            <div className="card hover:shadow-md transition-all duration-200">
+              <div className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-500">Processing</p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">{stats.processing}</p>
+                  </div>
+                  <div className="w-12 h-12 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl flex items-center justify-center">
+                    <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Failed</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.failed}</p>
+              </div>
+            </div>
+
+            <div className="card hover:shadow-md transition-all duration-200">
+              <div className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-500">Failed</p>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">{stats.failed}</p>
+                  </div>
+                  <div className="w-12 h-12 bg-gradient-to-br from-error-50 to-error-100 rounded-xl flex items-center justify-center">
+                    <svg className="w-6 h-6 text-error-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
           {/* Filters */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+          <div className="mb-6">
             <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <h2 className="text-lg font-semibold text-gray-900">Projects</h2>
-                <div className="flex items-center space-x-2">
-                  {[
-                    { key: 'all', label: 'All' },
-                    { key: 'completed', label: 'Completed' },
-                    { key: 'processing', label: 'Processing' },
-                    { key: 'pending', label: 'Pending' },
-                    { key: 'failed', label: 'Failed' }
-                  ].map(({ key, label }) => (
-                    <button
-                      key={key}
-                      onClick={() => setFilter(key)}
-                      className={`btn-filter ${
+              <div className="flex items-center gap-1 p-1 bg-white rounded-lg shadow-sm border border-gray-200">
+                {[
+                  { key: 'all', label: 'All', count: stats.total },
+                  { key: 'completed', label: 'Completed', count: stats.completed },
+                  { key: 'processing', label: 'Processing', count: stats.processing },
+                  { key: 'failed', label: 'Failed', count: stats.failed }
+                ].map(({ key, label, count }) => (
+                  <button
+                    key={key}
+                    onClick={() => setFilter(key)}
+                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
+                      filter === key
+                        ? 'bg-gray-900 text-white shadow-sm'
+                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                    }`}
+                  >
+                    {label}
+                    {count > 0 && (
+                      <span className={`ml-2 px-1.5 py-0.5 text-xs rounded-full ${
                         filter === key
-                          ? 'btn-filter-active'
-                          : 'btn-filter-inactive'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+                          ? 'bg-white/20 text-white'
+                          : 'bg-gray-100 text-gray-600'
+                      }`}>
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                ))}
               </div>
               <button 
                 onClick={() => mutate()}
-                className="btn-icon"
+                className="btn-icon hover:bg-gray-100 transition-all"
                 title="Refresh"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               </button>
             </div>
@@ -404,43 +440,53 @@ export default function Dashboard() {
 
           {/* Projects Grid */}
           {!data ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {[...Array(6)].map((_, i) => (
-                <div key={i} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 animate-pulse">
-                  <div className="h-4 bg-gray-200 rounded w-3/4 mb-3"></div>
-                  <div className="h-3 bg-gray-200 rounded w-1/2 mb-4"></div>
+                <div key={i} className="card p-6 animate-pulse">
+                  <div className="h-5 bg-gray-200 rounded-md w-3/4 mb-3"></div>
+                  <div className="h-4 bg-gray-100 rounded w-1/2 mb-4"></div>
                   <div className="space-y-2">
-                    <div className="h-3 bg-gray-200 rounded"></div>
-                    <div className="h-3 bg-gray-200 rounded w-5/6"></div>
+                    <div className="h-3 bg-gray-100 rounded"></div>
+                    <div className="h-3 bg-gray-100 rounded w-5/6"></div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-gray-100">
+                    <div className="h-10 bg-gray-100 rounded-lg"></div>
                   </div>
                 </div>
               ))}
             </div>
           ) : filteredProjects.length === 0 ? (
-            <div className="text-center py-12">
-              <svg className="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-              </svg>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">
-                {filter === 'all' ? 'No projects yet' : `No ${filter} projects`}
-              </h3>
-              <p className="text-gray-600 mb-6">
-                {filter === 'all' 
-                  ? 'Get started by uploading your first blueprint for HVAC analysis.'
-                  : `You don't have any ${filter} projects at the moment.`
-                }
-              </p>
-              {filter === 'all' && (
-                <button 
-                  onClick={handleNewAnalysis}
-                  className="btn-primary"
-                >
-                  Upload Blueprint
-                </button>
-              )}
+            <div className="card py-16">
+              <div className="text-center">
+                <div className="w-20 h-20 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  {filter === 'all' ? 'No projects yet' : `No ${filter} projects`}
+                </h3>
+                <p className="text-gray-500 mb-6 max-w-sm mx-auto">
+                  {filter === 'all' 
+                    ? 'Get started by uploading your first blueprint for HVAC analysis.'
+                    : `You don't have any ${filter} projects at the moment.`
+                  }
+                </p>
+                {filter === 'all' && (
+                  <button 
+                    onClick={handleNewAnalysis}
+                    className="btn-primary"
+                  >
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    Upload Blueprint
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredProjects.map((project) => (
                 <ProjectCard
                   key={project.id}

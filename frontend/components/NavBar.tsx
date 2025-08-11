@@ -12,11 +12,19 @@ export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarPr
   const router = useRouter()
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [isScrolled, setIsScrolled] = useState(false)
 
   useEffect(() => {
     // Check for user email in cookies
     const email = Cookies.get('user_email')
     setUserEmail(email || null)
+
+    // Handle scroll effect
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 10)
+    }
+    window.addEventListener('scroll', handleScroll)
+    return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
   const handleSignOut = () => {
@@ -32,63 +40,86 @@ export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarPr
   }
 
   return (
-    <nav className="bg-white shadow-sm border-b border-gray-100">
+    <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-200 ${
+      isScrolled 
+        ? 'bg-white/70 backdrop-blur-xl border-b border-gray-200/50 shadow-sm' 
+        : 'bg-white/50 backdrop-blur-md border-b border-gray-100/50'
+    }`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <div className="flex items-center">
-            <Link href="/" className="text-2xl font-bold text-brand-700 hover:text-brand-800 transition-colors">
-              AutoHVAC
+            <Link href="/" className="flex items-center space-x-2 group">
+              <div className="w-8 h-8 bg-gradient-to-br from-brand-600 to-brand-700 rounded-lg flex items-center justify-center shadow-sm group-hover:shadow-md transition-all duration-200">
+                <span className="text-white font-bold text-sm">AH</span>
+              </div>
+              <span className="text-xl font-semibold text-gray-900 group-hover:text-brand-700 transition-colors">
+                AutoHVAC
+              </span>
             </Link>
           </div>
 
           {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center space-x-6">
+          <div className="hidden md:flex items-center space-x-8">
             {/* Navigation Links */}
-            <div className="flex items-center space-x-6">
-              <Link href="/#features" className="text-gray-600 hover:text-brand-700 transition-colors">
+            <div className="flex items-center space-x-8">
+              <Link href="/#features" className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
                 Features
               </Link>
-              <Link href="/#how-it-works" className="text-gray-600 hover:text-brand-700 transition-colors">
+              <Link href="/#how-it-works" className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
                 How It Works
               </Link>
-              <Link href="/#pricing" className="text-gray-600 hover:text-brand-700 transition-colors">
+              <Link href="/pricing" className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
                 Pricing
               </Link>
             </div>
 
             {/* User Section */}
             {userEmail ? (
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-3">
                 <button
                   onClick={handleDashboardClick}
-                  className="btn-text"
+                  className="text-sm font-medium text-gray-700 hover:text-gray-900 px-3 py-2 rounded-lg hover:bg-gray-50 transition-all"
                 >
                   Dashboard
                 </button>
-                <div className="flex items-center space-x-3">
-                  <span className="text-sm text-gray-600 max-w-32 truncate" title={userEmail}>
-                    {userEmail}
-                  </span>
-                  <button
-                    onClick={handleSignOut}
-                    className="btn-icon"
-                    title="Sign Out"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                <div className="relative group">
+                  <button className="flex items-center space-x-2 px-3 py-2 rounded-lg hover:bg-gray-50 transition-all">
+                    <div className="w-8 h-8 bg-gradient-to-br from-brand-500 to-brand-600 rounded-full flex items-center justify-center text-white text-xs font-medium shadow-sm">
+                      {userEmail.charAt(0).toUpperCase()}
+                    </div>
+                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                   </button>
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 border border-gray-100">
+                    <div className="px-4 py-2 border-b border-gray-100">
+                      <p className="text-sm font-medium text-gray-900 truncate">{userEmail}</p>
+                    </div>
+                    <button
+                      onClick={handleSignOut}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      Sign Out
+                    </button>
+                  </div>
                 </div>
               </div>
-            ) : showGetStarted && onGetStarted ? (
-              <button 
-                onClick={onGetStarted}
-                className="btn-primary"
-              >
-                Get Started
-              </button>
-            ) : null}
+            ) : (
+              <div className="flex items-center space-x-3">
+                <Link href="/signin" className="text-sm font-medium text-gray-700 hover:text-gray-900 px-4 py-2">
+                  Sign In
+                </Link>
+                {showGetStarted && onGetStarted && (
+                  <button
+                    onClick={onGetStarted}
+                    className="btn-primary"
+                  >
+                    Get Started
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Mobile menu button */}
@@ -110,19 +141,19 @@ export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarPr
 
         {/* Mobile Navigation Menu */}
         {isMenuOpen && (
-          <div className="md:hidden border-t border-gray-100 py-4">
-            <div className="flex flex-col space-y-4">
+          <div className="md:hidden border-t border-gray-100 py-4 animate-slide-down">
+            <div className="flex flex-col space-y-1">
               {/* Navigation Links */}
               <Link 
                 href="/#features" 
-                className="text-gray-600 hover:text-brand-700 transition-colors"
+                className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-all"
                 onClick={() => setIsMenuOpen(false)}
               >
                 Features
               </Link>
               <Link 
                 href="/#how-it-works" 
-                className="text-gray-600 hover:text-brand-700 transition-colors"
+                className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-all"
                 onClick={() => setIsMenuOpen(false)}
               >
                 How It Works

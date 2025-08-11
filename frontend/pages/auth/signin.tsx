@@ -102,7 +102,7 @@ export default function SignIn() {
   if (status === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600"></div>
       </div>
     )
   }
@@ -114,15 +114,15 @@ export default function SignIn() {
         <Head>
           <title>Check Your Email - AutoHVAC</title>
         </Head>
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center px-4">
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-25 flex items-center justify-center px-4">
           <div className="max-w-md w-full">
-            <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
+            <div className="card glass p-8 text-center">
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                 </svg>
               </div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">Check your email</h2>
+              <h2 className="display-xs text-gray-900 mb-2">Check your email</h2>
               <p className="text-gray-600 mb-6">
                 We sent a sign-in link to <strong className="text-gray-900">{email}</strong>
               </p>
@@ -136,7 +136,7 @@ export default function SignIn() {
                       setIsSuccess(false)
                       handleMagicLink(e)
                     }}
-                    className="w-full py-2 px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                    className="w-full btn-primary"
                   >
                     Resend magic link
                   </button>
@@ -146,7 +146,7 @@ export default function SignIn() {
                       setEmail('')
                       setMode('password')
                     }}
-                    className="w-full py-2 px-4 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    className="w-full btn-secondary"
                   >
                     Try a different method
                   </button>
@@ -165,12 +165,12 @@ export default function SignIn() {
         <title>Sign In - AutoHVAC</title>
       </Head>
       
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-25 flex items-center justify-center p-4">
         <div className="max-w-md w-full">
-          <div className="bg-white rounded-2xl shadow-xl p-8">
+          <div className="card glass p-8">
             {/* Header */}
             <div className="text-center mb-8">
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+              <h1 className="display-md gradient-text">
                 Welcome Back
               </h1>
               <p className="text-gray-600 mt-2">
@@ -180,8 +180,8 @@ export default function SignIn() {
             
             {/* Error Message */}
             {error && (
-              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-red-600 text-sm">{error}</p>
+              <div className="mb-6 alert alert-error">
+                <p className="text-red-800 text-sm">{error}</p>
               </div>
             )}
             
@@ -191,7 +191,7 @@ export default function SignIn() {
                 onClick={() => setMode('password')}
                 className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all ${
                   mode === 'password'
-                    ? 'bg-white text-indigo-600 shadow-sm'
+                    ? 'bg-white text-brand-600 shadow-sm'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
@@ -201,7 +201,7 @@ export default function SignIn() {
                 onClick={() => setMode('magic')}
                 className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all ${
                   mode === 'magic'
-                    ? 'bg-white text-indigo-600 shadow-sm'
+                    ? 'bg-white text-brand-600 shadow-sm'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
@@ -224,7 +224,7 @@ export default function SignIn() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                    className="input"
                     placeholder="you@example.com"
                   />
                 </div>
@@ -235,7 +235,7 @@ export default function SignIn() {
                       <label htmlFor="password" className="block text-sm font-medium text-gray-700">
                         Password
                       </label>
-                      <Link href="/auth/forgot-password" className="text-sm text-indigo-600 hover:text-indigo-500">
+                      <Link href="/auth/forgot-password" className="text-sm text-brand-600 hover:text-brand-500">
                         Forgot password?
                       </Link>
                     </div>
@@ -245,7 +245,7 @@ export default function SignIn() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                      className="input"
                       placeholder="••••••••"
                     />
                   </div>
@@ -255,7 +255,7 @@ export default function SignIn() {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full mt-6 py-3 px-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg font-medium hover:from-indigo-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="w-full mt-6 btn-primary btn-lg"
               >
                 {isLoading ? (
                   <span className="flex items-center justify-center">
@@ -285,7 +285,7 @@ export default function SignIn() {
                 
                 <button
                   onClick={handleGoogleSignIn}
-                  className="mt-4 w-full py-3 px-4 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all flex items-center justify-center"
+                  className="mt-4 w-full btn-secondary btn-lg flex items-center justify-center"
                 >
                   <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -301,7 +301,7 @@ export default function SignIn() {
             {/* Sign Up Link */}
             <p className="mt-8 text-center text-sm text-gray-600">
               Don't have an account?{' '}
-              <Link href="/auth/signup" className="font-medium text-indigo-600 hover:text-indigo-500">
+              <Link href="/auth/signup" className="font-medium text-brand-600 hover:text-brand-500">
                 Sign up for free
               </Link>
             </p>

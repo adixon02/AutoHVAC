@@ -93,12 +93,12 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
   // Remove modal paywall - we'll redirect to full page instead
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="card max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col animate-scale-in">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-100">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-gray-25">
           <div>
-            <h2 className="text-2xl font-semibold text-brand-700">
+            <h2 className="text-xl font-semibold text-gray-900">
               {currentStep === 1 && 'Start Your HVAC Analysis'}
               {currentStep === 2 && 'What type of ductwork?'}
               {currentStep === 3 && 'What heating system will you use?'}
@@ -107,7 +107,7 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
               {currentStep === 6 && 'Almost done!'}
               {currentStep === 7 && 'Where should we send your analysis?'}
             </h2>
-            <p className="text-gray-600 mt-1">
+            <p className="text-sm text-gray-500 mt-1">
               {currentStep === 1 && 'Upload your blueprint and give your project a name'}
               {currentStep === 2 && 'This affects your system efficiency calculations'}
               {currentStep === 3 && 'This determines equipment recommendations'}
@@ -120,33 +120,53 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
           <button
             onClick={handleClose}
             disabled={isLoading}
-            className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
+            className="btn-icon hover:bg-gray-100 disabled:opacity-50 transition-all"
           >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
         {/* Progress Indicator */}
-        <div className="px-6 py-4 border-b border-gray-100">
-          <div className="flex items-center justify-center space-x-2">
+        <div className="px-6 py-4 bg-gradient-to-r from-gray-50 to-gray-25 border-b border-gray-100">
+          <div className="flex items-center justify-between max-w-md mx-auto">
             {Array.from({ length: totalSteps }, (_, i) => (
-              <div
-                key={i}
-                className={`w-3 h-3 rounded-full ${
-                  i < currentStep ? 'bg-brand-600' : 'bg-gray-300'
-                }`}
-              />
+              <React.Fragment key={i}>
+                <div className="flex flex-col items-center relative">
+                  <div
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium transition-all duration-300 ${
+                      i < currentStep 
+                        ? 'bg-brand-600 text-white' 
+                        : i === currentStep - 1
+                        ? 'bg-brand-100 text-brand-700 border-2 border-brand-600'
+                        : 'bg-gray-100 text-gray-400 border border-gray-300'
+                    }`}
+                  >
+                    {i < currentStep - 1 ? (
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    ) : (
+                      i + 1
+                    )}
+                  </div>
+                </div>
+                {i < totalSteps - 1 && (
+                  <div className={`flex-1 h-0.5 transition-all duration-500 ${
+                    i < currentStep - 1 ? 'bg-brand-600' : 'bg-gray-200'
+                  }`} />
+                )}
+              </React.Fragment>
             ))}
           </div>
-          <div className="text-center mt-2 text-sm text-gray-600">
+          <div className="text-center mt-3 text-xs font-medium text-gray-500 uppercase tracking-wide">
             Step {currentStep} of {totalSteps}
           </div>
         </div>
 
         {/* Content */}
-        <div className="p-6">
+        <div className="flex-1 p-6 overflow-y-auto">
           {/* Step 1: Project Setup */}
           {currentStep === 1 && (
             <Step1ProjectSetup 
@@ -260,11 +280,11 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
       console.error('Upload error:', error)
       
       // Check if it's a PaymentRequiredError from the fetcher
-      if (error.name === 'PaymentRequiredError' && error.checkoutUrl) {
+      if (error.name === 'PaymentRequiredError') {
         // Store email for the upgrade page
         Cookies.set('user_email', projectData.email, { expires: 30 })
-        // Redirect to the checkout URL provided by the backend
-        router.push(error.checkoutUrl)
+        // Redirect to upgrade page for better conversion (not directly to checkout)
+        router.push('/upgrade')
         return
       }
       
@@ -273,12 +293,9 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
         // Store email for the upgrade page
         Cookies.set('user_email', projectData.email, { expires: 30 })
         
-        // Try to extract checkout URL from error detail
-        const errorDetail = error.response?.data?.detail
-        const checkoutUrl = errorDetail?.checkout_url || 'https://autohvac.ai/upgrade'
-        
-        // Redirect to checkout URL or default upgrade page
-        router.push(checkoutUrl)
+        // Always redirect to upgrade page for better conversion
+        // (not directly to checkout, even if URL is provided)
+        router.push('/upgrade')
         return
       }
       
@@ -303,7 +320,7 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
       // Final fallback - if we somehow have a 402 that wasn't caught above, still redirect
       if (error.response?.status === 402) {
         Cookies.set('user_email', projectData.email, { expires: 30 })
-        router.push('https://autohvac.ai/upgrade')
+        router.push('/upgrade')
         return
       }
       

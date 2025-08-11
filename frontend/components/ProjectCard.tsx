@@ -20,37 +20,37 @@ const StatusBadge = ({ status }: { status: string }) => {
     switch (status.toLowerCase()) {
       case 'completed':
         return {
-          bg: 'bg-green-100',
-          text: 'text-green-800',
-          icon: '✓',
+          bg: 'bg-success-50 border-success-200',
+          text: 'text-success-700',
+          dot: 'bg-success-500',
           label: 'Completed'
         }
       case 'processing':
         return {
-          bg: 'bg-blue-100',
-          text: 'text-blue-800',
-          icon: '⟳',
+          bg: 'bg-blue-50 border-blue-200',
+          text: 'text-blue-700',
+          dot: 'bg-blue-500',
           label: 'Processing'
         }
       case 'pending':
         return {
-          bg: 'bg-yellow-100',
-          text: 'text-yellow-800',
-          icon: '⏳',
+          bg: 'bg-warning-50 border-warning-200',
+          text: 'text-warning-700',
+          dot: 'bg-warning-500',
           label: 'Pending'
         }
       case 'failed':
         return {
-          bg: 'bg-red-100',
-          text: 'text-red-800',
-          icon: '✗',
+          bg: 'bg-error-50 border-error-200',
+          text: 'text-error-700',
+          dot: 'bg-error-500',
           label: 'Failed'
         }
       default:
         return {
-          bg: 'bg-gray-100',
-          text: 'text-gray-800',
-          icon: '?',
+          bg: 'bg-gray-50 border-gray-200',
+          text: 'text-gray-700',
+          dot: 'bg-gray-500',
           label: status
         }
     }
@@ -59,8 +59,8 @@ const StatusBadge = ({ status }: { status: string }) => {
   const config = getStatusConfig(status)
 
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${config.bg} ${config.text}`}>
-      <span className="mr-1">{config.icon}</span>
+    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${config.bg} ${config.text}`}>
+      <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${config.dot}`}></span>
       {config.label}
     </span>
   )
@@ -112,17 +112,17 @@ export default function ProjectCard({ project, userEmail, onDownload }: ProjectC
 
   return (
     <div 
-      className="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow duration-200 cursor-pointer"
+      className="card hover:shadow-lg transition-all duration-300 cursor-pointer group"
       onClick={handleCardClick}
     >
-      <div className="p-6">
+      <div className="p-6 space-y-4">
         {/* Header */}
-        <div className="flex items-start justify-between mb-4">
+        <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
-            <h3 className="text-lg font-semibold text-gray-900 truncate">
+            <h3 className="text-lg font-semibold text-gray-900 truncate group-hover:text-brand-600 transition-colors">
               {project.project_label}
             </h3>
-            <p className="text-sm text-gray-500 truncate">
+            <p className="text-sm text-gray-500 truncate mt-1">
               {project.filename}
             </p>
           </div>
@@ -132,71 +132,78 @@ export default function ProjectCard({ project, userEmail, onDownload }: ProjectC
         </div>
 
         {/* Project Details */}
-        <div className="space-y-2 mb-4">
+        <div className="space-y-2.5 py-3 border-t border-gray-100">
           <div className="flex items-center text-sm text-gray-600">
-            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3a1 1 0 011-1h6a1 1 0 011 1v4h3a1 1 0 011 1v1H4V8a1 1 0 011-1h3z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 21v-8h8v8H8z" />
-            </svg>
-            Project ID: {project.id.substring(0, 8)}...
+            <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center mr-3">
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
+              </svg>
+            </div>
+            <span className="text-gray-900 font-medium">ID:</span>
+            <span className="ml-1 font-mono text-gray-500">{project.id.substring(0, 8)}...</span>
           </div>
           
           <div className="flex items-center text-sm text-gray-600">
-            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Created: {formatDate(project.created_at)}
+            <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center mr-3">
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <span className="text-gray-900 font-medium">Created:</span>
+            <span className="ml-1 text-gray-500">{formatDate(project.created_at)}</span>
           </div>
 
           {project.completed_at && (
             <div className="flex items-center text-sm text-gray-600">
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Completed in {getProcessingTime()}
+              <div className="w-8 h-8 rounded-lg bg-success-50 flex items-center justify-center mr-3">
+                <svg className="w-4 h-4 text-success-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <span className="text-gray-900 font-medium">Duration:</span>
+              <span className="ml-1 text-gray-500">{getProcessingTime()}</span>
             </div>
           )}
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center gap-3 pt-3 border-t border-gray-100">
           {project.status === 'completed' && project.has_pdf_report ? (
             <button
               onClick={handleDownload}
-              className="flex-1 btn-primary text-sm py-2"
+              className="flex-1 btn-primary btn-sm group/btn"
             >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              <svg className="w-4 h-4 mr-2 group-hover/btn:translate-y-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
               </svg>
               Download Report
             </button>
           ) : project.status === 'processing' || project.status === 'pending' ? (
-            <div className="flex-1 text-center">
-              <div className="inline-flex items-center text-sm text-blue-600">
-                <svg className="w-4 h-4 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Processing...
+            <div className="flex-1">
+              <div className="flex items-center justify-center py-2 px-4 bg-blue-50 rounded-lg">
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent mr-2"></div>
+                <span className="text-sm font-medium text-blue-700">Processing...</span>
               </div>
             </div>
           ) : project.status === 'failed' ? (
             <div className="flex-1">
-              <div className="bg-red-50 rounded-lg px-3 py-2">
-                <p className="text-sm text-red-800 font-medium">Analysis unsuccessful</p>
-                <p className="text-xs text-red-600 mt-0.5">Click to see details & retry options</p>
+              <div className="bg-error-50 border border-error-200 rounded-lg px-4 py-2.5">
+                <p className="text-sm text-error-700 font-medium">Analysis unsuccessful</p>
+                <p className="text-xs text-error-600 mt-0.5">Click to view details</p>
               </div>
             </div>
           ) : null}
 
-          {/* Info Icon */}
-          <div 
-            className="p-2 text-gray-400"
+          {/* View Details Button */}
+          <button 
+            className="btn-icon hover:bg-gray-100 transition-all"
             onClick={(e) => e.stopPropagation()}
+            title="View details"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
             </svg>
-          </div>
+          </button>
         </div>
       </div>
     </div>

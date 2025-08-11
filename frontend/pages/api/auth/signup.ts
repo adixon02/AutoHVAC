@@ -1,17 +1,18 @@
 import { NextApiRequest, NextApiResponse } from 'next'
-import { prisma } from '@/lib/prisma'
-import { hashPassword, validatePasswordStrength } from '@/lib/security/password'
-import { checkApiRateLimit, isIpBlocked } from '@/lib/security/rateLimit'
-import { createAuditLog } from '@/lib/security/audit'
-import { sendVerificationEmail } from '@/lib/email'
-import crypto from 'crypto'
-import { setCookie } from 'nookies'
 
+/**
+ * Signup endpoint - proxies to backend API
+ * The backend handles all business logic including:
+ * - Password validation and hashing
+ * - Rate limiting and security
+ * - User creation and email verification
+ * - Stripe customer creation
+ * - Audit logging
+ */
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
-  // Only allow POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
@@ -19,217 +20,56 @@ export default async function handler(
   try {
     const { email, password, name } = req.body
     
-    // Validate inputs
+    // Basic client-side validation (for UX, not security)
     if (!email || !password) {
       return res.status(400).json({
         error: 'Email and password are required'
       })
     }
     
-    // Normalize email
-    const normalizedEmail = email.toLowerCase().trim()
-    
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(normalizedEmail)) {
-      return res.status(400).json({
-        error: 'Invalid email format'
-      })
-    }
-    
-    // Get IP and user agent
-    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || 
-               req.headers['x-real-ip'] as string || 
-               'unknown'
-    const userAgent = req.headers['user-agent'] || ''
-    
-    // Check if IP is blocked
-    if (await isIpBlocked(ip)) {
-      await createAuditLog({
-        event: 'signup_blocked',
-        metadata: { email: normalizedEmail, reason: 'ip_blocked' },
-        ip,
-        userAgent
-      })
-      return res.status(429).json({
-        error: 'Too many attempts. Please try again later.'
-      })
-    }
-    
-    // Rate limiting
-    const rateLimit = await checkApiRateLimit(ip, 'signup', {
-      maxAttempts: 3,
-      windowMs: 5 * 60 * 1000 // 3 signups per 5 minutes per IP
-    })
-    
-    if (!rateLimit.allowed) {
-      return res.status(429).json({
-        error: 'Too many signup attempts. Please try again later.',
-        retryAfter: rateLimit.retryAfter
-      })
-    }
-    
-    // Validate password strength
-    const passwordValidation = validatePasswordStrength(password)
-    if (!passwordValidation.isValid) {
-      return res.status(400).json({
-        error: passwordValidation.errors[0],
-        errors: passwordValidation.errors
-      })
-    }
-    
-    // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email: normalizedEmail }
-    })
-    
-    if (existingUser) {
-      // Don't reveal that email exists (security)
-      // But log it for monitoring
-      await createAuditLog({
-        event: 'signup_duplicate',
-        metadata: { email: normalizedEmail },
-        ip,
-        userAgent
-      })
-      
-      // Generic message
-      return res.status(400).json({
-        error: 'Unable to create account. Please try a different email or sign in.'
-      })
-    }
-    
-    // Hash password
-    const hashedPassword = await hashPassword(password)
-    
-    // Generate email verification token
-    const verificationToken = crypto.randomBytes(32).toString('hex')
-    const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
-    
-    // Create user in transaction
-    const user = await prisma.$transaction(async (tx) => {
-      // Create user
-      const newUser = await tx.user.create({
-        data: {
-          email: normalizedEmail,
-          password: hashedPassword,
-          name: name?.trim() || null,
-          signupMethod: 'password',
-          emailVerified: null // Not verified yet
-        }
-      })
-      
-      // Create verification token
-      await tx.verificationToken.create({
-        data: {
-          identifier: normalizedEmail,
-          token: verificationToken,
-          expires: verificationExpires
-        }
-      })
-      
-      // Check for anonymous projects to claim
-      const anonId = req.cookies.anon_id
-      if (anonId) {
-        const claimed = await tx.project.updateMany({
-          where: {
-            anonId,
-            userId: null
-          },
-          data: {
-            userId: newUser.id,
-            claimedAt: new Date()
-          }
-        })
-        
-        if (claimed.count > 0) {
-          await createAuditLog({
-            userId: newUser.id,
-            event: 'projects_claimed_on_signup',
-            metadata: { count: claimed.count, anonId },
-            ip,
-            userAgent
-          })
-        }
-      }
-      
-      return newUser
-    })
-    
-    // Create Stripe customer (async, don't block signup)
-    if (process.env.STRIPE_SECRET_KEY) {
-      // This would be done in a background job ideally
-      createStripeCustomer(user.id, normalizedEmail, name).catch(err => {
-        console.error('Failed to create Stripe customer:', err)
-      })
-    }
-    
-    // Send verification email
-    try {
-      await sendVerificationEmail({
-        to: normalizedEmail,
-        token: verificationToken
-      })
-    } catch (emailError) {
-      console.error('Failed to send verification email:', emailError)
-      // Don't fail signup if email fails - user can request resend
-    }
-    
-    // Create audit log
-    await createAuditLog({
-      userId: user.id,
-      event: 'account_created',
-      metadata: {
-        signupMethod: 'password',
-        emailSent: true
+    // Call backend signup endpoint
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const response = await fetch(`${backendUrl}/auth/signup`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Forward IP for rate limiting
+        'X-Forwarded-For': (req.headers['x-forwarded-for'] as string) || 
+                          (req.headers['x-real-ip'] as string) || 
+                          req.socket.remoteAddress || '',
+        'User-Agent': req.headers['user-agent'] || ''
       },
-      ip,
-      userAgent
+      body: JSON.stringify({
+        email: email.toLowerCase().trim(),
+        password,
+        name: name?.trim() || null
+      })
     })
     
-    // Clear anonymous ID cookie since projects were claimed
-    if (req.cookies.anon_id) {
-      setCookie({ res }, 'anon_id', '', {
-        maxAge: -1,
-        path: '/',
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax'
+    const data = await response.json()
+    
+    if (!response.ok) {
+      // Pass through backend error messages
+      return res.status(response.status).json({
+        error: data.detail || data.error || 'Signup failed',
+        errors: data.errors
       })
     }
     
+    // Return success response
     return res.status(201).json({
       success: true,
-      message: 'Account created successfully. Please check your email to verify your account.',
-      requiresVerification: true
+      message: data.message || 'Account created successfully. Please check your email to verify your account.',
+      requiresVerification: true,
+      user: data.user
     })
     
   } catch (error) {
-    console.error('Signup error:', error)
+    console.error('Signup proxy error:', error)
     
-    // Log error for monitoring
-    await createAuditLog({
-      event: 'signup_error',
-      metadata: {
-        error: error instanceof Error ? error.message : 'Unknown error'
-      },
-      ip: req.headers['x-forwarded-for'] as string || 'unknown',
-      userAgent: req.headers['user-agent'] || ''
-    })
-    
+    // Network or unexpected errors
     return res.status(500).json({
-      error: 'An error occurred during signup. Please try again.'
+      error: 'Unable to connect to authentication service. Please try again.'
     })
   }
-}
-
-// Helper function to create Stripe customer (would be in a separate file)
-async function createStripeCustomer(
-  userId: string,
-  email: string,
-  name?: string | null
-) {
-  // This would integrate with Stripe SDK
-  // For now, it's a placeholder
-  console.log('Would create Stripe customer for:', { userId, email, name })
 }

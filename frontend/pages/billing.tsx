@@ -96,7 +96,7 @@ export default function Billing() {
   if (status === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600"></div>
       </div>
     )
   }
@@ -107,13 +107,13 @@ export default function Billing() {
         <title>Billing & Subscription - AutoHVAC</title>
       </Head>
       
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-25">
         {/* Header */}
-        <nav className="bg-white shadow-sm border-b border-gray-100">
+        <nav className="bg-white/80 backdrop-blur-xl shadow-sm border-b border-gray-100">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center h-16">
               <div className="flex items-center space-x-8">
-                <Link href="/dashboard" className="text-2xl font-bold text-indigo-600">
+                <Link href="/dashboard" className="display-xs text-brand-700">
                   AutoHVAC
                 </Link>
                 <Link href="/dashboard" className="text-gray-600 hover:text-gray-900">
@@ -128,28 +128,28 @@ export default function Billing() {
         </nav>
         
         <div className="max-w-4xl mx-auto px-4 py-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-8">Billing & Subscription</h1>
+          <h1 className="display-md text-gray-900 mb-8">Billing & Subscription</h1>
           
           {message && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="mb-6 alert alert-error">
               <p className="text-red-800">{message}</p>
             </div>
           )}
           
           <div className="grid gap-6">
             {/* Current Plan Card */}
-            <div className="bg-white rounded-lg shadow p-6">
+            <div className="card p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Current Plan</h2>
               
               {subscription?.hasActiveSubscription ? (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-200">
+                  <div className="flex items-center justify-between p-4 bg-gradient-to-r from-brand-50 to-brand-25 rounded-lg border border-brand-200">
                     <div>
-                      <h3 className="font-semibold text-indigo-900">AutoHVAC Pro</h3>
-                      <p className="text-sm text-indigo-700">Unlimited blueprint analyses</p>
-                      <p className="text-2xl font-bold text-indigo-900 mt-2">$97<span className="text-base font-normal">/month</span></p>
+                      <h3 className="font-semibold text-brand-900">AutoHVAC Pro</h3>
+                      <p className="text-sm text-brand-700">Unlimited blueprint analyses</p>
+                      <p className="text-2xl font-bold text-brand-900 mt-2">$97<span className="text-base font-normal">/month</span></p>
                     </div>
-                    <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                    <span className="badge badge-success">
                       Active
                     </span>
                   </div>
@@ -206,7 +206,7 @@ export default function Billing() {
                     <button
                       onClick={handleBillingPortal}
                       disabled={loading}
-                      className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                      className="btn-primary"
                     >
                       {loading ? 'Loading...' : 'Manage Billing'}
                     </button>
@@ -215,7 +215,7 @@ export default function Billing() {
                       <button
                         onClick={handleCancelSubscription}
                         disabled={loading}
-                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
+                        className="btn-secondary"
                       >
                         Cancel Subscription
                       </button>
@@ -224,7 +224,7 @@ export default function Billing() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                  <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200">
                     <div>
                       <h3 className="font-semibold text-gray-900">Free Plan</h3>
                       <p className="text-sm text-gray-600">
@@ -233,13 +233,13 @@ export default function Billing() {
                           : '1 free blueprint analysis available'}
                       </p>
                     </div>
-                    <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm font-medium">
+                    <span className="badge badge-gray">
                       Free
                     </span>
                   </div>
                   
-                  <div className="p-6 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-200">
-                    <h3 className="font-semibold text-indigo-900 mb-3">Upgrade to Pro</h3>
+                  <div className="p-6 bg-gradient-to-r from-brand-50 to-brand-25 rounded-xl border border-brand-200">
+                    <h3 className="font-semibold text-brand-900 mb-3">Upgrade to Pro</h3>
                     <ul className="space-y-2 mb-4">
                       {[
                         'Unlimited HVAC load calculations',
@@ -248,7 +248,7 @@ export default function Billing() {
                         'Equipment recommendations',
                         'Cancel anytime'
                       ].map((benefit, idx) => (
-                        <li key={idx} className="flex items-center text-sm text-indigo-700">
+                        <li key={idx} className="flex items-center text-sm text-brand-700">
                           <svg className="w-4 h-4 text-green-500 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                           </svg>
@@ -259,7 +259,7 @@ export default function Billing() {
                     <button
                       onClick={handleUpgrade}
                       disabled={loading}
-                      className="w-full px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                      className="w-full btn-primary"
                     >
                       {loading ? 'Loading...' : 'Upgrade to Pro - $97/month'}
                     </button>
@@ -269,25 +269,25 @@ export default function Billing() {
             </div>
             
             {/* Usage Statistics */}
-            <div className="bg-white rounded-lg shadow p-6">
+            <div className="card p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Usage Statistics</h2>
               
               <div className="grid grid-cols-3 gap-4">
-                <div className="text-center p-4 bg-gray-50 rounded-lg">
+                <div className="text-center p-4 bg-gray-50 rounded-xl">
                   <p className="text-2xl font-bold text-gray-900">
                     {usageStats?.projectsThisMonth || 0}
                   </p>
                   <p className="text-sm text-gray-600">This Month</p>
                 </div>
                 
-                <div className="text-center p-4 bg-gray-50 rounded-lg">
+                <div className="text-center p-4 bg-gray-50 rounded-xl">
                   <p className="text-2xl font-bold text-gray-900">
                     {usageStats?.totalProjects || 0}
                   </p>
                   <p className="text-sm text-gray-600">Total Projects</p>
                 </div>
                 
-                <div className="text-center p-4 bg-gray-50 rounded-lg">
+                <div className="text-center p-4 bg-gray-50 rounded-xl">
                   <p className="text-2xl font-bold text-gray-900">
                     {subscription?.hasActiveSubscription ? '∞' : session?.user?.freeReportUsed ? '0' : '1'}
                   </p>
@@ -304,13 +304,13 @@ export default function Billing() {
             
             {/* Billing Actions */}
             {subscription?.hasActiveSubscription && (
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="card p-6">
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Billing Actions</h2>
                 
                 <div className="space-y-3">
                   <button
                     onClick={handleBillingPortal}
-                    className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    className="w-full text-left p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
                   >
                     <div className="flex items-center justify-between">
                       <div>
@@ -325,7 +325,7 @@ export default function Billing() {
                   
                   <button
                     onClick={handleBillingPortal}
-                    className="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    className="w-full text-left p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
                   >
                     <div className="flex items-center justify-between">
                       <div>
@@ -341,7 +341,7 @@ export default function Billing() {
                   {!subscription.details?.cancelAtPeriodEnd && (
                     <button
                       onClick={handleCancelSubscription}
-                      className="w-full text-left p-4 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                      className="w-full text-left p-4 border border-red-200 rounded-xl hover:bg-red-50 transition-colors"
                     >
                       <div className="flex items-center justify-between">
                         <div>
@@ -359,14 +359,14 @@ export default function Billing() {
             )}
             
             {/* Help Section */}
-            <div className="bg-blue-50 rounded-lg p-6">
+            <div className="alert alert-info">
               <h3 className="font-semibold text-blue-900 mb-2">Need Help?</h3>
-              <p className="text-blue-700 text-sm mb-3">
+              <p className="text-blue-800 text-sm mb-3">
                 If you have any questions about billing or need assistance with your subscription, we're here to help.
               </p>
               <a 
                 href="mailto:support@autohvac.ai?subject=Billing%20Question"
-                className="inline-flex items-center text-blue-600 hover:text-blue-700 font-medium text-sm"
+                className="btn-text"
               >
                 Contact Support
                 <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
