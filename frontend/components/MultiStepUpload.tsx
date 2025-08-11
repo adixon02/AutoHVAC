@@ -469,7 +469,7 @@ function Step7EmailCollection({ projectData, updateProjectData, onPrev, onSubmit
           await apiClient.captureLead({
             email: projectData.email,
             marketing_consent: true,
-            project_id: null // Will be set after upload
+            project_id: undefined // Will be set after upload
           })
           Cookies.set('user_email', projectData.email, { expires: 365 })
           onSubmit()
