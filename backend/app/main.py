@@ -85,6 +85,9 @@ app.include_router(auth.router, prefix="/api/v1/auth")
 app.include_router(jobs.router, prefix="/api/v1/jobs")
 app.include_router(admin.router, prefix="/api/v1/admin")
 
+# Also register auth routes without /api/v1 prefix for NextAuth compatibility
+app.include_router(auth.router, prefix="/auth")
+
 # Background task for periodic cleanup
 cleanup_task = None
 
@@ -226,6 +229,9 @@ async def catch_all(request: Request, path: str):
             "GET /api/v1/job/{job_id}",
             "POST /api/v1/billing/subscribe",
             "POST /api/v1/billing/webhook",
+            "POST /auth/login",
+            "POST /auth/signup",
+            "GET /auth/me",
             "GET /healthz"
         ]
     }
