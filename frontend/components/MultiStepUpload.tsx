@@ -1,5 +1,6 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
+import { signIn, useSession } from 'next-auth/react'
 import { apiHelpers } from '../lib/fetcher'
 // PaywallModal removed - using full page upgrade instead
 import Cookies from 'js-cookie'
@@ -17,17 +18,19 @@ interface ProjectData {
 interface MultiStepUploadProps {
   isOpen: boolean
   onClose: () => void
+  initialFile?: File | null
 }
 
-export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProps) {
+export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiStepUploadProps) {
   const router = useRouter()
+  const { data: session } = useSession()
   const [currentStep, setCurrentStep] = useState(1)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Removed showPaywall state - using full page upgrade instead
   
-  // Check for saved email on mount
-  const savedEmail = typeof window !== 'undefined' ? Cookies.get('user_email') || '' : ''
+  // Check for saved email from session or cookie
+  const savedEmail = session?.user?.email || (typeof window !== 'undefined' ? Cookies.get('user_email') || '' : '')
   
   const [projectData, setProjectData] = useState<ProjectData>({
     projectName: '',
@@ -40,6 +43,17 @@ export default function MultiStepUpload({ isOpen, onClose }: MultiStepUploadProp
   })
 
   const totalSteps = 7 // 7 steps including building orientation
+
+  // Handle initial file when modal opens
+  useEffect(() => {
+    if (isOpen && initialFile) {
+      setProjectData(prev => ({ ...prev, blueprintFile: initialFile }))
+      // If we have a file, automatically advance to step 2
+      if (currentStep === 1 && initialFile) {
+        setCurrentStep(2)
+      }
+    }
+  }, [isOpen, initialFile])
 
   const nextStep = () => {
     if (currentStep < totalSteps) {
@@ -409,10 +423,11 @@ function Step1ProjectSetup({ projectData, updateProjectData, onNext, error, setE
 }
 
 function Step7EmailCollection({ projectData, updateProjectData, onPrev, onSubmit, isLoading, error, setError }: any) {
-  const savedEmail = typeof window !== 'undefined' ? Cookies.get('user_email') || '' : ''
+  const { data: session } = useSession()
+  const savedEmail = session?.user?.email || (typeof window !== 'undefined' ? Cookies.get('user_email') || '' : '')
   const isReturningUser = savedEmail && savedEmail === projectData.email
   
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!projectData.email.trim()) {
       setError('Please enter your email address')
       return
@@ -422,7 +437,21 @@ function Step7EmailCollection({ projectData, updateProjectData, onPrev, onSubmit
       return
     }
     setError(null)
-    onSubmit()
+    
+    // Create a soft session with NextAuth (email-only, no password)
+    const result = await signIn('email-only', {
+      email: projectData.email,
+      redirect: false,
+    })
+    
+    if (result?.ok) {
+      // User is now "identified" in NextAuth
+      // Also keep cookie for backward compatibility
+      Cookies.set('user_email', projectData.email, { expires: 365 })
+      onSubmit()
+    } else {
+      setError('Failed to process email. Please try again.')
+    }
   }
 
   return (

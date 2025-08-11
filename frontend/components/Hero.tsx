@@ -1,10 +1,43 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 
 interface HeroProps {
-  onGetStarted: () => void
+  onGetStarted: (file?: File) => void
 }
 
 export default function Hero({ onGetStarted }: HeroProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [isDragging, setIsDragging] = useState(false)
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+    
+    const files = e.dataTransfer.files
+    if (files.length > 0 && files[0].type === 'application/pdf') {
+      onGetStarted(files[0])
+    }
+  }
+
+  const handleFileClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (files && files.length > 0 && files[0].type === 'application/pdf') {
+      onGetStarted(files[0])
+    }
+  }
   return (
     <section className="relative overflow-hidden gradient-bg">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 lg:py-24">
@@ -25,7 +58,7 @@ export default function Hero({ onGetStarted }: HeroProps) {
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start mb-8">
               <button 
-                onClick={onGetStarted}
+                onClick={() => onGetStarted()}
                 className="btn-primary text-lg px-8 py-4"
               >
                 Get Started Free
@@ -77,11 +110,30 @@ export default function Hero({ onGetStarted }: HeroProps) {
                 <p className="text-gray-600 text-sm">Drag & drop your PDF or select file</p>
               </div>
               
-              <div className="border-2 border-dashed border-brand-100 rounded-xl p-8 text-center hover:border-brand-500 transition-colors cursor-pointer bg-brand-50/30">
+              <div 
+                className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
+                  isDragging 
+                    ? 'border-brand-500 bg-brand-100/50' 
+                    : 'border-brand-100 hover:border-brand-500 bg-brand-50/30'
+                }`}
+                onClick={handleFileClick}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
                 <svg className="w-12 h-12 text-brand-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                <p className="text-gray-500 text-sm font-medium">blueprint.pdf</p>
+                <p className="text-gray-500 text-sm font-medium">
+                  {isDragging ? 'Drop your PDF here' : 'Click or drag blueprint.pdf'}
+                </p>
               </div>
               
               <div className="mt-6 space-y-3">

@@ -7,6 +7,7 @@ import ShareModal from '../../components/ShareModal'
 import { useSession } from 'next-auth/react'
 import Cookies from 'js-cookie'
 import ResultsPreview from '../../components/ResultsPreview'
+import CreatePasswordPrompt from '../../components/CreatePasswordPrompt'
 
 interface JobStatus {
   job_id: string
@@ -231,6 +232,8 @@ export default function AnalyzingPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [displayProgress, setDisplayProgress] = useState(0)
   const [currentStatusMessage, setCurrentStatusMessage] = useState(0)
+  const [showPasswordPrompt, setShowPasswordPrompt] = useState(false)
+  const [passwordPromptDismissed, setPasswordPromptDismissed] = useState(false)
   
   useEffect(() => {
     // Get email from cookie if not logged in
@@ -239,6 +242,8 @@ export default function AnalyzingPage() {
       if (email) {
         setUserEmail(email)
       }
+    } else {
+      setUserEmail(session.user.email)
     }
   }, [session])
   
@@ -315,6 +320,23 @@ export default function AnalyzingPage() {
       return () => clearInterval(interval)
     }
   }, [jobStatus?.status])
+
+  // Show password prompt after 20 seconds if user has email but no password
+  useEffect(() => {
+    if (
+      jobStatus?.status === 'processing' && 
+      userEmail && 
+      !passwordPromptDismissed &&
+      !showPasswordPrompt &&
+      (!session?.user || !session.user.hasPassword)
+    ) {
+      const timer = setTimeout(() => {
+        setShowPasswordPrompt(true)
+      }, 20000) // Show after 20 seconds
+
+      return () => clearTimeout(timer)
+    }
+  }, [jobStatus?.status, userEmail, passwordPromptDismissed, showPasswordPrompt, session])
 
   
   const getProcessingStages = (status: string): ProcessingStage[] => {
@@ -668,8 +690,25 @@ export default function AnalyzingPage() {
                     </p>
                   </div>
                   
+                  {/* Account Creation Prompt */}
+                  {showPasswordPrompt && userEmail && (
+                    <div className="border-t pt-6">
+                      <CreatePasswordPrompt
+                        email={userEmail}
+                        onSuccess={() => {
+                          setShowPasswordPrompt(false)
+                          setPasswordPromptDismissed(true)
+                        }}
+                        onSkip={() => {
+                          setShowPasswordPrompt(false)
+                          setPasswordPromptDismissed(true)
+                        }}
+                      />
+                    </div>
+                  )}
+
                   {/* Educational Content */}
-                  <div className="border-t pt-8">
+                  <div className={showPasswordPrompt ? "" : "border-t pt-8"}>
                     <EducationalFact 
                       fact={hvacFacts[currentFactIndex].fact}
                       icon={hvacFacts[currentFactIndex].icon}

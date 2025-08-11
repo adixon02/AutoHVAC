@@ -10,6 +10,7 @@ declare module "next-auth" {
       emailVerified: boolean
       freeReportUsed: boolean
       hasActiveSubscription: boolean
+      hasPassword: boolean
       stripeCustomerId?: string | null
     } & DefaultSession["user"]
   }
@@ -19,5 +20,14 @@ declare module "next-auth" {
     emailVerified: Date | null
     freeReportUsed: boolean
     stripeCustomerId?: string | null
+  }
+}
+
+declare module "next-auth/jwt" {
+  interface JWT {
+    id: string
+    hasPassword: boolean
+    emailVerified: Date | null
+    freeReportUsed: boolean
   }
 }

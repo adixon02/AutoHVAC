@@ -9,6 +9,7 @@ import Cookies from 'js-cookie'
 export default function Home() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
   const [savedEmail, setSavedEmail] = useState<string | null>(null)
+  const [initialFile, setInitialFile] = useState<File | null>(null)
 
   useEffect(() => {
     const email = Cookies.get('user_email')
@@ -17,7 +18,10 @@ export default function Home() {
     }
   }, [])
 
-  const handleGetStarted = () => {
+  const handleGetStarted = (file?: File) => {
+    if (file) {
+      setInitialFile(file)
+    }
     setIsUploadModalOpen(true)
   }
 
@@ -39,7 +43,7 @@ export default function Home() {
               </span>
             </div>
             <button 
-              onClick={handleGetStarted}
+              onClick={() => handleGetStarted()}
               className="btn-small-secondary"
             >
               Start New Analysis
@@ -123,7 +127,11 @@ export default function Home() {
       {/* Multi-Step Upload */}
       <MultiStepUpload 
         isOpen={isUploadModalOpen} 
-        onClose={() => setIsUploadModalOpen(false)} 
+        onClose={() => {
+          setIsUploadModalOpen(false)
+          setInitialFile(null)
+        }}
+        initialFile={initialFile}
       />
     </div>
   )
