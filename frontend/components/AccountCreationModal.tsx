@@ -1,5 +1,4 @@
 import React, { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
 import { X, Lock, CheckCircle, AlertCircle } from 'lucide-react'
 import { apiClient } from '../lib/api-client'
 import { signIn } from 'next-auth/react'
@@ -77,26 +76,18 @@ export default function AccountCreationModal({
     }
   }
 
-  return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-          />
+  if (!isOpen) return null
 
-          {/* Modal */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-md"
-          >
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        onClick={onClose}
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 animate-fade-in"
+      />
+
+      {/* Modal */}
+      <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-md animate-scale-in">
             <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
               {/* Header */}
               <div className="relative bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
@@ -181,16 +172,12 @@ export default function AccountCreationModal({
 
                 {/* Error Message */}
                 {error && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    className="bg-red-50 border border-red-200 rounded-lg p-3"
-                  >
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3">
                     <div className="flex items-center gap-2">
                       <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
                       <p className="text-sm text-red-600">{error}</p>
                     </div>
-                  </motion.div>
+                  </div>
                 )}
 
                 {/* Submit Button */}
@@ -241,9 +228,7 @@ export default function AccountCreationModal({
                 </p>
               </form>
             </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+          </div>
+    </>
   )
 }
