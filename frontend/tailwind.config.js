@@ -34,6 +34,9 @@ module.exports = {
         'fade-in': 'fadeIn 0.5s ease-in-out',
         'slide-up': 'slideUp 0.6s ease-out',
       },
+      scale: {
+        '102': '1.02',
+      },
       keyframes: {
         fadeIn: {
           '0%': { opacity: '0' },
