@@ -1,11 +1,10 @@
 import NextAuth, { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
-import { PrismaAdapter } from '@next-auth/prisma-adapter'
-import { prisma } from '@/lib/prisma'
-import bcrypt from 'bcryptjs'
+
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma),
+  // Remove Prisma adapter - we're using the backend as source of truth
   
   session: { 
     strategy: 'jwt',  // Use JWT for stateless sessions
@@ -23,32 +22,37 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.email) return null
         
-        const email = credentials.email.toLowerCase()
-        
-        // Get or create user (no password required)
-        let user = await prisma.user.findUnique({
-          where: { email }
-        })
-        
-        if (!user) {
-          // Create new user with just email
-          user = await prisma.user.create({
-            data: { 
-              email,
-              emailVerified: null, // Not verified yet
-              signupMethod: 'email_only'
-            }
+        try {
+          // Call backend login endpoint
+          const response = await fetch(`${BACKEND_URL}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: credentials.email.toLowerCase(),
+              password: null  // Email-only login
+            })
           })
-        }
-        
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          image: user.image,
-          emailVerified: user.emailVerified,
-          freeReportUsed: user.freeReportUsed,
-          stripeCustomerId: user.stripeCustomerId,
+          
+          if (!response.ok) {
+            return null
+          }
+          
+          const data = await response.json()
+          
+          // Return user data with backend JWT token
+          return {
+            id: data.user.id,
+            email: data.user.email,
+            name: data.user.name,
+            image: data.user.image,
+            emailVerified: data.user.emailVerified,
+            freeReportUsed: data.user.freeReportUsed,
+            stripeCustomerId: data.user.stripeCustomerId,
+            accessToken: data.access_token  // Store backend JWT
+          }
+        } catch (error) {
+          console.error('Login error:', error)
+          return null
         }
       }
     }),
@@ -64,47 +68,38 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null
         
-        const email = credentials.email.toLowerCase()
-        
-        const user = await prisma.user.findUnique({
-          where: { email }
-        })
-        
-        // Check if user exists and has a password
-        if (user && user.password) {
-          const valid = await bcrypt.compare(credentials.password, user.password)
-          if (valid) {
-            // Update login metadata
-            await prisma.user.update({
-              where: { id: user.id },
-              data: {
-                lastLoginAt: new Date(),
-                loginCount: { increment: 1 },
-                failedLoginAttempts: 0, // Reset on successful login
-              }
+        try {
+          // Call backend login endpoint with password
+          const response = await fetch(`${BACKEND_URL}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: credentials.email.toLowerCase(),
+              password: credentials.password
             })
-            
-            return {
-              id: user.id,
-              email: user.email,
-              name: user.name,
-              image: user.image,
-              emailVerified: user.emailVerified,
-              freeReportUsed: user.freeReportUsed,
-              stripeCustomerId: user.stripeCustomerId,
-            }
-          } else {
-            // Increment failed attempts
-            await prisma.user.update({
-              where: { id: user.id },
-              data: {
-                failedLoginAttempts: { increment: 1 }
-              }
-            })
+          })
+          
+          if (!response.ok) {
+            return null
           }
+          
+          const data = await response.json()
+          
+          // Return user data with backend JWT token
+          return {
+            id: data.user.id,
+            email: data.user.email,
+            name: data.user.name,
+            image: data.user.image,
+            emailVerified: data.user.emailVerified,
+            freeReportUsed: data.user.freeReportUsed,
+            stripeCustomerId: data.user.stripeCustomerId,
+            accessToken: data.access_token  // Store backend JWT
+          }
+        } catch (error) {
+          console.error('Login error:', error)
+          return null
         }
-        
-        return null
       }
     })
   ],
@@ -114,16 +109,10 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.id = user.id
         token.email = user.email
-        
-        // Check if user has a password
-        const dbUser = await prisma.user.findUnique({
-          where: { id: user.id },
-          select: { password: true, emailVerified: true, freeReportUsed: true }
-        })
-        
-        token.hasPassword = !!dbUser?.password
-        token.emailVerified = dbUser?.emailVerified || null
-        token.freeReportUsed = dbUser?.freeReportUsed || false
+        token.emailVerified = user.emailVerified
+        token.freeReportUsed = user.freeReportUsed
+        token.stripeCustomerId = user.stripeCustomerId
+        token.accessToken = (user as any).accessToken  // Store backend JWT
       }
       return token
     },
@@ -131,12 +120,14 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.id as string
-        session.user.hasPassword = token.hasPassword as boolean
         session.user.emailVerified = !!token.emailVerified
         session.user.freeReportUsed = token.freeReportUsed as boolean
-        session.user.hasActiveSubscription = false // Default value, update based on your subscription logic
-        session.user.stripeCustomerId = null // Default value, update if needed
+        session.user.stripeCustomerId = token.stripeCustomerId as string | null
+        session.user.hasActiveSubscription = false // Will be fetched from backend
+        session.user.hasPassword = true // Backend handles this
       }
+      // Include backend JWT for API calls
+      (session as any).accessToken = token.accessToken
       return session
     }
   },
