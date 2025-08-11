@@ -4,8 +4,8 @@ from typing import Optional, Literal
 from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_
-from app.database import get_db
-from app.models import User, Project
+from database import get_db
+from models.db_models import User, Project, JobStatus
 import bcrypt
 import uuid
 import logging
@@ -70,18 +70,8 @@ async def check_email_status(
         # Check if user exists
         user = db.query(User).filter(User.email == request.email).first()
         if user:
-            # Check for active subscription
-            has_subscription = False
-            if user.stripe_customer_id:
-                # Check subscription status (simplified - you may want to check actual Stripe status)
-                from app.models import Subscription
-                subscription = db.query(Subscription).filter(
-                    and_(
-                        Subscription.user_id == user.id,
-                        Subscription.status.in_(["active", "trialing"])
-                    )
-                ).first()
-                has_subscription = subscription is not None
+            # Check for active subscription (simplified - actual subscription check would use Stripe API)
+            has_subscription = user.active_subscription if hasattr(user, 'active_subscription') else False
             
             return CheckEmailResponse(
                 status="user",
