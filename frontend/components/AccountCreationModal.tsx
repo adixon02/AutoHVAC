@@ -1,5 +1,4 @@
 import React, { useState } from 'react'
-import { X, Lock, CheckCircle, AlertCircle } from 'lucide-react'
 import { apiClient } from '../lib/api-client'
 import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/router'
@@ -95,7 +94,9 @@ export default function AccountCreationModal({
                   onClick={onClose}
                   className="absolute right-4 top-4 text-white/80 hover:text-white transition-colors"
                 >
-                  <X className="w-5 h-5" />
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
                 <h2 className="text-xl font-semibold text-white">Create Your Account</h2>
                 <p className="text-blue-100 text-sm mt-1">
@@ -108,7 +109,9 @@ export default function AccountCreationModal({
                 {/* Info Box */}
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <div className="flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
                     <div className="text-sm">
                       <p className="font-medium text-gray-900">
                         You've used your free report
@@ -139,7 +142,9 @@ export default function AccountCreationModal({
                     Password
                   </label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
                     <input
                       type="password"
                       value={password}
@@ -158,7 +163,9 @@ export default function AccountCreationModal({
                     Confirm Password
                   </label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
                     <input
                       type="password"
                       value={confirmPassword}
@@ -174,7 +181,9 @@ export default function AccountCreationModal({
                 {error && (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3">
                     <div className="flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                      <svg className="w-4 h-4 text-red-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
                       <p className="text-sm text-red-600">{error}</p>
                     </div>
                   </div>
