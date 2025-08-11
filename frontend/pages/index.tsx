@@ -71,7 +71,7 @@ export default function Home() {
             Join thousands of professionals who've streamlined their blueprint analysis process.
           </p>
           <button 
-            onClick={handleGetStarted}
+            onClick={() => handleGetStarted()}
             className="btn-primary bg-white text-brand-700 hover:bg-brand-50 text-lg px-8 py-4"
           >
             Start Free Analysis

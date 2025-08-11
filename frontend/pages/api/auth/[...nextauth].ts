@@ -122,7 +122,7 @@ export const authOptions: NextAuthOptions = {
         })
         
         token.hasPassword = !!dbUser?.password
-        token.emailVerified = dbUser?.emailVerified
+        token.emailVerified = dbUser?.emailVerified || null
         token.freeReportUsed = dbUser?.freeReportUsed || false
       }
       return token
@@ -132,8 +132,10 @@ export const authOptions: NextAuthOptions = {
       if (session.user) {
         session.user.id = token.id as string
         session.user.hasPassword = token.hasPassword as boolean
-        session.user.emailVerified = token.emailVerified as Date | null
+        session.user.emailVerified = !!token.emailVerified
         session.user.freeReportUsed = token.freeReportUsed as boolean
+        session.user.hasActiveSubscription = false // Default value, update based on your subscription logic
+        session.user.stripeCustomerId = null // Default value, update if needed
       }
       return session
     }
