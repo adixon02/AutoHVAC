@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { signIn, useSession } from 'next-auth/react'
 import { apiHelpers } from '../lib/fetcher'
-// PaywallModal removed - using full page upgrade instead
+import { apiClient } from '../lib/api-client'
+import AccountCreationModal from './AccountCreationModal'
 import Cookies from 'js-cookie'
 
 interface ProjectData {
@@ -27,7 +28,8 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
   const [currentStep, setCurrentStep] = useState(1)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Removed showPaywall state - using full page upgrade instead
+  const [showAccountModal, setShowAccountModal] = useState(false)
+  const [emailStatus, setEmailStatus] = useState<'new' | 'lead' | 'user' | null>(null)
   
   // Check for saved email from session or cookie
   const savedEmail = session?.user?.email || (typeof window !== 'undefined' ? Cookies.get('user_email') || '' : '')
@@ -441,8 +443,10 @@ function Step1ProjectSetup({ projectData, updateProjectData, onNext, error, setE
 
 function Step7EmailCollection({ projectData, updateProjectData, onPrev, onSubmit, isLoading, error, setError }: any) {
   const { data: session } = useSession()
+  const router = useRouter()
   const savedEmail = session?.user?.email || (typeof window !== 'undefined' ? Cookies.get('user_email') || '' : '')
   const isReturningUser = savedEmail && savedEmail === projectData.email
+  const [showAccountModal, setShowAccountModal] = React.useState(false)
   
   const handleSubmit = async () => {
     if (!projectData.email.trim()) {
@@ -455,18 +459,45 @@ function Step7EmailCollection({ projectData, updateProjectData, onPrev, onSubmit
     }
     setError(null)
     
-    // Create a soft session with NextAuth (email-only, no password)
-    const result = await signIn('email-only', {
-      email: projectData.email,
-      redirect: false,
-    })
-    
-    if (result?.ok) {
-      // User is now "identified" in NextAuth
-      // Also keep cookie for backward compatibility
-      Cookies.set('user_email', projectData.email, { expires: 365 })
-      onSubmit()
-    } else {
+    try {
+      // Check email status using new lead system
+      const emailCheck = await apiClient.checkEmailStatus(projectData.email)
+      
+      switch (emailCheck.status) {
+        case 'new':
+          // New lead - capture and continue
+          await apiClient.captureLead({
+            email: projectData.email,
+            marketing_consent: true,
+            project_id: null // Will be set after upload
+          })
+          Cookies.set('user_email', projectData.email, { expires: 365 })
+          onSubmit()
+          break
+          
+        case 'lead':
+          // Returning lead - needs to create account
+          setShowAccountModal(true)
+          break
+          
+        case 'user':
+          // Existing user - check subscription
+          if (emailCheck.has_subscription) {
+            // Has subscription, continue
+            Cookies.set('user_email', projectData.email, { expires: 365 })
+            onSubmit()
+          } else if (!emailCheck.free_report_used) {
+            // User but hasn't used free report
+            onSubmit()
+          } else {
+            // Needs to upgrade
+            Cookies.set('user_email', projectData.email, { expires: 30 })
+            router.push('/upgrade')
+          }
+          break
+      }
+    } catch (err: any) {
+      console.error('Email check error:', err)
       setError('Failed to process email. Please try again.')
     }
   }
@@ -551,6 +582,17 @@ function Step7EmailCollection({ projectData, updateProjectData, onPrev, onSubmit
           )}
         </button>
       </div>
+      
+      {/* Account Creation Modal */}
+      <AccountCreationModal
+        isOpen={showAccountModal}
+        email={projectData.email}
+        onClose={() => setShowAccountModal(false)}
+        onSuccess={() => {
+          setShowAccountModal(false)
+          // Don't continue with upload, redirect to upgrade
+        }}
+      />
     </div>
   )
 }

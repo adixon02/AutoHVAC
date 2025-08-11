@@ -42,7 +42,8 @@ class Project(SQLModel, table=True):
     __tablename__ = "projects"
     
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
-    user_email: str = Field(foreign_key="users.email", index=True, max_length=255)
+    user_email: Optional[str] = Field(default=None, foreign_key="users.email", index=True, max_length=255)
+    lead_email: Optional[str] = Field(default=None, index=True, max_length=255)  # For lead-associated projects
     project_label: str = Field(max_length=255)
     filename: str = Field(max_length=255)
     file_size: Optional[int] = Field(default=None)
@@ -52,6 +53,7 @@ class Project(SQLModel, table=True):
     pdf_report_path: Optional[str] = Field(default=None, max_length=255)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     completed_at: Optional[datetime] = Field(default=None)
+    claimed_at: Optional[datetime] = Field(default=None)  # When lead converts to user
     
     # Manual J assumptions
     duct_config: Optional[str] = Field(default=None)

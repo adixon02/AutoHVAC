@@ -54,6 +54,36 @@ export interface AuthResponse {
   user: UserData
 }
 
+// Lead Management Types
+export interface CheckEmailResponse {
+  status: 'new' | 'lead' | 'user'
+  free_report_used: boolean
+  has_account: boolean
+  has_subscription: boolean
+}
+
+export interface CaptureLeadRequest {
+  email: string
+  marketing_consent?: boolean
+  project_id?: string
+}
+
+export interface CaptureLeadResponse {
+  success: boolean
+  lead_id: string
+}
+
+export interface ConvertLeadRequest {
+  email: string
+  password: string
+}
+
+export interface ConvertLeadResponse {
+  user_id: string
+  email: string
+  success: boolean
+}
+
 // API Client Class
 export class ApiClient {
   private baseUrl: string
@@ -225,6 +255,28 @@ export class ApiClient {
   // User Endpoints
   async getUserProjects(limit = 10, offset = 0): Promise<any> {
     return this.request(`/api/v1/jobs/user?limit=${limit}&offset=${offset}`)
+  }
+
+  // Lead Management Endpoints
+  async checkEmailStatus(email: string): Promise<CheckEmailResponse> {
+    return this.request('/api/leads/check', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    })
+  }
+
+  async captureLead(request: CaptureLeadRequest): Promise<CaptureLeadResponse> {
+    return this.request('/api/leads/capture', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })
+  }
+
+  async convertLeadToUser(request: ConvertLeadRequest): Promise<ConvertLeadResponse> {
+    return this.request('/api/leads/convert', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })
   }
 }
 

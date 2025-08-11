@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from datetime import datetime
 from routes import blueprint, job, billing, auth, jobs, admin
+from app.api import leads
 from app.middleware.error_handler import traceback_exception_handler, CORSMiddleware as CustomCORSMiddleware
 from app.config import DEBUG, DEV_VERIFIED_EMAILS
 from services.database_rate_limiter import database_rate_limiter
@@ -84,6 +85,7 @@ app.include_router(billing.router, prefix="/api/v1/billing")
 app.include_router(auth.router, prefix="/api/v1/auth")
 app.include_router(jobs.router, prefix="/api/v1/jobs")
 app.include_router(admin.router, prefix="/api/v1/admin")
+app.include_router(leads.router)  # Already has /api/leads prefix
 
 # Also register auth routes without /api/v1 prefix for NextAuth compatibility
 app.include_router(auth.router, prefix="/auth")

@@ -12,52 +12,8 @@ export const authOptions: NextAuthOptions = {
   },
   
   providers: [
-    // Email-only provider (no password required)
-    CredentialsProvider({
-      id: 'email-only',
-      name: 'Email Only',
-      credentials: {
-        email: { label: "Email", type: "email" }
-      },
-      async authorize(credentials) {
-        if (!credentials?.email) return null
-        
-        try {
-          // Call backend login endpoint
-          const response = await fetch(`${BACKEND_URL}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: credentials.email.toLowerCase(),
-              password: null  // Email-only login
-            })
-          })
-          
-          if (!response.ok) {
-            return null
-          }
-          
-          const data = await response.json()
-          
-          // Return user data with backend JWT token
-          return {
-            id: data.user.id,
-            email: data.user.email,
-            name: data.user.name,
-            image: data.user.image,
-            emailVerified: data.user.emailVerified,
-            freeReportUsed: data.user.freeReportUsed,
-            stripeCustomerId: data.user.stripeCustomerId,
-            accessToken: data.access_token  // Store backend JWT
-          }
-        } catch (error) {
-          console.error('Login error:', error)
-          return null
-        }
-      }
-    }),
-    
     // Standard credentials provider (email + password)
+    // This is the only auth method now - leads don't create sessions
     CredentialsProvider({
       id: 'credentials',
       name: 'Email and Password',

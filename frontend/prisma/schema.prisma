@@ -43,6 +43,7 @@ model User {
   subscriptions   Subscription[]
   apiTokens       ApiToken[]
   auditLogs       AuditLog[]
+  convertedLeads  Lead[]    @relation("ConvertedLead")
   
   @@index([email])
   @@index([stripeCustomerId])
@@ -92,10 +93,32 @@ model VerificationToken {
   @@index([expires])
 }
 
+// ==================== LEADS ====================
+model Lead {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  firstReportDate   DateTime @default(now())
+  projectId         String?  // Reference to their first project
+  marketingConsent  Boolean  @default(false)
+  convertedToUserId String?  // When they create an account
+  
+  // Metadata
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // Relations
+  projects          Project[]
+  convertedToUser   User?     @relation("ConvertedLead", fields: [convertedToUserId], references: [id])
+  
+  @@index([email])
+  @@index([convertedToUserId])
+}
+
 // ==================== BUSINESS LOGIC ====================
 model Project {
   id          String   @id @default(cuid())
-  userId      String?  // Null for anonymous uploads
+  userId      String?  // Null for anonymous uploads and lead projects
+  leadEmail   String?  // For lead-associated projects
   anonId      String?  // For claiming after signup
   
   // Blueprint data
@@ -120,9 +143,11 @@ model Project {
   completedAt DateTime?
   
   user        User?    @relation(fields: [userId], references: [id])
+  lead        Lead?    @relation(fields: [leadEmail], references: [email])
   
   @@index([anonId])
   @@index([userId])
+  @@index([leadEmail])
   @@index([status])
   @@index([createdAt])
 }
