@@ -257,7 +257,9 @@ class GPT4VBlueprintAnalyzer:
                 raw_response = self._analyze_with_gpt4v(image_base64, prompt)
                 
                 # Validate the response
-                is_valid, error_msg = blueprint_prompt_manager.validate_response(raw_response)
+                # For upper floors (page_num > 0), be more lenient with room count
+                min_rooms = 3 if page_num and page_num > 0 else 5
+                is_valid, error_msg = blueprint_prompt_manager.validate_response(raw_response, min_rooms=min_rooms)
                 
                 if is_valid:
                     logger.info(f"✅ Prompt version {prompt_version} succeeded")

@@ -595,6 +595,7 @@ class PDFPageAnalyzer:
                 (r'BASEMENT|LOWER\s+LEVEL|GARDEN\s+LEVEL', 0, "Basement"),
                 (r'MAIN\s+FLOOR|MAIN\s+LEVEL|GROUND\s+FLOOR', 1, "Main Floor"),
                 (r'UPPER\s+FLOOR', 2, "Upper Floor"),
+                (r'BONUS\s+FLOOR|BONUS\s+ROOM', 2, "Bonus Floor"),
                 (r'ATTIC|LOFT', 3, "Attic/Loft"),
             ]
             

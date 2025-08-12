@@ -53,11 +53,14 @@ STEP-BY-STEP ANALYSIS:
    - Are there stairs indicating other floors?
    - Total floors in building?
 
-2. ROOM EXTRACTION:
-   - List EVERY room visible with its label
-   - Extract dimensions from the blueprint
-   - Identify room types (bedroom, bathroom, kitchen, etc.)
+2. ROOM EXTRACTION (CRITICAL):
+   - List EVERY SINGLE room visible on this floor
+   - Include ALL bedrooms, bathrooms, closets, hallways, storage areas
+   - Do NOT skip any rooms - even small closets or utility rooms
+   - Extract dimensions from the blueprint for each room
+   - Identify room types (bedroom, bathroom, kitchen, storage, etc.)
    - Note which walls are exterior
+   - IMPORTANT: Bonus/upper floors may have fewer rooms than main floors
 
 3. DIMENSION CALCULATION:
    - Find the scale notation

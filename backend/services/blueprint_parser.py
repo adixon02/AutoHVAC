@@ -509,6 +509,9 @@ class BlueprintParser:
                     if 'selected_pages' in locals() and len(selected_pages) > 1:
                         # Process each floor separately then combine
                         all_rooms = []
+                        # Track which floor numbers have been used to avoid duplicates
+                        used_floor_numbers = set()
+                        
                         for i, page_analysis in enumerate(selected_pages):
                             logger.info(f"AI analysis for {page_analysis.floor_name or f'Floor {i+1}'}")
                             
@@ -520,8 +523,19 @@ class BlueprintParser:
                             page_idx = page_analysis.page_number - 1
                             floor_rooms = self._perform_ai_analysis(page_geometry, page_text, zip_code, parsing_metadata, project_id=project_id, page_num=page_idx)
                             
-                            # Set floor number for these rooms
-                            floor_num = page_analysis.floor_number if page_analysis.floor_number is not None else (i + 1)
+                            # Determine floor number intelligently
+                            if page_analysis.floor_number is not None:
+                                floor_num = page_analysis.floor_number
+                            else:
+                                # If no floor detected, assign based on order (1, 2, 3...)
+                                # but skip already used numbers
+                                floor_num = 1
+                                while floor_num in used_floor_numbers:
+                                    floor_num += 1
+                            
+                            used_floor_numbers.add(floor_num)
+                            logger.info(f"Assigning floor number {floor_num} to {len(floor_rooms)} rooms from page {page_analysis.page_number}")
+                            
                             for room in floor_rooms:
                                 room.floor = floor_num
                                 # Add floor name to room name if not already present
@@ -573,8 +587,8 @@ class BlueprintParser:
                     )
                     if metrics_collector.current_stage:
                         metrics_collector.current_stage.output_data = {
-                            "total_heating_load": sum(r.loads.heating_total for r in blueprint_schema.rooms if r.loads),
-                            "total_cooling_load": sum(r.loads.cooling_total for r in blueprint_schema.rooms if r.loads),
+                            "total_heating_load": 0,  # Loads are calculated separately in HVAC calculator
+                            "total_cooling_load": 0,  # Loads are calculated separately in HVAC calculator
                             "quality_score": parsing_metadata.data_quality_score
                         }
                 
@@ -628,8 +642,8 @@ class BlueprintParser:
                 metrics_collector.end_pipeline(success=True, results={
                     "total_area": blueprint_schema.sqft_total,
                     "num_rooms": len(blueprint_schema.rooms),
-                    "heating_load": sum(r.loads.heating_total for r in blueprint_schema.rooms if r.loads),
-                    "cooling_load": sum(r.loads.cooling_total for r in blueprint_schema.rooms if r.loads),
+                    "heating_load": 0,  # Loads are calculated separately in HVAC calculator
+                    "cooling_load": 0,  # Loads are calculated separately in HVAC calculator
                     "confidence": parsing_metadata.overall_confidence,
                     "quality_score": parsing_metadata.data_quality_score
                 })
