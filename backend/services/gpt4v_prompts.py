@@ -205,8 +205,19 @@ Return JSON:
         if room_count < min_rooms:
             return False, f"Only {room_count} rooms found (minimum {min_rooms} expected)"
         
-        # Check for reasonable total area
-        total_area = response.get('total_area_sqft', 0) or response.get('total_sqft', 0)
+        # Check for reasonable total area - support both old and new formats
+        total_area = (
+            response.get('total_area_sqft', 0) or 
+            response.get('total_sqft', 0) or
+            response.get('areas', {}).get('current_floor_sqft', 0) or
+            response.get('areas', {}).get('estimated_total_building_sqft', 0)
+        )
+        
+        # Debug logging to trace validation
+        logger.debug(f"Validating response - total_area_sqft: {response.get('total_area_sqft')}, "
+                     f"areas: {response.get('areas')}, room_count: {room_count}, "
+                     f"calculated total_area: {total_area}")
+        
         if total_area < 500:
             return False, f"Total area {total_area} sq ft is too small for residential"
         

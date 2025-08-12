@@ -52,7 +52,7 @@ class SemanticFloorValidator:
         # Room patterns that indicate basement
         self.basement_indicators = {
             'basement', 'rec', 'recreation', 'game', 'lower level',
-            'storage', 'workshop', 'wine', 'theater'
+            'workshop', 'wine', 'theater', 'furnace', 'utility'
         }
     
     def validate_floor_assignments(
@@ -147,9 +147,13 @@ class SemanticFloorValidator:
         elif has_kitchen and (has_living or has_dining):
             floor_type = "main"
             confidence = 0.9
-        elif has_bonus or (len(rooms) <= 3 and bedroom_count <= 1):
+        elif has_bonus or (len(rooms) <= 3 and bedroom_count <= 1 and not basement_score):
             floor_type = "bonus"
             confidence = 0.85
+        elif len(rooms) <= 3 and any('storage' in r.name.lower() for r in rooms):
+            # Small floor with storage room - likely bonus/attic space
+            floor_type = "bonus"
+            confidence = 0.8
         elif bedroom_count >= 2 and bathroom_count >= 1:
             floor_type = "upper"
             confidence = 0.8

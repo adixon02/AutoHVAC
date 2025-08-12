@@ -678,7 +678,7 @@ class BlueprintParser:
                                 "confidence": quality_report.overall_confidence,
                                 "critical_issues": quality_report.critical_issues
                             },
-                            severity=ValidationSeverity.CRITICAL,
+                            severity=ValidationSeverity.ERROR,
                             can_continue=False,
                             user_actions=["Review blueprint scale", "Check page selection", "Verify room detection"]
                         )
@@ -1279,6 +1279,8 @@ class BlueprintParser:
     
     def _create_fallback_rooms(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any]) -> List[Room]:
         """Create fallback rooms when AI analysis fails using intelligent geometry analysis"""
+        
+        logger.warning("⚠️ CREATING FALLBACK ROOMS - GPT-4V analysis failed validation")
         
         # Convert dictionaries to schema objects for the fallback parser
         from app.parser.schema import RawGeometry, RawText

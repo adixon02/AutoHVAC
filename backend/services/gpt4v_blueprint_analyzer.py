@@ -861,6 +861,11 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
             cooling_system_tons=hvac_loads.get("cooling_system_tons")
         )
         
+        # Add backward compatibility fields for validation
+        if 'total_area_sqft' not in response and 'areas' in response:
+            response['total_area_sqft'] = response['areas'].get('current_floor_sqft', 0)
+            logger.debug(f"Added backward compatibility: total_area_sqft = {response['total_area_sqft']}")
+        
         return analysis
     
     def _validate_analysis(self, analysis: GPTBlueprintAnalysis) -> bool:
