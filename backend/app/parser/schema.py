@@ -115,6 +115,7 @@ class Room(BaseModel):
     # Parsing details
     label_found: bool = Field(False, description="Whether a text label was found for this room")
     dimensions_source: str = Field("inferred", description="How dimensions were determined: measured, inferred, estimated")
+    area_source: str = Field("calculated", description="How area was determined: gpt4v_detected, provided, calculated_from_dimensions")
     source_page: Optional[int] = Field(None, description="Source PDF page number (1-based) for multi-floor processing")
     
     # Floor detection from GPT-4V discovery mode

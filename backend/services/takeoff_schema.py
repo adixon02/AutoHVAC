@@ -101,8 +101,17 @@ class Room(BaseModel):
     source: SourceType = Field(..., description="Primary data source")
     confidence: float = Field(0.8, ge=0, le=1, description="Detection confidence")
     
+    # Actual area field to store GPT-4V detected area
+    actual_area_sqft: Optional[float] = Field(None, gt=0, description="Actual room area from GPT-4V or measurement")
+    
     @property
     def area_sqft(self) -> float:
+        """
+        Return actual area if available (from GPT-4V), otherwise calculate from dimensions
+        This preserves GPT-4V detected areas for irregular rooms
+        """
+        if self.actual_area_sqft is not None and self.actual_area_sqft > 0:
+            return self.actual_area_sqft
         return self.width_ft * self.length_ft
     
     @property

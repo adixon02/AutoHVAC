@@ -428,6 +428,13 @@ IMPORTANT:
                     if "id" not in room:
                         room["id"] = f"room_{i+1:03d}"
                     
+                    # CRITICAL FIX: Preserve GPT-4V detected areas
+                    # If area_sqft is provided by GPT-4V, store it as actual_area_sqft
+                    # This preserves accurate areas for irregular rooms
+                    if "area_sqft" in room and room["area_sqft"] > 0:
+                        room["actual_area_sqft"] = room["area_sqft"]
+                        logger.info(f"Room '{room.get('name', 'Unknown')}': Using GPT-4V area {room['area_sqft']} sqft")
+                    
                     # Set defaults for missing fields
                     room_defaults = {
                         "ceiling_height_ft": vision_config.default_ceiling_height_ft,

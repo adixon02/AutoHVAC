@@ -179,8 +179,13 @@ def validate_room_data(room_data: Dict[str, Any]) -> Dict[str, Any]:
     if area is None or not isinstance(area, (int, float)) or area <= 0:
         width, length = validated['dimensions_ft']
         validated['area'] = width * length
+        validated['area_source'] = 'calculated_from_dimensions'
     else:
         validated['area'] = safe_float(area, 144.0, min_val=1.0, max_val=50000.0)
+        validated['area_source'] = room_data.get('area_source', 'provided')
+        # Mark if this came from GPT-4V to preserve it
+        if room_data.get('dimensions_source') == 'gpt4o_vision':
+            validated['area_source'] = 'gpt4v_detected'
     
     # Integer fields with bounds
     validated['floor'] = safe_int(room_data.get('floor', 1), 1, min_val=1, max_val=10)
@@ -218,11 +223,19 @@ def validate_room_data(room_data: Dict[str, Any]) -> Dict[str, Any]:
     area_diff = abs(calculated_area - validated['area']) / validated['area']
     
     if area_diff > 0.2:  # More than 20% difference
-        logger.warning(f"Room '{validated['name']}': Area mismatch - calculated {calculated_area:.1f} vs provided {validated['area']:.1f}")
+        logger.warning(f"Room '{validated['name']}': Area mismatch - calculated {calculated_area:.1f} vs provided {validated['area']:.1f} (source: {validated.get('area_source', 'unknown')})")
         validated['area_matches_dimensions'] = False
-        # Use calculated area if it seems more reasonable
-        if 10 <= calculated_area <= 2000:  # Reasonable room size
-            validated['area'] = calculated_area
+        
+        # PRESERVE GPT-4V AREAS: Only override if NOT from GPT-4V
+        if validated.get('area_source') != 'gpt4v_detected':
+            # Use calculated area if it seems more reasonable
+            if 10 <= calculated_area <= 2000:  # Reasonable room size
+                validated['area'] = calculated_area
+                logger.info(f"Room '{validated['name']}': Using calculated area {calculated_area:.1f} sqft")
+        else:
+            logger.info(f"Room '{validated['name']}': Preserving GPT-4V detected area {validated['area']:.1f} sqft (irregular room shape)")
+            # Store both for transparency
+            validated['calculated_area_sqft'] = calculated_area
     
     return validated
 

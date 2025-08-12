@@ -558,10 +558,14 @@ class BlueprintParser:
                         # Apply validated floor assignments
                         all_rooms = []
                         floors_processed = {}
+                        total_area_all_floors = 0
                         
                         for page_idx, validation in floor_validations.items():
                             page_analysis = selected_pages[page_idx]
                             floor_rooms = rooms_by_page[page_idx]
+                            floor_area = sum(r.area for r in floor_rooms)
+                            logger.info(f"Floor {page_idx}: {len(floor_rooms)} rooms, {floor_area:.0f} sqft")
+                            total_area_all_floors += floor_area
                             
                             # Use suggested floor if validation found issues
                             floor_num = validation.suggested_floor or validation.floor_number
@@ -584,7 +588,13 @@ class BlueprintParser:
                             logger.info(f"Page {page_analysis.page_number}: {len(floor_rooms)} rooms assigned to floor {floor_num} ({floor_name})")
                         
                         rooms = all_rooms
-                        logger.info(f"Combined {len(rooms)} rooms from {len(floors_processed)} floors")
+                        final_total_area = sum(r.area for r in all_rooms)
+                        logger.info(f"🏠 MULTI-FLOOR SUMMARY: Combined {len(rooms)} rooms from {len(floors_processed)} floors")
+                        logger.info(f"📊 TOTAL AREA: {final_total_area:.0f} sqft (tracked: {total_area_all_floors:.0f} sqft)")
+                        for floor_num, floor_name in floors_processed.items():
+                            floor_rooms = [r for r in all_rooms if r.floor == floor_num]
+                            floor_area = sum(r.area for r in floor_rooms)
+                            logger.info(f"  Floor {floor_num} ({floor_name}): {len(floor_rooms)} rooms, {floor_area:.0f} sqft")
                         
                         # Multi-story validation
                         self._validate_multi_story_rooms(rooms, selected_pages)
@@ -1107,7 +1117,10 @@ class BlueprintParser:
                                 logger.info(f"Using GPT-4V detected floor type: {detected_floor_info['type']} (confidence: {detected_floor_info['confidence']:.2f})")
                             
                             for gpt_room in analysis.rooms:
-                                # CRITICAL: Check for zero area (main cause of wrong calculations)
+                                # CRITICAL: Log GPT-4V areas to trace propagation
+                                logger.info(f"GPT-4V room '{gpt_room.name}': area={gpt_room.area_sqft} sqft, dims={gpt_room.dimensions_ft}")
+                                
+                                # Check for zero area (but preserve non-zero areas from GPT-4V)
                                 if gpt_room.area_sqft <= 0:
                                     logger.error(f"GPT-4V returned ZERO AREA for room '{gpt_room.name}'! Dimensions: {gpt_room.dimensions_ft}")
                                     # Calculate from dimensions if possible
@@ -1118,6 +1131,9 @@ class BlueprintParser:
                                     else:
                                         logger.error(f"Cannot calculate area - no valid dimensions for '{gpt_room.name}'")
                                         gpt_room.area_sqft = 100  # Default fallback
+                                else:
+                                    # Area is valid from GPT-4V - preserve it!
+                                    logger.info(f"✅ Preserving GPT-4V area for '{gpt_room.name}': {gpt_room.area_sqft} sqft")
                                 
                                 room = Room(
                                     name=gpt_room.name,
@@ -1130,7 +1146,8 @@ class BlueprintParser:
                                     confidence=gpt_room.confidence,
                                     center_position=(0.0, 0.0),
                                     label_found=True,
-                                    dimensions_source="gpt4o_vision"
+                                    dimensions_source="gpt4o_vision",
+                                    area_source="gpt4v_detected"  # Mark area as from GPT-4V
                                 )
                                 # Store detected floor info if available
                                 if detected_floor_info:
