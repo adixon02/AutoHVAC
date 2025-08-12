@@ -1,6 +1,6 @@
 """
-GPT-5 Vision Blueprint Analyzer - Advanced Blueprint Analysis
-Uses OpenAI's GPT-5 Vision API to accurately interpret blueprints
+GPT-4o Vision Blueprint Analyzer - Advanced Blueprint Analysis
+Uses OpenAI's GPT-4o Vision API to accurately interpret blueprints
 Provides comprehensive room detection and HVAC load calculations
 """
 
@@ -179,12 +179,10 @@ class GPT4VBlueprintAnalyzer:
             }
         }
         
-        # Models to try in order
+        # Models to try in order - gpt-4o-2024-11-20 is the only one that works properly for vision
         self.models_to_try = [
-            "gpt-4o",                 # Primary multimodal model with vision
-            "gpt-4o-2024-11-20",      # Specific version if generic fails
-            "gpt-4-turbo-2024-04-09", # Latest GPT-4 Turbo with vision
-            "gpt-4-turbo",            # Generic fallback
+            "gpt-4o-2024-11-20",      # Primary model - only one that properly handles vision
+            "gpt-4o",                 # Fallback if specific version not available
         ]
         
         # Configurable timeouts with sensible defaults
@@ -327,7 +325,7 @@ class GPT4VBlueprintAnalyzer:
         return analysis
     
     def _render_page_to_base64(self, pdf_path: str, page_num: int, dpi: int = 200) -> str:
-        """Render PDF page to base64 encoded image for GPT-5 Vision"""
+        """Render PDF page to base64 encoded image for GPT-4o Vision"""
         doc = fitz.open(pdf_path)
         page = doc[page_num]
         

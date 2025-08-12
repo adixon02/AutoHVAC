@@ -518,7 +518,7 @@ class BlueprintParser:
                             
                             # Pass the specific page number for this floor (0-indexed)
                             page_idx = page_analysis.page_number - 1
-                            floor_rooms = self._perform_ai_analysis(page_geometry, page_text, zip_code, parsing_metadata, page_num=page_idx)
+                            floor_rooms = self._perform_ai_analysis(page_geometry, page_text, zip_code, parsing_metadata, project_id=project_id, page_num=page_idx)
                             
                             # Set floor number for these rooms
                             floor_num = page_analysis.floor_number if page_analysis.floor_number is not None else (i + 1)
@@ -537,7 +537,7 @@ class BlueprintParser:
                         self._validate_multi_story_rooms(rooms, selected_pages)
                     else:
                         # Single page processing (original behavior)
-                        rooms = self._perform_ai_analysis(raw_geometry, raw_text, zip_code, parsing_metadata)
+                        rooms = self._perform_ai_analysis(raw_geometry, raw_text, zip_code, parsing_metadata, project_id=project_id)
                     
                     metrics_collector.current_stage.output_data = {
                         "num_rooms": len(rooms),
@@ -956,7 +956,7 @@ class BlueprintParser:
             })
             return {}, [], []
     
-    def _perform_ai_analysis(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], zip_code: str, metadata: ParsingMetadata, page_num: Optional[int] = None) -> List[Room]:
+    def _perform_ai_analysis(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], zip_code: str, metadata: ParsingMetadata, project_id: Optional[str] = None, page_num: Optional[int] = None) -> List[Room]:
         """Perform AI analysis to identify rooms with validation"""
         try:
             # First try GPT-4 Vision if available for maximum accuracy
@@ -971,8 +971,11 @@ class BlueprintParser:
                     pdf_path = self.current_pdf_path if hasattr(self, 'current_pdf_path') else None
                     if pdf_path and os.path.exists(pdf_path):
                         gpt4v = get_gpt4v_analyzer()
-                        # Set project_id for S3 saving
-                        gpt4v.current_project_id = project_id
+                        # Set project_id for S3 saving - use from parameter or pipeline context
+                        if project_id:
+                            gpt4v.current_project_id = project_id
+                        elif pipeline_context.project_id:
+                            gpt4v.current_project_id = pipeline_context.project_id
                         # Pass explicit page number for multi-floor processing
                         analysis = gpt4v.analyze_blueprint(
                             pdf_path, 
@@ -1005,7 +1008,7 @@ class BlueprintParser:
                             metadata.ai_status = ParsingStatus.SUCCESS
                             return enhanced_rooms
                 except Exception as e:
-                    logger.warning(f"GPT-4o Vision analysis failed, falling back to GPT-5 text AI: {e}")
+                    logger.warning(f"GPT-4o Vision analysis failed, falling back to text-based AI analysis: {e}")
             
             # Fallback to original AI analysis
             # Convert back to schema objects for AI processing
