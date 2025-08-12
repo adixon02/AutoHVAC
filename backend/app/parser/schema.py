@@ -163,6 +163,9 @@ class BlueprintSchema(BaseModel):
     # Comprehensive metadata
     parsing_metadata: ParsingMetadata = Field(..., description="Complete parsing metadata and audit trail")
     
+    # Building typology analysis (optional, for multi-story buildings)
+    building_typology: Optional[Dict[str, Any]] = Field(None, description="Building typology analysis with floor characteristics")
+    
     @validator('project_id', pre=True)
     def validate_project_id(cls, v):
         """Convert string UUID to UUID object if needed"""

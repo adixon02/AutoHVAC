@@ -34,6 +34,8 @@ from services.deterministic_scale_detector import deterministic_scale_detector, 
 from services.room_filter import room_filter, RoomFilterConfig
 from services.metrics_collector import metrics_collector, PipelineStage, track_stage
 from services.pipeline_context import pipeline_context
+from services.building_typology import detect_building_typology, BuildingTypologyDetector
+from services.semantic_floor_validator import validate_floor_assignments
 
 # Import our new lean components
 try:
@@ -508,12 +510,11 @@ class BlueprintParser:
                 with track_stage(PipelineStage.SEMANTIC_ANALYSIS):
                     if 'selected_pages' in locals() and len(selected_pages) > 1:
                         # Process each floor separately then combine
-                        all_rooms = []
-                        # Track which floor numbers have been used to avoid duplicates
-                        used_floor_numbers = set()
+                        rooms_by_page = {}
                         
+                        # First, get rooms for each page
                         for i, page_analysis in enumerate(selected_pages):
-                            logger.info(f"AI analysis for {page_analysis.floor_name or f'Floor {i+1}'}")
+                            logger.info(f"AI analysis for page {page_analysis.page_number} ({page_analysis.floor_name or 'Unknown floor'})")
                             
                             # Use geometry/text for this specific page
                             page_geometry = all_raw_geometry[i] if i < len(all_raw_geometry) else {}
@@ -523,29 +524,43 @@ class BlueprintParser:
                             page_idx = page_analysis.page_number - 1
                             floor_rooms = self._perform_ai_analysis(page_geometry, page_text, zip_code, parsing_metadata, project_id=project_id, page_num=page_idx)
                             
-                            # Determine floor number intelligently
-                            if page_analysis.floor_number is not None:
-                                floor_num = page_analysis.floor_number
-                            else:
-                                # If no floor detected, assign based on order (1, 2, 3...)
-                                # but skip already used numbers
-                                floor_num = 1
-                                while floor_num in used_floor_numbers:
-                                    floor_num += 1
+                            rooms_by_page[i] = floor_rooms
+                            logger.info(f"Page {page_analysis.page_number}: Found {len(floor_rooms)} rooms")
+                        
+                        # Validate floor assignments using semantic analysis
+                        logger.info("Validating floor assignments with semantic analysis...")
+                        floor_validations = validate_floor_assignments(rooms_by_page, selected_pages)
+                        
+                        # Apply validated floor assignments
+                        all_rooms = []
+                        floors_processed = {}
+                        
+                        for page_idx, validation in floor_validations.items():
+                            page_analysis = selected_pages[page_idx]
+                            floor_rooms = rooms_by_page[page_idx]
                             
-                            used_floor_numbers.add(floor_num)
-                            logger.info(f"Assigning floor number {floor_num} to {len(floor_rooms)} rooms from page {page_analysis.page_number}")
+                            # Use suggested floor if validation found issues
+                            floor_num = validation.suggested_floor or validation.floor_number
                             
+                            if validation.issues:
+                                logger.warning(f"Page {page_analysis.page_number} floor assignment issues: {validation.issues}")
+                                logger.info(f"Using floor {floor_num} instead of original {validation.floor_number}")
+                            
+                            # Assign floor numbers to rooms
                             for room in floor_rooms:
                                 room.floor = floor_num
-                                # Add floor name to room name if not already present
-                                if page_analysis.floor_name and page_analysis.floor_name.lower() not in room.name.lower():
-                                    room.name = f"{room.name} ({page_analysis.floor_name})"
                             
                             all_rooms.extend(floor_rooms)
+                            
+                            # Track floors processed
+                            floor_name = validation.detected_type.title() + " Floor"
+                            if floor_num not in floors_processed:
+                                floors_processed[floor_num] = floor_name
+                            
+                            logger.info(f"Page {page_analysis.page_number}: {len(floor_rooms)} rooms assigned to floor {floor_num} ({floor_name})")
                         
                         rooms = all_rooms
-                        logger.info(f"Combined {len(rooms)} rooms from {len(selected_pages)} floors")
+                        logger.info(f"Combined {len(rooms)} rooms from {len(floors_processed)} floors")
                         
                         # Multi-story validation
                         self._validate_multi_story_rooms(rooms, selected_pages)
@@ -559,19 +574,26 @@ class BlueprintParser:
                         "floors_processed": len(selected_pages) if 'selected_pages' in locals() else 1
                     }
                 
-                # Stage 5: Compile final blueprint schema
-                logger.info("Stage 5: Compiling final blueprint schema")
+                # Stage 5: Building Typology Detection and Schema Compilation
+                logger.info("Stage 5: Detecting building typology and compiling final blueprint schema")
                 with track_stage(PipelineStage.LOAD_CALCULATION):
-                    # Build floors_processed dict
-                    floors_processed = {}
-                    if 'selected_pages' in locals():
-                        for page in selected_pages:
-                            floor_num = page.floor_number if page.floor_number is not None else 1
-                            floor_name = page.floor_name or f"Floor {floor_num}"
-                            floors_processed[floor_num] = floor_name
-                    else:
-                        # Default single floor
-                        floors_processed = {1: "Main Floor"}
+                    # Detect building typology for accurate load calculations
+                    building_typology = detect_building_typology(rooms, selected_pages if 'selected_pages' in locals() else None)
+                    
+                    logger.info(f"Building type: {building_typology.building_type.value}, "
+                               f"Actual stories: {building_typology.actual_stories}")
+                    if building_typology.has_bonus_room:
+                        logger.info(f"Bonus room detected: {building_typology.bonus_room_area:.0f} sqft")
+                    
+                    # Log any typology notes/warnings
+                    for note in building_typology.notes:
+                        logger.info(f"Typology note: {note}")
+                    
+                    # Build floors_processed dict from typology
+                    if 'floors_processed' not in locals():
+                        floors_processed = {}
+                        for fc in building_typology.floor_characteristics:
+                            floors_processed[fc.floor_number] = fc.floor_name
                     
                     blueprint_schema = self._compile_blueprint_schema(
                     project_id=project_id or str(uuid4()),
@@ -583,7 +605,8 @@ class BlueprintParser:
                     parsed_dimensions=parsed_dimensions,
                     geometry_elements=geometry_elements,
                     parsing_metadata=parsing_metadata,
-                    floors_processed=floors_processed
+                    floors_processed=floors_processed,
+                    building_typology=building_typology
                     )
                     if metrics_collector.current_stage:
                         metrics_collector.current_stage.output_data = {
@@ -1393,7 +1416,8 @@ class BlueprintParser:
         geometry_elements: List[GeometricElement],
         parsing_metadata: ParsingMetadata,
         detected_scale: float = 48,
-        floors_processed: Optional[Dict[int, str]] = None
+        floors_processed: Optional[Dict[int, str]] = None,
+        building_typology: Optional[Any] = None
     ) -> BlueprintSchema:
         """Compile all parsed data into final BlueprintSchema with scale information"""
         
@@ -1402,9 +1426,16 @@ class BlueprintParser:
             raw_geometry['detected_scale'] = detected_scale
             raw_geometry['scale_source'] = 'multi_method_voting'
         
-        # Calculate totals
-        total_area = sum(room.area for room in rooms)
-        max_floor = max((room.floor for room in rooms), default=1)
+        # Use building typology for accurate area and story calculations
+        if building_typology:
+            total_area = building_typology.total_conditioned_area
+            stories = int(building_typology.actual_stories) if building_typology.actual_stories >= 1 else 1
+            logger.info(f"Using typology-validated area: {total_area:.0f} sqft, stories: {stories}")
+        else:
+            # Fallback to simple calculation
+            total_area = sum(room.area for room in rooms)
+            max_floor = max((room.floor for room in rooms), default=1)
+            stories = max_floor
         
         # VALIDATION: Square footage sanity checks
         if rooms:
@@ -1490,11 +1521,27 @@ class BlueprintParser:
             # Log validation results
             logger.info(f"Square footage validation: {room_count} rooms, {total_area:.0f} total sq ft, {avg_room_size:.0f} avg sq ft/room")
         
+        # Convert building typology to dict if present
+        typology_dict = None
+        if building_typology:
+            from dataclasses import asdict
+            typology_dict = {
+                'building_type': building_typology.building_type.value,
+                'actual_stories': building_typology.actual_stories,
+                'has_bonus_room': building_typology.has_bonus_room,
+                'bonus_room_area': building_typology.bonus_room_area,
+                'total_conditioned_area': building_typology.total_conditioned_area,
+                'main_floor_area': building_typology.main_floor_area,
+                'upper_floor_area': building_typology.upper_floor_area,
+                'confidence': building_typology.confidence,
+                'notes': building_typology.notes
+            }
+        
         return BlueprintSchema(
             project_id=project_id,
             zip_code=zip_code,
             sqft_total=total_area,
-            stories=max_floor,
+            stories=stories,  # Use the typology-corrected stories count
             rooms=rooms,
             raw_geometry=raw_geometry,
             raw_text=raw_text,
@@ -1502,7 +1549,8 @@ class BlueprintParser:
             labels=parsed_labels,
             geometric_elements=geometry_elements,
             parsing_metadata=parsing_metadata,
-            floors_processed=floors_processed or {r.floor: f"Floor {r.floor}" for r in rooms if r.floor is not None}
+            floors_processed=floors_processed or {r.floor: f"Floor {r.floor}" for r in rooms if r.floor is not None},
+            building_typology=typology_dict
         )
     
     def _create_typical_fallback_rooms(self, target_sqft: Optional[float] = None) -> List[Room]:
