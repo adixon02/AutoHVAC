@@ -12,6 +12,18 @@ from .cltd_clf import (
     calculate_window_solar_load, calculate_window_conduction_load,
     calculate_internal_load_clf, get_diversity_factor
 )
+
+# Window-to-Wall Ratios per ASHRAE 90.1 Residential
+WWR_BY_ROOM_TYPE = {
+    'living': 0.20,     # 18-22% typical
+    'dining': 0.18,
+    'kitchen': 0.15,    # 12-18% typical  
+    'bedroom': 0.13,    # 12-15% typical
+    'bathroom': 0.06,   # 5-8% typical
+    'hallway': 0.03,
+    'closet': 0.0,
+    'garage': 0.0       # Unconditioned
+}
 from .infiltration import (
     convert_cfm50_to_natural, convert_ach50_to_cfm50, 
     estimate_infiltration_by_quality, calculate_infiltration_loads,
@@ -403,7 +415,11 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
             window_area = room.windows * window_size
             wall_area -= window_area
         else:
-            window_area = 0
+            # Use WWR method for window area calculation
+            window_area = _calculate_window_area_wwr(
+                room, exterior_wall_length, ceiling_height, room_type
+            )
+            wall_area -= window_area
     
     # Roof area (only for top floor rooms)
     roof_area = room.area if room.floor == max([r.floor for r in [room]]) else 0
@@ -521,31 +537,34 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
             )
         cooling_load += solar_load
     
-    # 5. Internal loads with CLF
-    # People load (assume 1 person per 175 sq ft for modern homes)
-    # New construction often has higher occupancy density
-    people_count = max(1, room.area / 175)
-    people_load = calculate_internal_load_clf(people_count * 275, 'people')  # 275 BTU/hr per person sensible (increased activity)
-    cooling_load += people_load
+    # 5. Internal loads with CLF and sensible/latent splits
+    internal_gains = _get_room_internal_gains(room_type, room.area)
     
-    # CALIBRATED lighting load for LED-dominant homes
-    # Reduced from 1.9 to 1.5 W/sq ft (modern LED efficiency)
-    lighting_load = calculate_internal_load_clf(room.area * 1.5 * 3.41, 'lighting')  # Convert W to BTU/hr
-    cooling_load += lighting_load
+    # People load (sensible + latent)
+    if internal_gains['people'] > 0:
+        people_sensible = internal_gains['people'] * 230  # 230 BTU/hr sensible per person
+        people_latent = internal_gains['people'] * 200    # 200 BTU/hr latent per person
+        people_load = calculate_internal_load_clf(people_sensible, 'people')
+        cooling_load += people_load
+        # Latent load doesn't use CLF
+        cooling_load += people_latent * internal_gains['schedule']
     
-    # CALIBRATED equipment loads for realistic residential usage
-    # Reduced to fix 27% cooling overestimation
-    equipment_loads = {
-        'kitchen': room.area * 3.5,  # Reduced from 5.2 (typical residential kitchen)
-        'office': room.area * 2.5,   # Reduced from 3.5 (home office, not commercial)
-        'living': room.area * 1.5,   # Reduced from 1.8 (TV and entertainment)
-        'bedroom': room.area * 1.0,  # Reduced from 1.3 (minimal equipment)
-        'bathroom': room.area * 1.5, # Reduced from 2.2 (occasional use items)
-        'other': room.area * 1.0     # Reduced from 1.2 (general loads)
-    }
-    equipment_heat = equipment_loads.get(room_type, equipment_loads['other'])
-    equipment_load = calculate_internal_load_clf(equipment_heat, 'equipment')
-    cooling_load += equipment_load
+    # Lighting load (sensible only, W/sqft)
+    lighting_watts = room.area * internal_gains['lighting']
+    lighting_load = calculate_internal_load_clf(lighting_watts * 3.41, 'lighting')  # Convert W to BTU/hr
+    cooling_load += lighting_load * internal_gains['schedule']
+    
+    # Equipment loads with sensible/latent splits
+    equipment_sensible = internal_gains['equipment']['sensible'] * 3.41  # Convert W to BTU/hr
+    equipment_latent = internal_gains['equipment']['latent'] * 3.41
+    
+    if equipment_sensible > 0:
+        equipment_load = calculate_internal_load_clf(equipment_sensible, 'equipment')
+        cooling_load += equipment_load * internal_gains['schedule']
+    
+    if equipment_latent > 0:
+        # Latent load doesn't use CLF
+        cooling_load += equipment_latent * internal_gains['schedule']
     
     # 6. Infiltration cooling load (sensible + latent)
     # Note: infiltration_cfm is calculated in the heating section below, but we need it here too
@@ -613,6 +632,11 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
         outdoor_heating_temp=outdoor_heating_temp,
         outdoor_cooling_temp=outdoor_cooling_temp
     )
+    
+    # Apply HRV/ERV recovery if present
+    if envelope_data and hasattr(envelope_data, 'ventilation_system'):
+        ventilation = _apply_ventilation_recovery(ventilation, envelope_data)
+    
     cooling_load += ventilation['cooling']
     
     # HEATING LOAD CALCULATIONS (simplified conduction method)
@@ -1598,6 +1622,206 @@ def _classify_room_type(room_name: str) -> str:
         return "utility"
     else:
         return "other"
+
+
+def _get_room_internal_gains(room_type: str, room_area: float) -> Dict[str, Any]:
+    """
+    Get internal gain schedules with sensible/latent splits
+    
+    Args:
+        room_type: Type of room
+        room_area: Room area in sq ft
+        
+    Returns:
+        Dict with people count, lighting W/sqft, equipment loads, and schedule factor
+    """
+    # Internal gains schedule by room type
+    INTERNAL_GAINS_SCHEDULE = {
+        'kitchen': {
+            'people': 0,  # Counted in adjacent dining/living
+            'lighting': 2.0,  # W/sqft
+            'equipment': {'sensible': 1200, 'latent': 400},  # Cooking moisture (W)
+            'schedule': 0.75  # Diversity factor
+        },
+        'living': {
+            'people': min(3, room_area / 150),  # Scale with area
+            'lighting': 1.5,
+            'equipment': {'sensible': 500, 'latent': 0},
+            'schedule': 0.80
+        },
+        'dining': {
+            'people': min(2, room_area / 100),
+            'lighting': 1.8,
+            'equipment': {'sensible': 100, 'latent': 0},
+            'schedule': 0.60
+        },
+        'bedroom': {
+            'people': min(2, room_area / 100),
+            'lighting': 1.0,
+            'equipment': {'sensible': 200, 'latent': 0},
+            'schedule': 0.50  # Lower at peak cooling hour
+        },
+        'bathroom': {
+            'people': 0,  # Transient occupancy
+            'lighting': 2.0,
+            'equipment': {'sensible': 50, 'latent': 200},  # Shower moisture
+            'schedule': 0.25  # Brief peaks only
+        },
+        'closet': {
+            'people': 0,
+            'lighting': 0.5,
+            'equipment': {'sensible': 0, 'latent': 0},
+            'schedule': 0.10
+        },
+        'hallway': {
+            'people': 0,
+            'lighting': 1.0,
+            'equipment': {'sensible': 0, 'latent': 0},
+            'schedule': 0.50
+        },
+        'office': {
+            'people': min(1, room_area / 120),
+            'lighting': 2.0,
+            'equipment': {'sensible': 400, 'latent': 0},  # Computer equipment
+            'schedule': 0.70
+        },
+        'utility': {
+            'people': 0,
+            'lighting': 1.0,
+            'equipment': {'sensible': 500, 'latent': 100},  # Washer/dryer
+            'schedule': 0.30
+        },
+        'garage': {
+            'people': 0,
+            'lighting': 0.5,
+            'equipment': {'sensible': 0, 'latent': 0},
+            'schedule': 0.0  # Unconditioned
+        },
+        'other': {
+            'people': min(1, room_area / 200),
+            'lighting': 1.0,
+            'equipment': {'sensible': 100, 'latent': 0},
+            'schedule': 0.60
+        }
+    }
+    
+    # Get gains for room type
+    gains = INTERNAL_GAINS_SCHEDULE.get(room_type, INTERNAL_GAINS_SCHEDULE['other'])
+    
+    # Scale equipment loads for very large rooms
+    if room_area > 400 and room_type in ['living', 'bedroom']:
+        scale_factor = min(1.5, room_area / 400)
+        gains['equipment']['sensible'] *= scale_factor
+    
+    return gains
+
+
+def _apply_ventilation_recovery(
+    ventilation_loads: Dict[str, float],
+    envelope_data: Any
+) -> Dict[str, float]:
+    """
+    Apply HRV/ERV recovery efficiency to ventilation loads
+    
+    Args:
+        ventilation_loads: Dict with heating/cooling/cfm values
+        envelope_data: Envelope data with ventilation system info
+        
+    Returns:
+        Updated ventilation loads with recovery applied
+    """
+    # Check ventilation system type
+    vent_system = getattr(envelope_data, 'ventilation_system', '').lower()
+    
+    if 'hrv' in vent_system:
+        # Heat Recovery Ventilator - sensible only
+        sre = 0.70  # Sensible Recovery Efficiency (70-80% typical)
+        lre = 0.0   # No latent recovery for HRV
+        system_type = 'HRV'
+    elif 'erv' in vent_system:
+        # Energy Recovery Ventilator - sensible and latent
+        sre = 0.65  # Sensible Recovery Efficiency (60-70% typical)
+        lre = 0.45  # Latent Recovery Efficiency (40-50% typical)
+        system_type = 'ERV'
+    else:
+        # No recovery system
+        return ventilation_loads
+    
+    # Apply recovery efficiency
+    original_heating = ventilation_loads.get('heating', 0)
+    original_cooling = ventilation_loads.get('cooling', 0)
+    original_sensible = ventilation_loads.get('sensible_cooling', original_cooling * 0.7)
+    original_latent = ventilation_loads.get('latent_cooling', original_cooling * 0.3)
+    
+    # Reduce loads by recovery efficiency
+    ventilation_loads['heating'] = original_heating * (1 - sre)
+    ventilation_loads['sensible_cooling'] = original_sensible * (1 - sre)
+    ventilation_loads['latent_cooling'] = original_latent * (1 - lre)
+    ventilation_loads['cooling'] = (
+        ventilation_loads['sensible_cooling'] + 
+        ventilation_loads['latent_cooling']
+    )
+    
+    # Log the credit applied
+    heating_reduction = original_heating - ventilation_loads['heating']
+    cooling_reduction = original_cooling - ventilation_loads['cooling']
+    
+    logger.info(f"{system_type} recovery applied: SRE={sre*100:.0f}%, LRE={lre*100:.0f}%")
+    logger.info(f"Ventilation load reduced by {heating_reduction:.0f} BTU/hr (heating), "
+               f"{cooling_reduction:.0f} BTU/hr (cooling)")
+    
+    # Add recovery info to output
+    ventilation_loads['recovery_type'] = system_type
+    ventilation_loads['sre'] = sre
+    ventilation_loads['lre'] = lre
+    ventilation_loads['heating_credit'] = heating_reduction
+    ventilation_loads['cooling_credit'] = cooling_reduction
+    
+    return ventilation_loads
+
+
+def _calculate_window_area_wwr(
+    room: Room,
+    exterior_wall_length: float,
+    ceiling_height: float,
+    room_type: str
+) -> float:
+    """
+    Calculate window area using Window-to-Wall Ratio method
+    
+    Args:
+        room: Room object
+        exterior_wall_length: Total exterior wall length in feet
+        ceiling_height: Ceiling height in feet
+        room_type: Type of room for WWR lookup
+        
+    Returns:
+        Window area in square feet
+    """
+    # Get WWR for room type
+    wwr = WWR_BY_ROOM_TYPE.get(room_type.lower(), 0.10)
+    
+    # Calculate gross exterior wall area
+    gross_wall_area = exterior_wall_length * ceiling_height
+    
+    # Calculate window area from WWR
+    window_area_wwr = gross_wall_area * wwr
+    
+    # If room has window count, use it with median size as alternative
+    if hasattr(room, 'windows') and room.windows and room.windows > 0:
+        window_area_count = room.windows * 15  # 3x5 ft median window
+        # Use minimum to avoid over-glazing
+        window_area = min(window_area_count, window_area_wwr)
+    else:
+        window_area = window_area_wwr
+    
+    # Cap at maximum 40% WWR to be reasonable
+    max_window_area = gross_wall_area * 0.40
+    window_area = min(window_area, max_window_area)
+    
+    logger.debug(f"Room {room.name}: WWR={wwr:.2f}, window area={window_area:.1f} sqft")
+    
+    return window_area
 
 
 def _calculate_ventilation_load(room: Room, climate: Dict, include_ventilation: bool = True, 

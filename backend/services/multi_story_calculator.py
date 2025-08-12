@@ -272,28 +272,23 @@ class MultiStoryCalculator:
         
         # Special handling for bonus rooms over garage
         if is_bonus_room or 'bonus' in room.name.lower():
-            # Bonus rooms have exposed floor over unconditioned garage
-            has_exterior_floor = True
-            floor_r_value = 11  # Often less insulated over garage
+            # Calculate bonus room loads based on actual geometry
+            bonus_loads = self._calculate_bonus_room_loads(
+                room, 
+                outdoor_heating, 
+                outdoor_cooling, 
+                indoor
+            )
             
-            # Higher infiltration for bonus rooms
-            infiltration_multiplier = 1.5
+            # Add bonus-specific loads to base loads
+            heating_load += bonus_loads['heating_addition']
+            cooling_load += bonus_loads['cooling_addition']
             
-            # Exposed floor load (garage is semi-conditioned)
-            garage_temp_winter = outdoor_heating + 10  # Garage warmer than outside
-            garage_temp_summer = outdoor_cooling - 5   # Garage cooler than outside
-            
-            floor_delta_t_heating = indoor - garage_temp_winter
-            floor_delta_t_cooling = garage_temp_summer - indoor
-            
-            heating_load += room.area * floor_delta_t_heating / floor_r_value
-            cooling_load += room.area * max(0, floor_delta_t_cooling) / floor_r_value
-            
-            # Additional infiltration load for bonus rooms
-            heating_load *= infiltration_multiplier
-            cooling_load *= infiltration_multiplier
-            
-            logger.debug(f"Bonus room '{room.name}': Additional floor load due to garage exposure")
+            logger.info(f"Bonus room '{room.name}': Added {bonus_loads['heating_addition']:.0f} BTU/hr heating, "
+                       f"{bonus_loads['cooling_addition']:.0f} BTU/hr cooling")
+            logger.debug(f"  Knee-wall: {bonus_loads['knee_wall_area']:.0f} sqft @ R-{bonus_loads['knee_wall_r']}")
+            logger.debug(f"  Sloped ceiling: {bonus_loads['sloped_ceiling_area']:.0f} sqft @ R-{bonus_loads['ceiling_r']}")
+            logger.debug(f"  Floor over garage: {room.area:.0f} sqft @ R-{bonus_loads['floor_r']}")
             
         elif has_exterior_floor:
             floor_r_value = 19  # R-19 typical
@@ -316,6 +311,103 @@ class MultiStoryCalculator:
         cooling_load += window_area * 20  # 20 BTU/hr/sq ft solar gain
         
         return heating_load, cooling_load
+    
+    def _calculate_bonus_room_loads(
+        self,
+        room: Room,
+        outdoor_heating: float,
+        outdoor_cooling: float,
+        indoor: float
+    ) -> Dict[str, Any]:
+        """
+        Calculate bonus room loads based on actual geometry
+        
+        Bonus rooms typically have:
+        - Knee walls (short vertical walls) to unconditioned attic
+        - Sloped ceiling/roof sections
+        - Floor over unconditioned garage
+        
+        Args:
+            room: Bonus room object
+            outdoor_heating: Winter design temp
+            outdoor_cooling: Summer design temp
+            indoor: Indoor design temp
+            
+        Returns:
+            Dict with load additions and component details
+        """
+        # Get geometry info if available
+        geometry_info = getattr(room, 'geometry_info', {})
+        
+        # Knee-wall height - from geometry or use default
+        if 'knee_wall_height' in geometry_info:
+            knee_wall_height = geometry_info['knee_wall_height']
+            confidence = 'measured'
+        else:
+            knee_wall_height = 4.0  # Default 4 ft knee wall
+            confidence = 'estimated'
+            logger.debug(f"Using default knee-wall height {knee_wall_height} ft for bonus room")
+        
+        # Calculate perimeter (approximate if not available)
+        if hasattr(room, 'perimeter'):
+            room_perimeter = room.perimeter
+        else:
+            # Approximate as square room
+            room_perimeter = 4 * (room.area ** 0.5)
+        
+        # Knee-wall area (exposed to unconditioned attic)
+        knee_wall_area = room_perimeter * knee_wall_height
+        knee_wall_r = 13  # Typical R-13 for knee walls
+        
+        # Sloped ceiling area (account for roof pitch)
+        roof_pitch_factor = geometry_info.get('roof_pitch_factor', 1.2)  # 20% slope increase default
+        sloped_ceiling_area = room.area * roof_pitch_factor
+        ceiling_r = 30  # Typical R-30 for sloped ceiling
+        
+        # Floor over garage
+        floor_r = 19  # Typical R-19 floor over garage
+        floor_area = room.area
+        
+        # Temperature differences
+        dt_heating = indoor - outdoor_heating
+        dt_cooling = outdoor_cooling - indoor
+        
+        # Garage temperatures (semi-conditioned)
+        garage_temp_winter = outdoor_heating + 10  # Garage ~10°F warmer than outside
+        garage_temp_summer = outdoor_cooling - 5   # Garage ~5°F cooler than outside
+        
+        floor_dt_heating = indoor - garage_temp_winter
+        floor_dt_cooling = max(0, garage_temp_summer - indoor)
+        
+        # Calculate loads
+        heating_addition = (
+            knee_wall_area / knee_wall_r * dt_heating +
+            sloped_ceiling_area / ceiling_r * dt_heating +
+            floor_area / floor_r * floor_dt_heating
+        )
+        
+        cooling_addition = (
+            knee_wall_area / knee_wall_r * dt_cooling +
+            sloped_ceiling_area / ceiling_r * dt_cooling +
+            floor_area / floor_r * floor_dt_cooling
+        )
+        
+        # Add 20% for increased infiltration in bonus rooms
+        heating_addition *= 1.2
+        cooling_addition *= 1.2
+        
+        return {
+            'heating_addition': heating_addition,
+            'cooling_addition': cooling_addition,
+            'knee_wall_height': knee_wall_height,
+            'knee_wall_area': knee_wall_area,
+            'knee_wall_r': knee_wall_r,
+            'sloped_ceiling_area': sloped_ceiling_area,
+            'ceiling_r': ceiling_r,
+            'floor_area': floor_area,
+            'floor_r': floor_r,
+            'confidence': confidence
+        }
     
     def _distribute_infiltration_stack_effect(
         self,

@@ -711,6 +711,25 @@ class BlueprintParser:
                     for warning in validation_result.issues:
                         logger.warning(f"[VALIDATION] {warning.category}: {warning.message}")
                     
+                    # Validate room sizes
+                    from services.room_validation import validate_room_sizes
+                    room_valid, room_issues = validate_room_sizes(rooms)
+                    
+                    if not room_valid:
+                        logger.error("Room size validation failed - critical issues found")
+                        critical_room_issues = [i for i in room_issues if i.severity == 'critical']
+                        from services.error_types import NeedsInputError
+                        raise NeedsInputError(
+                            input_type='room_validation',
+                            message=f"Room validation failed: {len(critical_room_issues)} critical issues",
+                            details={
+                                'critical_issues': [
+                                    f"{i.room_name}: {i.message}" for i in critical_room_issues[:5]
+                                ],
+                                'recommendation': 'Check scale detection and room parsing'
+                            }
+                        )
+                    
                     # Validation Gate 6: Final quality check
                     if quality_score < 50:
                         logger.error(f"Data quality score too low: {quality_score:.0f}")
@@ -1100,8 +1119,23 @@ class BlueprintParser:
                             use_discovery_mode=use_discovery_mode  # Let GPT-4V discover floor type
                         )
                         
-                        if analysis and hasattr(analysis, 'total_area_sqft') and analysis.total_area_sqft and analysis.total_area_sqft > 100:
-                            logger.info(f"GPT-4o Vision successful: {len(analysis.rooms)} rooms, {analysis.total_area_sqft:.0f} sq ft")
+                        # Check for valid GPT-4V analysis using correct attributes
+                        if analysis:
+                            # GPTBlueprintAnalysis has current_floor_area_sqft, not total_area_sqft
+                            if hasattr(analysis, 'current_floor_area_sqft'):
+                                area = analysis.current_floor_area_sqft
+                            elif hasattr(analysis, 'estimated_total_area_sqft'):
+                                area = analysis.estimated_total_area_sqft
+                            else:
+                                area = 0
+                            
+                            if area and area > 100 and len(analysis.rooms) > 0:
+                                logger.info(f"GPT-4o Vision successful: {len(analysis.rooms)} rooms, {area:.0f} sq ft")
+                            else:
+                                logger.warning(f"GPT-4V analysis rejected: area={area}, rooms={len(analysis.rooms) if analysis.rooms else 0}")
+                                analysis = None
+                        
+                        if analysis:
                             
                             # Convert GPT-4V results to Room schema
                             enhanced_rooms = []

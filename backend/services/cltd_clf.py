@@ -360,9 +360,19 @@ def calculate_window_solar_load(area: float, shading_coefficient: float, orienta
     Returns:
         Solar cooling load in BTU/hr
     """
-    # Get solar heat gain factor
-    shgf_data = SOLAR_HEAT_GAIN_FACTORS.get(orientation, SOLAR_HEAT_GAIN_FACTORS['S'])
-    shgf = shgf_data.get(month, shgf_data['jul'])
+    # Get solar heat gain factor - try latitude-aware first
+    try:
+        import sys
+        import os
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, backend_dir)
+        # Import from backend/data directory
+        from data.solar_factors import get_shgf_by_latitude
+        shgf = get_shgf_by_latitude(latitude, orientation, month, hour)
+    except (ImportError, Exception) as e:
+        # Fallback to static table
+        shgf_data = SOLAR_HEAT_GAIN_FACTORS.get(orientation, SOLAR_HEAT_GAIN_FACTORS['S'])
+        shgf = shgf_data.get(month, shgf_data['jul'])
     
     # Get cooling load factor
     clf = get_glass_clf(orientation, hour)

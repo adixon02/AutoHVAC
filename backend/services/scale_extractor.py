@@ -5,6 +5,7 @@ Replaces complex 500+ line scale detector with focused approach
 
 import re
 import logging
+import numpy as np
 from typing import Optional, Tuple, List, Dict, Any
 from dataclasses import dataclass
 
@@ -45,7 +46,9 @@ class ScaleExtractor:
         self,
         ocr_text: str,
         page_num: int = 0,
-        sample_rooms: Optional[List[Dict]] = None
+        sample_rooms: Optional[List[Dict]] = None,
+        dimension_strings: Optional[List[str]] = None,
+        polygon_edges: Optional[List[float]] = None
     ) -> ScaleResult:
         """
         Extract scale from OCR text with validation
@@ -54,11 +57,23 @@ class ScaleExtractor:
             ocr_text: OCR extracted text from the page
             page_num: Page number (0-indexed)
             sample_rooms: Optional room rectangles for validation
+            dimension_strings: Optional list of dimension strings for least-squares fitting
+            polygon_edges: Optional list of polygon edge lengths in pixels
             
         Returns:
             ScaleResult with detected scale and confidence
         """
-        # Try OCR-based detection first
+        # Try least-squares fitting if dimension strings provided
+        if dimension_strings and polygon_edges and len(dimension_strings) >= 3:
+            try:
+                scale = self.extract_scale_least_squares(dimension_strings, polygon_edges, page_num)
+                if scale and scale.confidence > 0.95:
+                    logger.info(f"Scale detected via least-squares: {scale.pixels_per_foot:.1f} px/ft, confidence: {scale.confidence:.3f}")
+                    return scale
+            except Exception as e:
+                logger.warning(f"Least-squares scale detection failed: {e}")
+        
+        # Try OCR-based detection
         scale = self._extract_from_ocr(ocr_text, page_num)
         
         if scale and scale.confidence > 0.7:
@@ -132,6 +147,124 @@ class ScaleExtractor:
                 source="ocr",
                 page_num=page_num
             )
+        
+        return None
+    
+    def extract_scale_least_squares(
+        self,
+        dimension_strings: List[str],
+        edge_lengths_px: List[float],
+        page_num: int = 0
+    ) -> Optional[ScaleResult]:
+        """
+        Fit scale using multiple dimensions via least-squares regression
+        
+        Args:
+            dimension_strings: List of dimension strings (e.g., "21'-6\"")
+            edge_lengths_px: Corresponding edge lengths in pixels
+            page_num: Page number
+            
+        Returns:
+            ScaleResult with high confidence if variance < 5%
+        """
+        # Parse dimension strings to feet
+        parsed_dims_ft = []
+        for dim_str in dimension_strings:
+            try:
+                feet_value = self._parse_dimension_to_feet(dim_str)
+                if feet_value and feet_value > 0:
+                    parsed_dims_ft.append(feet_value)
+            except Exception as e:
+                logger.debug(f"Failed to parse dimension '{dim_str}': {e}")
+        
+        if len(parsed_dims_ft) < 3:
+            logger.warning(f"Insufficient valid dimensions for least-squares: {len(parsed_dims_ft)}")
+            return None
+        
+        # Match dimensions to edges (simplified - assumes same order)
+        min_pairs = min(len(parsed_dims_ft), len(edge_lengths_px))
+        if min_pairs < 3:
+            return None
+        
+        dims_array = np.array(parsed_dims_ft[:min_pairs])
+        edges_array = np.array(edge_lengths_px[:min_pairs])
+        
+        # Remove outliers using IQR method
+        ratios = edges_array / dims_array
+        q1, q3 = np.percentile(ratios, [25, 75])
+        iqr = q3 - q1
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
+        
+        mask = (ratios >= lower_bound) & (ratios <= upper_bound)
+        clean_dims = dims_array[mask]
+        clean_edges = edges_array[mask]
+        
+        if len(clean_dims) < 3:
+            logger.warning("Too many outliers removed in scale detection")
+            return None
+        
+        # Least-squares fit: edges = scale * dims
+        # Using numpy's least squares: minimize ||Ax - b||^2
+        A = clean_dims.reshape(-1, 1)
+        b = clean_edges
+        
+        scale_matrix, residuals, rank, s = np.linalg.lstsq(A, b, rcond=None)
+        scale_px_per_ft = float(scale_matrix[0])
+        
+        # Calculate confidence based on residual variance
+        if len(residuals) > 0:
+            rmse = np.sqrt(residuals[0] / len(clean_dims))
+            mean_edge = np.mean(clean_edges)
+            variance_pct = (rmse / mean_edge) if mean_edge > 0 else 1.0
+            confidence = max(0, 1.0 - variance_pct)
+        else:
+            confidence = 0.5
+        
+        logger.info(f"Least-squares scale: {scale_px_per_ft:.1f} px/ft from {len(clean_dims)} dimensions")
+        logger.info(f"Variance: {variance_pct*100:.1f}%, Confidence: {confidence:.3f}")
+        
+        # FAIL if variance > 5%
+        if variance_pct > 0.05:
+            raise ValueError(f"Scale variance {variance_pct*100:.1f}% exceeds 5% threshold")
+        
+        # Determine closest standard scale
+        best_notation = "1/4\"=1'"
+        best_diff = float('inf')
+        for notation, standard_scale in self.SCALE_MAP.items():
+            diff = abs(scale_px_per_ft - standard_scale)
+            if diff < best_diff:
+                best_diff = diff
+                best_notation = notation
+        
+        return ScaleResult(
+            pixels_per_foot=scale_px_per_ft,
+            scale_notation=best_notation,
+            confidence=confidence,
+            source="least_squares",
+            page_num=page_num
+        )
+    
+    def _parse_dimension_to_feet(self, dim_str: str) -> Optional[float]:
+        """Parse dimension string to feet value"""
+        # Pattern: 21'-6" or 21'6" or 21.5'
+        patterns = [
+            r"(\d+)'[\s-]*(\d+)\"",  # 21'-6" or 21'6"
+            r"(\d+\.?\d*)'",          # 21.5' or 21'
+            r"(\d+)\.(\d+)",          # 21.5 (decimal feet)
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, dim_str)
+            if match:
+                if len(match.groups()) == 2:
+                    # Feet and inches
+                    feet = float(match.group(1))
+                    inches = float(match.group(2))
+                    return feet + inches / 12
+                elif len(match.groups()) == 1:
+                    # Just feet
+                    return float(match.group(1))
         
         return None
     

@@ -206,3 +206,149 @@ class GeometryExtractor:
         
         # Convert back to list of tuples
         return [(float(p[0][0]), float(p[0][1])) for p in hull]
+    
+    def detect_exterior_exposure(
+        self,
+        room_polygon: List[Tuple[float, float]],
+        building_hull: List[Tuple[float, float]],
+        tolerance: float = 0.5
+    ) -> Dict[str, Any]:
+        """
+        Count exterior edges by intersecting room edges with building perimeter
+        
+        Args:
+            room_polygon: Room boundary points
+            building_hull: Building perimeter points
+            tolerance: Distance tolerance for edge matching (feet)
+            
+        Returns:
+            Dictionary with exterior wall info and orientation distribution
+        """
+        if not room_polygon or not building_hull:
+            return {
+                'exterior_wall_count': 0,
+                'corner_room': False,
+                'exterior_wall_length': 0,
+                'orientation_distribution': {},
+                'exterior_percentage': 0
+            }
+        
+        exterior_edges = []
+        total_perimeter = 0
+        
+        # Check each edge of the room polygon
+        for i in range(len(room_polygon)):
+            p1 = room_polygon[i]
+            p2 = room_polygon[(i + 1) % len(room_polygon)]
+            
+            edge_length = self._distance(p1, p2)
+            total_perimeter += edge_length
+            
+            # Check if edge is close to hull
+            if self._edge_near_hull(p1, p2, building_hull, tolerance):
+                orientation = self._compute_edge_orientation(p1, p2)
+                exterior_edges.append({
+                    'start': p1,
+                    'end': p2,
+                    'length': edge_length,
+                    'orientation': orientation
+                })
+        
+        # Calculate orientation distribution by edge length
+        orientation_distribution = {}
+        total_exterior_length = sum(e['length'] for e in exterior_edges)
+        
+        if total_exterior_length > 0:
+            for edge in exterior_edges:
+                orient = edge['orientation']
+                proportion = edge['length'] / total_exterior_length
+                orientation_distribution[orient] = orientation_distribution.get(orient, 0) + proportion
+        
+        return {
+            'exterior_wall_count': len(exterior_edges),
+            'corner_room': len(exterior_edges) >= 2,
+            'exterior_wall_length': total_exterior_length,
+            'orientation_distribution': orientation_distribution,
+            'exterior_percentage': total_exterior_length / total_perimeter if total_perimeter > 0 else 0,
+            'exterior_edges': exterior_edges
+        }
+    
+    def _distance(self, p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
+        """Calculate distance between two points"""
+        return ((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2) ** 0.5
+    
+    def _edge_near_hull(
+        self,
+        edge_start: Tuple[float, float],
+        edge_end: Tuple[float, float],
+        hull: List[Tuple[float, float]],
+        tolerance: float
+    ) -> bool:
+        """Check if an edge is within tolerance of the hull"""
+        # Check if either endpoint is close to hull
+        for hull_idx in range(len(hull)):
+            hull_p1 = hull[hull_idx]
+            hull_p2 = hull[(hull_idx + 1) % len(hull)]
+            
+            # Check distance from edge to hull segment
+            dist = self._segment_to_segment_distance(
+                edge_start, edge_end,
+                hull_p1, hull_p2
+            )
+            
+            if dist < tolerance:
+                return True
+        
+        return False
+    
+    def _segment_to_segment_distance(
+        self,
+        p1: Tuple[float, float],
+        p2: Tuple[float, float],
+        p3: Tuple[float, float],
+        p4: Tuple[float, float]
+    ) -> float:
+        """Calculate minimum distance between two line segments"""
+        # Simplified - check endpoint distances
+        distances = [
+            self._distance(p1, p3),
+            self._distance(p1, p4),
+            self._distance(p2, p3),
+            self._distance(p2, p4)
+        ]
+        return min(distances)
+    
+    def _compute_edge_orientation(
+        self,
+        p1: Tuple[float, float],
+        p2: Tuple[float, float]
+    ) -> str:
+        """Compute cardinal orientation of an edge"""
+        dx = p2[0] - p1[0]
+        dy = p2[1] - p1[1]
+        
+        # Calculate angle in degrees (0 = East, 90 = North)
+        import math
+        angle = math.degrees(math.atan2(dy, dx))
+        
+        # Normalize to 0-360
+        if angle < 0:
+            angle += 360
+        
+        # Map to cardinal directions
+        if 337.5 <= angle or angle < 22.5:
+            return 'E'
+        elif 22.5 <= angle < 67.5:
+            return 'NE'
+        elif 67.5 <= angle < 112.5:
+            return 'N'
+        elif 112.5 <= angle < 157.5:
+            return 'NW'
+        elif 157.5 <= angle < 202.5:
+            return 'W'
+        elif 202.5 <= angle < 247.5:
+            return 'SW'
+        elif 247.5 <= angle < 292.5:
+            return 'S'
+        else:  # 292.5 <= angle < 337.5
+            return 'SE'
