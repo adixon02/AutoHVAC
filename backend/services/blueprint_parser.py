@@ -1107,6 +1107,18 @@ class BlueprintParser:
                                 logger.info(f"Using GPT-4V detected floor type: {detected_floor_info['type']} (confidence: {detected_floor_info['confidence']:.2f})")
                             
                             for gpt_room in analysis.rooms:
+                                # CRITICAL: Check for zero area (main cause of wrong calculations)
+                                if gpt_room.area_sqft <= 0:
+                                    logger.error(f"GPT-4V returned ZERO AREA for room '{gpt_room.name}'! Dimensions: {gpt_room.dimensions_ft}")
+                                    # Calculate from dimensions if possible
+                                    if gpt_room.dimensions_ft[0] > 0 and gpt_room.dimensions_ft[1] > 0:
+                                        calculated_area = gpt_room.dimensions_ft[0] * gpt_room.dimensions_ft[1]
+                                        logger.warning(f"Calculated area from dimensions: {calculated_area} sqft")
+                                        gpt_room.area_sqft = calculated_area
+                                    else:
+                                        logger.error(f"Cannot calculate area - no valid dimensions for '{gpt_room.name}'")
+                                        gpt_room.area_sqft = 100  # Default fallback
+                                
                                 room = Room(
                                     name=gpt_room.name,
                                     dimensions_ft=gpt_room.dimensions_ft,

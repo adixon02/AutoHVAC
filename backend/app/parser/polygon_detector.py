@@ -208,29 +208,56 @@ class PolygonRoomDetector:
     ):
         """
         Connect wall endpoints that are close but not exactly touching
+        OPTIMIZED: Use spatial indexing to avoid O(n²) comparisons
         """
+        import time
+        start_time = time.time()
         endpoints = list(graph.keys())
         
+        # OPTIMIZATION: Limit to 1000 endpoint comparisons max
+        max_comparisons = 1000
+        comparisons = 0
+        
+        # Sort endpoints by x-coordinate for spatial locality
+        endpoints.sort(key=lambda p: p[0])
+        
         for i, p1 in enumerate(endpoints):
-            for p2 in endpoints[i+1:]:
+            if comparisons > max_comparisons:
+                logger.warning(f"Endpoint connection limit reached ({max_comparisons} comparisons)")
+                break
+                
+            # Only check nearby points (within tolerance window)
+            for j in range(i+1, len(endpoints)):
+                p2 = endpoints[j]
+                
+                # Early exit if too far in x-direction (sorted)
+                if p2[0] - p1[0] > self.ENDPOINT_TOLERANCE:
+                    break
+                    
+                comparisons += 1
                 dist = np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
                 
                 if 0 < dist < self.ENDPOINT_TOLERANCE:
                     # Merge these endpoints
-                    walls_at_p2 = graph[p2]
-                    graph[p1].extend(walls_at_p2)
-                    
-                    # Update wall endpoints
-                    for wall_idx in walls_at_p2:
-                        wall = walls[wall_idx]
-                        if abs(wall['x0'] - p2[0]) < 1 and abs(wall['y0'] - p2[1]) < 1:
-                            wall['x0'] = p1[0]
-                            wall['y0'] = p1[1]
-                        if abs(wall['x1'] - p2[0]) < 1 and abs(wall['y1'] - p2[1]) < 1:
-                            wall['x1'] = p1[0]
-                            wall['y1'] = p1[1]
-                    
-                    del graph[p2]
+                    if p2 in graph:  # Check if not already deleted
+                        walls_at_p2 = graph[p2]
+                        graph[p1].extend(walls_at_p2)
+                        
+                        # Update wall endpoints
+                        for wall_idx in walls_at_p2:
+                            wall = walls[wall_idx]
+                            if abs(wall['x0'] - p2[0]) < 1 and abs(wall['y0'] - p2[1]) < 1:
+                                wall['x0'] = p1[0]
+                                wall['y0'] = p1[1]
+                            if abs(wall['x1'] - p2[0]) < 1 and abs(wall['y1'] - p2[1]) < 1:
+                                wall['x1'] = p1[0]
+                                wall['y1'] = p1[1]
+                        
+                        del graph[p2]
+        
+        elapsed = time.time() - start_time
+        if elapsed > 1:
+            logger.warning(f"Endpoint connection took {elapsed:.1f}s with {comparisons} comparisons")
     
     def find_closed_polygons(
         self, 
@@ -239,17 +266,26 @@ class PolygonRoomDetector:
     ) -> List[List[Tuple[float, float]]]:
         """
         Find closed polygons (cycles) in the wall graph using DFS
+        OPTIMIZED: Limit search depth and number of polygons
         """
+        import time
+        start_time = time.time()
         polygons = []
         visited_edges = set()
+        max_polygons = 30  # Most buildings have <30 rooms
+        max_search_time = 5  # 5 seconds max for polygon search
         
-        def find_cycle(start_point, current_point, path, visited):
-            """DFS to find cycles"""
+        def find_cycle(start_point, current_point, path, visited, depth=0):
+            """DFS to find cycles with depth limit"""
+            # Check timeout
+            if time.time() - start_time > max_search_time:
+                return []
+                
             if len(path) > 3 and current_point == start_point:
                 # Found a cycle
                 return [path[:]]
             
-            if len(path) > 20:  # Max room complexity
+            if depth > 15 or len(path) > 20:  # Limit depth and path length
                 return []
             
             cycles = []
@@ -269,23 +305,45 @@ class PolygonRoomDetector:
                 visited.add(wall_idx)
                 path.append(next_point)
                 
-                cycles.extend(find_cycle(start_point, next_point, path, visited))
+                cycles.extend(find_cycle(start_point, next_point, path, visited, depth+1))
                 
                 path.pop()
                 visited.remove(wall_idx)
+                
+                # Early exit if we found enough cycles
+                if len(cycles) > 5:  # Max 5 cycles per starting point
+                    break
             
             return cycles
         
         # Try to find cycles starting from each node
+        nodes_checked = 0
         for start_point in graph.keys():
+            if len(polygons) >= max_polygons:
+                logger.info(f"Found maximum {max_polygons} polygons, stopping search")
+                break
+                
+            if time.time() - start_time > max_search_time:
+                logger.warning(f"Polygon search timeout after {max_search_time}s")
+                break
+                
+            nodes_checked += 1
+            if nodes_checked > 100:  # Check max 100 starting points
+                logger.info("Checked 100 nodes, stopping polygon search")
+                break
+                
             cycles = find_cycle(start_point, start_point, [start_point], set())
             
-            for cycle in cycles:
+            for cycle in cycles[:3]:  # Take max 3 cycles per node
                 # Check if this polygon is new
                 polygon = self.order_polygon_points(cycle)
                 if polygon and not self.is_duplicate_polygon(polygon, polygons):
                     polygons.append(polygon)
+                    if len(polygons) >= max_polygons:
+                        break
         
+        elapsed = time.time() - start_time
+        logger.info(f"Found {len(polygons)} polygons in {elapsed:.2f}s (checked {nodes_checked} nodes)")
         return polygons
     
     def filter_valid_rooms(
