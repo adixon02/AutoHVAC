@@ -11,6 +11,12 @@ from services.takeoff_schema import (
     BlueprintTakeoff, Room, BuildingEnvelope, ClimateData,
     HVACLoad, RoomType
 )
+try:
+    from services.multi_story_calculator import MultiStoryCalculator, BuildingLoad
+    MULTI_STORY_AVAILABLE = True
+except ImportError:
+    logger.warning("MultiStoryCalculator not available - using simple calculations")
+    MULTI_STORY_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -116,24 +122,87 @@ class HVACCalculator:
         total_heating = 0
         total_cooling = 0
         
+        # Check if this is a multi-story building
+        floors = {}
         for room in takeoff.rooms:
-            heating_load, cooling_load = self._calculate_room_load(
-                room=room,
-                climate_data=climate_data,
-                envelope=takeoff.building_envelope
+            floor_num = room.floor_number if hasattr(room, 'floor_number') else 1
+            if floor_num not in floors:
+                floors[floor_num] = []
+            floors[floor_num].append(room)
+        
+        is_multi_story = len(floors) > 1
+        
+        if is_multi_story and MULTI_STORY_AVAILABLE:
+            logger.info(f"Multi-story building with {len(floors)} floors - using advanced calculator")
+            
+            # Use MultiStoryCalculator for proper physics
+            multi_calc = MultiStoryCalculator(climate_zone=climate_data.zone)
+            
+            # Convert floors dict to list
+            floor_list = [floors[k] for k in sorted(floors.keys())]
+            
+            # Get design temperatures
+            outdoor_heating = climate_data.winter_design_temp
+            outdoor_cooling = climate_data.summer_design_temp
+            
+            # Calculate with multi-story physics
+            building_load = multi_calc.calculate_building_loads(
+                floors=floor_list,
+                outdoor_temp_heating=outdoor_heating,
+                outdoor_temp_cooling=outdoor_cooling,
+                indoor_temp=70
             )
             
-            # Update room with calculated loads
-            room.heating_btu_hr = heating_load
-            room.cooling_btu_hr = cooling_load
+            # Update rooms with calculated loads
+            for floor_load in building_load.floor_loads:
+                for room in floor_load.rooms:
+                    # Distribute floor load to rooms proportionally
+                    room_fraction = room.area_sqft / sum(r.area_sqft for r in floor_load.rooms)
+                    room.heating_btu_hr = floor_load.heating_load * room_fraction
+                    room.cooling_btu_hr = floor_load.cooling_load * room_fraction
             
-            # Track totals
-            room_loads[room.id] = {
-                "heating": heating_load,
-                "cooling": cooling_load
-            }
-            total_heating += heating_load
-            total_cooling += cooling_load
+            total_heating = building_load.total_heating_btu_hr
+            total_cooling = building_load.total_cooling_btu_hr
+            
+            logger.info(f"Multi-story calculation complete: {total_heating:.0f} BTU/hr heating, "
+                       f"{total_cooling:.0f} BTU/hr cooling")
+            
+            # Track room loads for consistency
+            room_loads = {}
+            for room in takeoff.rooms:
+                room_loads[room.id] = {
+                    "heating": room.heating_btu_hr or 0,
+                    "cooling": room.cooling_btu_hr or 0
+                }
+        else:
+            # Single floor or fallback - use existing simple calculation
+            if is_multi_story:
+                logger.info("Multi-story building but using simple calculator (advanced not available)")
+            else:
+                logger.info("Single floor building - using standard calculator")
+            
+            room_loads = {}
+            total_heating = 0
+            total_cooling = 0
+            
+            for room in takeoff.rooms:
+                heating_load, cooling_load = self._calculate_room_load(
+                    room=room,
+                    climate_data=climate_data,
+                    envelope=takeoff.building_envelope
+                )
+                
+                # Update room with calculated loads
+                room.heating_btu_hr = heating_load
+                room.cooling_btu_hr = cooling_load
+                
+                # Track totals
+                room_loads[room.id] = {
+                    "heating": heating_load,
+                    "cooling": cooling_load
+                }
+                total_heating += heating_load
+                total_cooling += cooling_load
         
         # Calculate load components
         heating_components = self._calculate_heating_components(
@@ -273,13 +342,15 @@ class HVACCalculator:
         base_heating += infiltration_heating
         base_cooling += infiltration_cooling_sensible + infiltration_cooling_latent
         
-        # Adjust for floor level
-        if room.floor_number == 0:  # Basement
-            base_heating *= 0.8  # Ground coupling reduces heating load
-            base_cooling *= 0.9  # Less cooling needed
-        elif room.floor_number > 1:  # Upper floors
-            base_heating *= 1.05  # Heat rises
-            base_cooling *= 1.1   # More cooling needed upstairs
+        # Floor level adjustments only for simple calculator
+        # Multi-story calculator handles this with proper physics
+        if hasattr(room, 'floor_number'):
+            if room.floor_number == 0:  # Basement
+                base_heating *= 0.8  # Ground coupling reduces heating load
+                base_cooling *= 0.9  # Less cooling needed
+            elif room.floor_number > 1 and not MULTI_STORY_AVAILABLE:  # Upper floors (only if not using multi-story calc)
+                base_heating *= 1.05  # Heat rises
+                base_cooling *= 1.1   # More cooling needed upstairs
         
         # Internal gains (people, lights, equipment) - cooling only
         internal_gains = room.area_sqft * 3  # 3 BTU/hr/sq ft typical

@@ -113,6 +113,32 @@ class Room(BaseModel):
     def window_area_sqft(self) -> float:
         return sum(w.area_sqft for w in self.windows)
     
+    @property
+    def is_corner_room(self) -> bool:
+        """Check if room is a corner room (2+ exterior walls)"""
+        return self.exterior_walls >= 2
+    
+    def estimate_wall_areas(self) -> None:
+        """Estimate wall areas if not provided"""
+        if self.exterior_wall_area_sqft is None and self.exterior_walls > 0:
+            # Estimate based on room dimensions and ceiling height
+            perimeter = 2 * (self.width_ft + self.length_ft)
+            wall_height = self.ceiling_height_ft
+            
+            # Distribute perimeter based on number of exterior walls
+            if self.exterior_walls == 1:
+                self.exterior_wall_area_sqft = max(self.width_ft, self.length_ft) * wall_height
+            elif self.exterior_walls == 2:
+                self.exterior_wall_area_sqft = (self.width_ft + self.length_ft) * wall_height
+            elif self.exterior_walls >= 3:
+                self.exterior_wall_area_sqft = perimeter * wall_height * 0.75
+            else:
+                self.exterior_wall_area_sqft = 0
+            
+            # Interior walls are the remainder
+            total_wall_area = perimeter * wall_height
+            self.interior_wall_area_sqft = total_wall_area - (self.exterior_wall_area_sqft or 0)
+    
     @validator('room_type', pre=True)
     def normalize_room_type(cls, v):
         """Convert string to RoomType enum"""

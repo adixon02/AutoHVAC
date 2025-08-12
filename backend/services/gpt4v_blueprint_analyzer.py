@@ -23,24 +23,67 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class RoomSurfaces:
+    """Surface classification for a room"""
+    exterior_walls: int = 0
+    interior_walls: int = 0
+    has_exterior_ceiling: bool = False
+    has_interior_ceiling: bool = False
+    has_exterior_floor: bool = False
+    has_interior_floor: bool = False
+
+@dataclass
+class VerticalConnections:
+    """Vertical connections for a room"""
+    has_stairs_up: bool = False
+    has_stairs_down: bool = False
+    likely_room_above: Optional[str] = None
+    likely_room_below: Optional[str] = None
+
+@dataclass
 class GPTRoom:
-    """Room detected by GPT-5 with HVAC loads"""
+    """Room detected by GPT-4V with HVAC loads and surface classification"""
     name: str
     room_type: str  # bedroom, bathroom, kitchen, etc.
+    floor_level: int  # Which floor this room is on
     dimensions_ft: Tuple[float, float]  # width x height in feet
     area_sqft: float
+    surfaces: RoomSurfaces  # Surface classification
+    vertical_connections: VerticalConnections  # Vertical relationships
     location: str  # description of where in the blueprint
     features: List[str]  # windows, doors, closets, etc.
     confidence: float
-    heating_btu_hr: Optional[float] = None  # Heating load in BTU/hr
-    cooling_btu_hr: Optional[float] = None  # Cooling load in BTU/hr
+    heating_btu_hr: Optional[float] = None  # Heating load (exterior surfaces only)
+    cooling_btu_hr: Optional[float] = None  # Cooling load (exterior surfaces only)
 
+
+@dataclass  
+class FloorAnalysis:
+    """Floor level analysis from blueprint"""
+    current_floor_number: int
+    current_floor_name: str
+    total_floors_in_building: int
+    floors_above: int
+    floors_below: int
+    is_complete_building: bool
+
+@dataclass
+class BuildingEnvelope:
+    """Building envelope analysis"""
+    total_exterior_wall_area: float
+    total_interior_wall_area: float
+    perimeter_length_ft: float
+    envelope_tightness: str
+    stairwells: List[Dict[str, Any]]
+    open_floor_connections: List[str]
 
 @dataclass
 class GPTBlueprintAnalysis:
-    """Complete blueprint analysis from GPT-5 with HVAC loads"""
-    total_area_sqft: float
-    num_floors: int
+    """Complete blueprint analysis from GPT-4V with multi-floor awareness"""
+    current_floor_area_sqft: float  # Area of the floor shown
+    estimated_total_area_sqft: float  # Total building if known
+    floor_analysis: FloorAnalysis  # Floor detection results
+    building_envelope: BuildingEnvelope  # Envelope analysis
     rooms: List[GPTRoom]
     building_type: str  # residential, commercial, etc.
     special_features: List[str]  # garage, basement, deck, etc.
@@ -49,8 +92,10 @@ class GPTBlueprintAnalysis:
     raw_response: Dict[str, Any]
     zip_code: Optional[str] = None
     climate_zone: Optional[str] = None
-    total_heating_btu_hr: Optional[float] = None
-    total_cooling_btu_hr: Optional[float] = None
+    floor_heating_btu_hr: Optional[float] = None  # This floor only
+    floor_cooling_btu_hr: Optional[float] = None  # This floor only
+    estimated_total_heating_btu_hr: Optional[float] = None  # Whole building estimate
+    estimated_total_cooling_btu_hr: Optional[float] = None  # Whole building estimate
     heating_system_tons: Optional[float] = None
     cooling_system_tons: Optional[float] = None
 
@@ -182,72 +227,135 @@ Analyze this residential blueprint AND calculate HVAC loads using ACCA Manual J 
 PROJECT LOCATION: ZIP CODE {zip_code}
 This is CRITICAL for determining climate zone, design temperatures, and accurate load calculations.
 
-ANALYSIS REQUIREMENTS:
-1. Room Detection (use GPT-4o's multimodal vision):
-   - Identify EVERY room, closet, hallway, and space
-   - Read ALL dimension annotations (e.g., 12'-6" x 10'-0")
-   - Detect room labels and types from text
-   - Calculate exact area in square feet
-   - Note window and door locations/sizes
+🏠 CRITICAL MULTI-STORY BUILDING AWARENESS:
+Most residential buildings have multiple floors. You MUST:
+1. Identify which floor(s) are shown in this image
+2. Look for stairs/elevators indicating other floors exist
+3. Distinguish between EXTERIOR surfaces (touching outside) and INTERIOR surfaces (between floors)
+4. Note vertical room relationships for multi-story buildings
 
-2. Scale Extraction:
-   - Find and read the scale notation (typically 1/4"=1'-0" or 1/8"=1'-0")
+ANALYSIS REQUIREMENTS:
+
+1. FLOOR IDENTIFICATION (Do This FIRST):
+   - What floor level is shown? Look for: "First Floor", "Second Floor", "Basement", etc.
+   - Are there stairs going UP? (indicates floors above)
+   - Are there stairs going DOWN? (indicates floors below)
+   - Is this a complete building or just one floor?
+   - Estimate total number of floors based on architectural cues
+
+2. Room Detection with Surface Classification:
+   - Identify EVERY room on THIS FLOOR
+   - For each room, determine:
+     * Which walls are EXTERIOR (touching outside)
+     * Which walls are INTERIOR (touching other rooms)
+     * Is the ceiling to another floor OR to attic/roof?
+     * Is the floor above ground OR above another floor?
+   - Read ALL dimension annotations
+   - Note which rooms have stairs (vertical connections)
+
+3. Scale Extraction:
+   - Find and read the scale notation
    - Apply scale to all measurements consistently
    - Verify dimensions against scale
 
-3. Building Envelope:
-   - Identify exterior walls vs interior walls
+4. Building Envelope Analysis:
+   - Map the EXTERIOR envelope (walls/roof/floor touching outside)
+   - Identify INTERIOR surfaces (between conditioned spaces)
    - Note building orientation (N/S/E/W if marked)
-   - Detect insulation notations if present
-   - Identify foundation type (slab/crawl/basement)
+   - Count exterior wall area vs interior partition area
+   - Identify foundation type and ground contact
 
-4. HVAC-Specific Data:
-   - Window sizes and locations for heat gain
-   - Door types (exterior/interior)
-   - Ceiling heights if noted
-   - Any existing HVAC equipment shown
+5. Vertical Space Relationships:
+   - Which rooms are likely above/below each other?
+   - Are there open spaces (cathedral ceilings, open stairs)?
+   - Note any floor/ceiling assemblies between conditioned spaces
+   - Identify unconditioned spaces (attic, crawlspace, garage)
 
-5. HVAC Load Calculations (Using ZIP {zip_code} climate data):
-   - Calculate heating BTU/hr for each room
-   - Calculate cooling BTU/hr for each room
-   - Consider climate zone for ZIP {zip_code}
-   - Apply proper design temperatures for location
-   - Include infiltration, ventilation, and duct losses
-   - Size equipment properly with safety factors
+6. HVAC Load Calculations - MULTI-FLOOR AWARE:
+   - Calculate loads for EXTERIOR surfaces only
+   - Do NOT add load for interior floors/ceilings between conditioned spaces
+   - Account for stack effect if multiple floors detected
+   - Note if this is partial building (loads incomplete)
+   - Apply proper infiltration distribution by floor level:
+     * More infiltration LOW in winter (cold air sinks)
+     * More infiltration HIGH in summer (hot air rises)
 
 Use GPT-4o's vision capabilities to:
-- Cross-verify dimensions for accuracy
-- Detect partial/obscured text with context
-- Identify non-standard room shapes
-- Calculate accurate total square footage
+- Detect floor level indicators and stairwells
+- Distinguish exterior envelope from interior partitions
+- Map vertical adjacencies between floors
+- Identify shared floor/ceiling assemblies
+- Calculate accurate square footage FOR THIS FLOOR
+- Estimate total building square footage if multiple floors
 
 Respond with a JSON object in this exact format:
 {{
   "zip_code": "{zip_code}",
   "climate_zone": "<climate zone for {zip_code}>",
-  "total_area_sqft": <number>,
-  "num_floors": <number>,
+  "floor_analysis": {{
+    "current_floor_number": <0=basement, 1=first, 2=second, etc>,
+    "current_floor_name": "<e.g., 'First Floor', 'Second Floor'>",
+    "total_floors_in_building": <estimated total>,
+    "floors_above": <number of floors above this one>,
+    "floors_below": <number of floors below this one>,
+    "is_complete_building": <true if all floors shown, false otherwise>
+  }},
+  "areas": {{
+    "current_floor_sqft": <area of THIS floor>,
+    "estimated_total_building_sqft": <estimated total if known>,
+    "exterior_wall_area_sqft": <only walls touching outside>,
+    "interior_partition_area_sqft": <walls between rooms>
+  }},
   "building_type": "<residential/commercial/other>",
   "scale": "<scale notation from blueprint>",
   "rooms": [
     {{
       "name": "<room name from blueprint>",
       "room_type": "<bedroom/bathroom/kitchen/etc>",
+      "floor_level": <which floor this room is on>,
       "width_ft": <number>,
       "length_ft": <number>,
       "area_sqft": <number>,
+      "surfaces": {{
+        "exterior_walls": <count of walls touching outside>,
+        "interior_walls": <count of walls to other rooms>,
+        "has_exterior_ceiling": <true if ceiling to outside/attic>,
+        "has_interior_ceiling": <true if ceiling to floor above>,
+        "has_exterior_floor": <true if floor to outside/crawl>,
+        "has_interior_floor": <true if floor to room below>
+      }},
+      "vertical_connections": {{
+        "has_stairs_up": <true/false>,
+        "has_stairs_down": <true/false>,
+        "likely_room_above": "<room name if determinable>",
+        "likely_room_below": "<room name if determinable>"
+      }},
       "location": "<description>",
       "features": ["<feature1>", "<feature2>"],
       "confidence": <0.0-1.0>,
-      "heating_btu_hr": <number>,
-      "cooling_btu_hr": <number>
+      "heating_btu_hr": <for EXTERIOR surfaces only>,
+      "cooling_btu_hr": <for EXTERIOR surfaces only>
     }}
   ],
   "special_features": ["<garage>", "<basement>", "<deck>", etc],
+  "building_envelope": {{
+    "total_exterior_wall_area": <sq ft of walls touching outside>,
+    "total_interior_wall_area": <sq ft of walls between rooms>,
+    "perimeter_length_ft": <building perimeter>,
+    "envelope_tightness": "<tight/average/leaky based on age/construction>",
+    "stairwells": [
+      {{"location": "<e.g., central>", "connects_floors": [1, 2]}}
+    ],
+    "open_floor_connections": ["<e.g., open stairway>", "<cathedral ceiling>"]
+  }},
   "confidence": <overall confidence 0.0-1.0>,
   "hvac_loads": {{
-    "total_heating_btu_hr": <number>,
-    "total_cooling_btu_hr": <number>,
+    "floor_heating_btu_hr": <heating for THIS FLOOR's EXTERIOR surfaces>,
+    "floor_cooling_btu_hr": <cooling for THIS FLOOR's EXTERIOR surfaces>,
+    "notes_on_calculation": "<e.g., 'Calculated for first floor only - upper floor not shown'>",
+    "infiltration_adjustment": "<e.g., 'Lower floor - higher winter infiltration applied'>",
+    "estimated_total_building_heating_btu_hr": <if multiple floors detected>,
+    "estimated_total_building_cooling_btu_hr": <if multiple floors detected>,
     "heating_system_tons": <number>,
     "cooling_system_tons": <number>,
     "design_temps": {{
@@ -354,21 +462,66 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
         }
     
     def _parse_gpt_response(self, response: Dict[str, Any]) -> GPTBlueprintAnalysis:
-        """Parse GPT-4V response into structured analysis"""
+        """Parse GPT-4V response into structured analysis with multi-floor awareness"""
         
-        # Parse rooms
+        # Parse floor analysis
+        floor_data = response.get("floor_analysis", {})
+        floor_analysis = FloorAnalysis(
+            current_floor_number=floor_data.get("current_floor_number", 1),
+            current_floor_name=floor_data.get("current_floor_name", "Unknown Floor"),
+            total_floors_in_building=floor_data.get("total_floors_in_building", 1),
+            floors_above=floor_data.get("floors_above", 0),
+            floors_below=floor_data.get("floors_below", 0),
+            is_complete_building=floor_data.get("is_complete_building", True)
+        )
+        
+        # Parse building envelope
+        envelope_data = response.get("building_envelope", {})
+        building_envelope = BuildingEnvelope(
+            total_exterior_wall_area=envelope_data.get("total_exterior_wall_area", 0),
+            total_interior_wall_area=envelope_data.get("total_interior_wall_area", 0),
+            perimeter_length_ft=envelope_data.get("perimeter_length_ft", 0),
+            envelope_tightness=envelope_data.get("envelope_tightness", "average"),
+            stairwells=envelope_data.get("stairwells", []),
+            open_floor_connections=envelope_data.get("open_floor_connections", [])
+        )
+        
+        # Parse rooms with surface classification
         rooms = []
         for room_data in response.get("rooms", []):
             try:
-                # Handle dimensions - might be None
+                # Parse surfaces
+                surfaces_data = room_data.get("surfaces", {})
+                surfaces = RoomSurfaces(
+                    exterior_walls=surfaces_data.get("exterior_walls", 0),
+                    interior_walls=surfaces_data.get("interior_walls", 0),
+                    has_exterior_ceiling=surfaces_data.get("has_exterior_ceiling", False),
+                    has_interior_ceiling=surfaces_data.get("has_interior_ceiling", False),
+                    has_exterior_floor=surfaces_data.get("has_exterior_floor", False),
+                    has_interior_floor=surfaces_data.get("has_interior_floor", False)
+                )
+                
+                # Parse vertical connections
+                vert_data = room_data.get("vertical_connections", {})
+                vertical_connections = VerticalConnections(
+                    has_stairs_up=vert_data.get("has_stairs_up", False),
+                    has_stairs_down=vert_data.get("has_stairs_down", False),
+                    likely_room_above=vert_data.get("likely_room_above"),
+                    likely_room_below=vert_data.get("likely_room_below")
+                )
+                
+                # Handle dimensions
                 width = room_data.get("width_ft", 10) or 10
                 length = room_data.get("length_ft", 10) or 10
                 
                 room = GPTRoom(
                     name=room_data.get("name", "Unknown"),
                     room_type=room_data.get("room_type", "unknown"),
+                    floor_level=room_data.get("floor_level", floor_analysis.current_floor_number),
                     dimensions_ft=(float(width), float(length)),
                     area_sqft=float(room_data.get("area_sqft", 100) or 100),
+                    surfaces=surfaces,
+                    vertical_connections=vertical_connections,
                     location=room_data.get("location", "") or "",
                     features=room_data.get("features", []) or [],
                     confidence=float(room_data.get("confidence", 0.5) or 0.5),
@@ -379,21 +532,19 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
             except Exception as e:
                 logger.warning(f"Error parsing room: {e}")
         
-        # Create analysis object with safe defaults
-        total_area_value = response.get("total_area_sqft", 0)
-        if isinstance(total_area_value, str):
-            # Handle "Unknown" or other string values
-            try:
-                total_area_value = float(total_area_value)
-            except (ValueError, TypeError):
-                total_area_value = sum(r.area_sqft for r in rooms) if rooms else 0
+        # Parse areas
+        areas = response.get("areas", {})
+        current_floor_area = areas.get("current_floor_sqft", sum(r.area_sqft for r in rooms))
+        estimated_total_area = areas.get("estimated_total_building_sqft", current_floor_area)
         
-        # Extract HVAC loads if provided by GPT-5
+        # Extract HVAC loads with multi-floor awareness
         hvac_loads = response.get("hvac_loads", {})
         
         analysis = GPTBlueprintAnalysis(
-            total_area_sqft=float(total_area_value) if total_area_value else sum(r.area_sqft for r in rooms),
-            num_floors=response.get("num_floors", 1),
+            current_floor_area_sqft=float(current_floor_area),
+            estimated_total_area_sqft=float(estimated_total_area),
+            floor_analysis=floor_analysis,
+            building_envelope=building_envelope,
             rooms=rooms,
             building_type=response.get("building_type", "residential"),
             special_features=response.get("special_features", []),
@@ -402,8 +553,10 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
             raw_response=response,
             zip_code=response.get("zip_code"),
             climate_zone=response.get("climate_zone"),
-            total_heating_btu_hr=hvac_loads.get("total_heating_btu_hr"),
-            total_cooling_btu_hr=hvac_loads.get("total_cooling_btu_hr"),
+            floor_heating_btu_hr=hvac_loads.get("floor_heating_btu_hr"),
+            floor_cooling_btu_hr=hvac_loads.get("floor_cooling_btu_hr"),
+            estimated_total_heating_btu_hr=hvac_loads.get("estimated_total_building_heating_btu_hr"),
+            estimated_total_cooling_btu_hr=hvac_loads.get("estimated_total_building_cooling_btu_hr"),
             heating_system_tons=hvac_loads.get("heating_system_tons"),
             cooling_system_tons=hvac_loads.get("cooling_system_tons")
         )
@@ -411,17 +564,27 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
         return analysis
     
     def format_for_hvac(self, analysis: GPTBlueprintAnalysis) -> Dict[str, Any]:
-        """Format GPT-4o Vision analysis for HVAC load calculations"""
+        """Format GPT-4o Vision analysis for HVAC load calculations with multi-floor awareness"""
         return {
             "success": True,
-            "total_area": analysis.total_area_sqft,
+            "current_floor_area": analysis.current_floor_area_sqft,
+            "estimated_total_area": analysis.estimated_total_area_sqft,
+            "floor_info": {
+                "current_floor": analysis.floor_analysis.current_floor_number,
+                "current_floor_name": analysis.floor_analysis.current_floor_name,
+                "total_floors": analysis.floor_analysis.total_floors_in_building,
+                "is_complete": analysis.floor_analysis.is_complete_building
+            },
             "rooms": [
                 {
                     "name": room.name,
                     "area": room.area_sqft,
                     "room_type": room.room_type,
+                    "floor_level": room.floor_level,
                     "width": room.dimensions_ft[0],
                     "height": room.dimensions_ft[1],
+                    "exterior_walls": room.surfaces.exterior_walls,
+                    "has_exterior_ceiling": room.surfaces.has_exterior_ceiling,
                     "features": room.features,
                     "confidence": room.confidence,
                     "heating_btu_hr": room.heating_btu_hr,
@@ -429,10 +592,15 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                 }
                 for room in analysis.rooms
             ],
+            "building_envelope": {
+                "exterior_wall_area": analysis.building_envelope.total_exterior_wall_area,
+                "interior_wall_area": analysis.building_envelope.total_interior_wall_area,
+                "stairwells": analysis.building_envelope.stairwells,
+                "envelope_tightness": analysis.building_envelope.envelope_tightness
+            },
             "metadata": {
-                "method": "GPT-4o Vision Analysis with HVAC Calculation",
+                "method": "GPT-4o Vision Multi-Floor Analysis",
                 "building_type": analysis.building_type,
-                "num_floors": analysis.num_floors,
                 "special_features": analysis.special_features,
                 "scale": analysis.scale,
                 "confidence": analysis.confidence,
@@ -440,8 +608,10 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                 "climate_zone": analysis.climate_zone
             },
             "hvac_totals": {
-                "total_heating_btu_hr": analysis.total_heating_btu_hr,
-                "total_cooling_btu_hr": analysis.total_cooling_btu_hr,
+                "floor_heating_btu_hr": analysis.floor_heating_btu_hr,
+                "floor_cooling_btu_hr": analysis.floor_cooling_btu_hr,
+                "estimated_total_heating_btu_hr": analysis.estimated_total_heating_btu_hr,
+                "estimated_total_cooling_btu_hr": analysis.estimated_total_cooling_btu_hr,
                 "heating_system_tons": analysis.heating_system_tons,
                 "cooling_system_tons": analysis.cooling_system_tons
             }
