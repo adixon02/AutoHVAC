@@ -155,6 +155,13 @@ class BlueprintSchema(BaseModel):
     rooms: List[Room] = Field(..., description="List of all rooms from all floors")
     floors_processed: Optional[Dict[int, str]] = Field(None, description="Map of floor numbers to floor names processed")
     
+    # Detection results
+    scale_px_per_ft: Optional[float] = Field(None, description="Detected scale in pixels per foot")
+    scale_confidence: Optional[float] = Field(None, description="Scale detection confidence")
+    north_bearing_deg: Optional[float] = Field(None, description="North arrow bearing in degrees")
+    north_confidence: Optional[float] = Field(None, description="North arrow detection confidence")
+    orientation_source: Optional[str] = Field(None, description="Source of orientation data")
+    
     # Raw data preservation
     raw_geometry: Optional[Dict[str, Any]] = Field(None, description="Raw geometry data (may be combined from multiple pages)")
     raw_text: Optional[Dict[str, Any]] = Field(None, description="Raw text data (may be combined from multiple pages)")

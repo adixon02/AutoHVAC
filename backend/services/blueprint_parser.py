@@ -1336,6 +1336,21 @@ class BlueprintParser:
     def _create_fallback_rooms(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], floor_number: int = 1, floor_label: Optional[str] = None) -> List[Room]:
         """Create fallback rooms when AI analysis fails using intelligent geometry analysis"""
         
+        # CRITICAL FIX: Disable AI fallback room creation until stable
+        logger.error(f"🚫 AI FALLBACK DISABLED: GPT-4V failed for floor {floor_number} ({floor_label or 'Unknown'})")
+        from services.error_types import NeedsInputError
+        raise NeedsInputError(
+            input_type='plan_quality',
+            message="Blueprint analysis failed. AI fallback has been disabled.",
+            details={
+                'floor_number': floor_number,
+                'floor_label': floor_label,
+                'reason': 'AI analysis failed validation and fallback rooms are disabled',
+                'recommendation': 'Please upload a clearer blueprint or contact support'
+            }
+        )
+        
+        # Original code disabled - remove this return statement
         logger.warning(f"⚠️ CREATING FALLBACK ROOMS for floor {floor_number} ({floor_label or 'Unknown'}) - GPT-4V analysis failed validation")
         
         # Convert dictionaries to schema objects for the fallback parser
@@ -1624,6 +1639,35 @@ class BlueprintParser:
     ) -> BlueprintSchema:
         """Compile all parsed data into final BlueprintSchema with scale information"""
         
+        # CRITICAL FIX: Run Gate B validation before Manual J
+        from services.validation_gates import get_validation_gates, GateStatus
+        from services.error_types import NeedsInputError
+        
+        gates = get_validation_gates()
+        if gates and rooms:
+            # Check pre-Manual-J validation gate
+            avg_room_size = sum(room.area for room in rooms) / len(rooms)
+            gate_b_result = gates.check_gate_b_pre_manualj(
+                rooms_count=len(rooms),
+                avg_room_size=avg_room_size,
+                total_area=sum(room.area for room in rooms),
+                has_exterior_rooms=any(
+                    room.source_elements.get('exterior_walls', 0) > 0 
+                    if hasattr(room, 'source_elements') else False 
+                    for room in rooms
+                )
+            )
+            logger.info(f"Pre-Manual-J Gate B: {gate_b_result.status.value} - {gate_b_result.message}")
+            
+            # CRITICAL: Actually stop processing if gate fails
+            if gate_b_result.status == GateStatus.FAILED and not gate_b_result.can_continue:
+                logger.error(f"🚫 QUALITY GATE B FAILED: {gate_b_result.message}")
+                raise NeedsInputError(
+                    input_type='plan_quality',
+                    message=gate_b_result.message,
+                    details=gate_b_result.details or {}
+                )
+        
         # Add detected scale to raw geometry for downstream use
         if isinstance(raw_geometry, dict):
             raw_geometry['detected_scale'] = detected_scale
@@ -1645,6 +1689,15 @@ class BlueprintParser:
             # Also check max floor number (in case floors are numbered 1, 2, etc.)
             max_floor = max((room.floor for room in rooms), default=1)
             stories = max(stories, max_floor)
+            
+            # CRITICAL FIX: If we have multiple floors but stories is still 1, something is wrong
+            if floors_processed and len(floors_processed) > 1 and stories == 1:
+                logger.error(f"⚠️ STORIES BUG: Detected {len(floors_processed)} floors but stories={stories}")
+                logger.error(f"Floor numbers in rooms: {floor_numbers}")
+                logger.error(f"Floors processed: {floors_processed}")
+                # Force stories to match floors_processed count
+                stories = len(floors_processed)
+                logger.info(f"Corrected stories count to {stories}")
             
             logger.info(f"Detected {stories} stories from {len(floor_numbers)} unique floor numbers: {floor_numbers}")
         
@@ -1748,12 +1801,33 @@ class BlueprintParser:
                 'notes': building_typology.notes
             }
         
+        # Extract scale and orientation data from raw_geometry if available
+        scale_px_per_ft = None
+        scale_confidence = None
+        north_bearing_deg = None
+        north_confidence = None
+        orientation_source = None
+        
+        if isinstance(raw_geometry, dict):
+            scale_px_per_ft = raw_geometry.get('scale_factor', raw_geometry.get('detected_scale'))
+            # Default confidence if scale exists but no confidence provided
+            scale_confidence = 0.95 if scale_px_per_ft else None
+            north_bearing_deg = raw_geometry.get('north_angle')
+            if north_bearing_deg is not None:
+                north_confidence = 0.90  # Default confidence for detected north arrow
+                orientation_source = "vector_north_arrow"
+        
         return BlueprintSchema(
             project_id=project_id,
             zip_code=zip_code,
             sqft_total=total_area,
             stories=stories,  # Use the typology-corrected stories count
             rooms=rooms,
+            scale_px_per_ft=scale_px_per_ft,
+            scale_confidence=scale_confidence,
+            north_bearing_deg=north_bearing_deg,
+            north_confidence=north_confidence,
+            orientation_source=orientation_source,
             raw_geometry=raw_geometry,
             raw_text=raw_text,
             dimensions=parsed_dimensions,
@@ -2213,16 +2287,26 @@ class BlueprintParser:
                 logger.info(f"RANSAC scale detection: {scale_result.scale_px_per_ft} px/ft "
                            f"(confidence: {scale_result.confidence:.2%}, method: {scale_result.method})")
                 
-                # Store in validation gates if high confidence
-                if hasattr(self, 'validation_gates') and scale_result.confidence >= 0.95:
-                    from services.validation_gates import get_validation_gates
+                # CRITICAL FIX: Check validation gates and actually stop if they fail
+                if hasattr(self, 'validation_gates'):
+                    from services.validation_gates import get_validation_gates, GateStatus
+                    from services.error_types import NeedsInputError
                     gates = get_validation_gates()
                     gate_result = gates.check_gate_a_scale(
                         scale_confidence=scale_result.confidence,
                         scale_px_per_ft=scale_result.scale_px_per_ft,
-                        detection_method=scale_result.method
+                        dimension_count=len(raw_text.get('dimensions', [])) if raw_text else 0
                     )
                     logger.info(f"Scale Gate A: {gate_result.status.value} - {gate_result.message}")
+                    
+                    # CRITICAL: Actually stop processing if gate fails
+                    if gate_result.status == GateStatus.FAILED and not gate_result.can_continue:
+                        logger.error(f"🚫 QUALITY GATE A FAILED: {gate_result.message}")
+                        raise NeedsInputError(
+                            input_type='scale',
+                            message=gate_result.message,
+                            details=gate_result.details or {}
+                        )
                 
                 # Validate scale with room sizes if available
                 if rooms and scale_result.confidence < 0.95:
@@ -2330,6 +2414,14 @@ class BlueprintParser:
         
         logger.info(f"North arrow: {north_result.angle_degrees}° "
                    f"(confidence: {north_result.confidence:.2%})")
+        
+        # Set north arrow in pipeline context if we have one
+        if hasattr(self, 'pipeline_context') and self.pipeline_context:
+            self.pipeline_context.set_north_arrow(
+                north_result.angle_degrees,
+                north_result.confidence,
+                source="vector_north_arrow"
+            )
         
         # Step 4: Extract room geometry using detected scale
         geometry_extractor = GeometryExtractor(scale_result.scale_px_per_ft)

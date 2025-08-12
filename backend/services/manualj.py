@@ -745,9 +745,10 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     # Floor numbering: 0 = basement/ground, 1 = main/first floor, 2+ = upper floors
     exterior_walls_count = room.source_elements.get('exterior_walls', 1) if hasattr(room, 'source_elements') else 1
     
-    # Determine if this is a ground floor room
-    # Floor 0 = basement, Floor 1 = main floor (ground level), Floor 2+ = upper floors
-    is_ground_floor = room.floor <= 1  # Both basement (0) and main floor (1) can have floor losses
+    # CRITICAL FIX: Determine if this is a ground floor room
+    # Floor 0 = basement (has its own floor loss logic), Floor 1 = main floor (slab/crawlspace), Floor 2+ = upper floors (no floor losses)
+    # Only main floor (1) should get slab losses, NOT upper floors
+    is_ground_floor = (room.floor == 1) or (room.floor is None)  # Only main floor gets slab losses
     
     if is_ground_floor and exterior_walls_count > 0:
         # Determine floor type from envelope data or use default
@@ -1232,14 +1233,58 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     
     rooms_to_process = list(conditioned_rooms)  # Process only conditioned rooms
     
-    # Apply building orientation
-    if building_orientation == "unknown":
+    # Apply building orientation - check blueprint data first
+    orientation_applied = False
+    
+    # First priority: Use detected north arrow from blueprint
+    if hasattr(schema, 'north_bearing_deg') and schema.north_bearing_deg is not None and schema.north_confidence and schema.north_confidence >= 0.7:
+        logger.info(f"Using detected north arrow: {schema.north_bearing_deg}° (confidence: {schema.north_confidence:.2f})")
+        # Convert bearing to cardinal direction (0° = North, 90° = East, etc.)
+        bearing = schema.north_bearing_deg
+        if bearing < 22.5 or bearing >= 337.5:
+            default_orientation = 'N'
+        elif bearing < 67.5:
+            default_orientation = 'NE'
+        elif bearing < 112.5:
+            default_orientation = 'E'
+        elif bearing < 157.5:
+            default_orientation = 'SE'
+        elif bearing < 202.5:
+            default_orientation = 'S'
+        elif bearing < 247.5:
+            default_orientation = 'SW'
+        elif bearing < 292.5:
+            default_orientation = 'W'
+        else:
+            default_orientation = 'NW'
+        
+        for room in rooms_to_process:
+            if room.orientation in ['unknown', 'N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']:
+                room.orientation = default_orientation
+                if hasattr(room, 'source_elements'):
+                    room.source_elements['orientation_confidence'] = schema.north_confidence
+                    room.source_elements['orientation_source'] = 'detected_north_arrow'
+        orientation_applied = True
+    
+    # Second priority: User-provided orientation
+    elif building_orientation != "unknown":
+        logger.info(f"Applying user-provided building orientation: {building_orientation}")
+        for room in rooms_to_process:
+            if room.orientation in ['unknown', 'N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']:
+                room.orientation = building_orientation
+                if hasattr(room, 'source_elements'):
+                    room.source_elements['orientation_confidence'] = 0.9
+                    room.source_elements['orientation_source'] = 'user_provided'
+        orientation_applied = True
+    
+    # Third priority: Climate-based default
+    elif building_orientation == "unknown":
         # Use smart climate-based default
         smart_default = get_smart_orientation_default(
             schema.zip_code, 
             climate_data.get('climate_zone', '4A')
         )
-        logger.info(f"User selected 'Not sure' for orientation - using climate-based default: {smart_default}")
+        logger.info(f"No orientation detected or provided - using climate-based default: {smart_default}")
         for room in rooms_to_process:
             # Only apply to exterior rooms (don't change interior rooms)
             if room.orientation in ['unknown', 'N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']:
@@ -1248,10 +1293,11 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
                 if hasattr(room, 'source_elements'):
                     room.source_elements['orientation_confidence'] = 0.7
                     room.source_elements['orientation_source'] = 'climate_based_estimate'
-    elif building_orientation != "unknown":
-        logger.info(f"Applying user-provided building orientation: {building_orientation}")
-        for room in rooms_to_process:
-            # Only apply to exterior rooms (don't change interior rooms)
+        orientation_applied = True
+    
+    # Log final orientation decision
+    if orientation_applied:
+        logger.info(f"Orientation applied to {len(rooms_to_process)} rooms")
             if room.orientation in ['unknown', 'N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']:
                 # Set orientation based on user input
                 # Assume front door faces the given direction

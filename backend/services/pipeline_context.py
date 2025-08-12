@@ -23,6 +23,10 @@ class PipelineContext:
         self.selected_page: Optional[int] = None  # Deprecated - kept for backward compatibility
         self.selected_pages: List[int] = []  # New: supports multiple pages for multi-story
         self.scale_px_per_ft: Optional[float] = None
+        self.scale_confidence: float = 0.0
+        self.north_bearing_deg: Optional[float] = None
+        self.north_confidence: float = 0.0
+        self.orientation_source: Optional[str] = None
         self.pdf_path: Optional[str] = None
         self.zip_code: Optional[str] = None
         self.project_id: Optional[str] = None
@@ -116,6 +120,22 @@ class PipelineContext:
             if self.scale_px_per_ft is None:
                 raise ValueError("Scale not set in context! Call set_scale() first.")
             return self.scale_px_per_ft
+    
+    def set_north_arrow(self, bearing_deg: float, confidence: float, source: str = "unknown") -> None:
+        """
+        Set the north arrow bearing in degrees.
+        """
+        with self._lock:
+            if self.north_bearing_deg is None or confidence > self.north_confidence:
+                self.north_bearing_deg = bearing_deg
+                self.north_confidence = confidence
+                self.orientation_source = source
+                logger.info(f"[CONTEXT] Locked north arrow: {bearing_deg:.1f}° (conf: {confidence:.2f}) from {source}")
+    
+    def get_north_arrow(self) -> Optional[float]:
+        """Get the north arrow bearing if available."""
+        with self._lock:
+            return self.north_bearing_deg
     
     def set_pdf_path(self, pdf_path: str) -> None:
         """Set the PDF path being processed."""
