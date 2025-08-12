@@ -196,7 +196,8 @@ class GPT4VBlueprintAnalyzer:
         pdf_path: str,
         zip_code: str = "99006",
         page_num: Optional[int] = None,
-        pipeline_context=None
+        pipeline_context=None,
+        override_page: Optional[int] = None  # New parameter for explicit page selection
     ) -> GPTBlueprintAnalysis:
         """
         Analyze blueprint using GPT-4 Vision for maximum accuracy
@@ -205,6 +206,8 @@ class GPT4VBlueprintAnalyzer:
             pdf_path: Path to PDF file
             zip_code: Building location zip code
             page_num: Page number (None = auto-detect floor plan)
+            pipeline_context: Pipeline context for locked page selection
+            override_page: Explicit page override for multi-floor processing
             
         Returns:
             Complete blueprint analysis with all rooms and dimensions
@@ -215,21 +218,26 @@ class GPT4VBlueprintAnalyzer:
         # Store zip code for use in retry logic
         self.current_zip_code = zip_code
         
-        # Use page from pipeline context if available, otherwise from parameter or auto-detect
-        if pipeline_context:
+        # Priority: override_page > page_num > pipeline_context > auto-detect
+        if override_page is not None:
+            # Explicit override for multi-floor processing
+            page_num = override_page
+            logger.info(f"Using override page {page_num + 1} for multi-floor processing")
+        elif page_num is not None:
+            # Explicit page number provided
+            logger.info(f"Using provided page {page_num + 1}")
+        elif pipeline_context:
             try:
                 page_num = pipeline_context.get_page()
                 logger.info(f"Using locked page {page_num + 1} from pipeline context")
             except ValueError:
-                # Context doesn't have page set yet, fall back to other methods
-                if page_num is None:
-                    page_num = page_classifier.find_best_floor_plan_page(pdf_path) or 0
-                    logger.info(f"No context page, auto-detected page {page_num + 1}")
-        elif page_num is None:
+                # Context doesn't have page set yet, fall back to auto-detect
+                page_num = page_classifier.find_best_floor_plan_page(pdf_path) or 0
+                logger.info(f"No context page, auto-detected page {page_num + 1}")
+        else:
+            # Auto-detect best floor plan page
             page_num = page_classifier.find_best_floor_plan_page(pdf_path) or 0
             logger.info(f"Using auto-detected page {page_num + 1}")
-        else:
-            logger.info(f"Using provided page {page_num + 1}")
         
         # Render page to high-quality image
         image_base64 = self._render_page_to_base64(pdf_path, page_num)

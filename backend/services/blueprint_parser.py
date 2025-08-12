@@ -390,9 +390,10 @@ class BlueprintParser:
                         
                         logger.info(f"Selected {len(selected_pages)} floor plan pages for processing")
                         
-                        # For now, still set primary page in context (for compatibility)
-                        selected_page = best_page - 1
-                        pipeline_context.set_page(selected_page, source="traditional_analyzer")
+                        # Lock ALL floor plan pages in context for multi-story support
+                        page_indices = [p.page_number - 1 for p in selected_pages]  # Convert to 0-indexed
+                        pipeline_context.set_pages(page_indices, source="traditional_analyzer")
+                        selected_page = page_indices[0]  # Keep first page for backward compatibility
                         
                         # Track multi-floor metadata
                         if len(selected_pages) > 1:
@@ -515,7 +516,9 @@ class BlueprintParser:
                             page_geometry = all_raw_geometry[i] if i < len(all_raw_geometry) else {}
                             page_text = all_raw_text[i] if i < len(all_raw_text) else {}
                             
-                            floor_rooms = self._perform_ai_analysis(page_geometry, page_text, zip_code, parsing_metadata)
+                            # Pass the specific page number for this floor (0-indexed)
+                            page_idx = page_analysis.page_number - 1
+                            floor_rooms = self._perform_ai_analysis(page_geometry, page_text, zip_code, parsing_metadata, page_num=page_idx)
                             
                             # Set floor number for these rooms
                             floor_num = page_analysis.floor_number if page_analysis.floor_number is not None else (i + 1)
@@ -529,6 +532,9 @@ class BlueprintParser:
                         
                         rooms = all_rooms
                         logger.info(f"Combined {len(rooms)} rooms from {len(selected_pages)} floors")
+                        
+                        # Multi-story validation
+                        self._validate_multi_story_rooms(rooms, selected_pages)
                     else:
                         # Single page processing (original behavior)
                         rooms = self._perform_ai_analysis(raw_geometry, raw_text, zip_code, parsing_metadata)
@@ -950,7 +956,7 @@ class BlueprintParser:
             })
             return {}, [], []
     
-    def _perform_ai_analysis(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], zip_code: str, metadata: ParsingMetadata) -> List[Room]:
+    def _perform_ai_analysis(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], zip_code: str, metadata: ParsingMetadata, page_num: Optional[int] = None) -> List[Room]:
         """Perform AI analysis to identify rooms with validation"""
         try:
             # First try GPT-4 Vision if available for maximum accuracy
@@ -965,8 +971,13 @@ class BlueprintParser:
                     pdf_path = self.current_pdf_path if hasattr(self, 'current_pdf_path') else None
                     if pdf_path and os.path.exists(pdf_path):
                         gpt4v = get_gpt4v_analyzer()
-                        # Pass pipeline context to use locked page
-                        analysis = gpt4v.analyze_blueprint(pdf_path, zip_code, pipeline_context=pipeline_context)
+                        # Pass explicit page number for multi-floor processing
+                        analysis = gpt4v.analyze_blueprint(
+                            pdf_path, 
+                            zip_code, 
+                            pipeline_context=pipeline_context,
+                            override_page=page_num  # Pass specific page for this floor
+                        )
                         
                         if analysis and hasattr(analysis, 'total_area_sqft') and analysis.total_area_sqft and analysis.total_area_sqft > 100:
                             logger.info(f"GPT-4o Vision successful: {len(analysis.rooms)} rooms, {analysis.total_area_sqft:.0f} sq ft")
@@ -2138,6 +2149,45 @@ class BlueprintParser:
         else:
             logger.info("All validation gates passed successfully")
     
+    def _validate_multi_story_rooms(self, rooms: List[Room], pages: List) -> None:
+        """
+        Validate multi-story room data for consistency and accuracy.
+        """
+        if not rooms or len(pages) <= 1:
+            return
+        
+        # Check for duplicate room names across floors
+        room_names_by_floor = {}
+        for room in rooms:
+            floor = room.floor if hasattr(room, 'floor') else 1
+            if floor not in room_names_by_floor:
+                room_names_by_floor[floor] = []
+            room_names_by_floor[floor].append(room.name)
+        
+        # Validate total area is reasonable
+        total_area = sum(r.area for r in rooms)
+        avg_area_per_floor = total_area / len(pages)
+        
+        if avg_area_per_floor < 500:
+            logger.warning(f"Average floor area {avg_area_per_floor:.0f} sq ft seems too small for residential")
+        elif avg_area_per_floor > 5000:
+            logger.warning(f"Average floor area {avg_area_per_floor:.0f} sq ft seems too large for residential")
+        
+        # Check floor number assignments
+        floors_found = set()
+        for room in rooms:
+            if hasattr(room, 'floor'):
+                floors_found.add(room.floor)
+        
+        if len(floors_found) != len(pages):
+            logger.warning(f"Floor assignment mismatch: {len(floors_found)} unique floors for {len(pages)} pages")
+        
+        # Log validation summary
+        logger.info(f"Multi-story validation complete:")
+        logger.info(f"  - Total rooms: {len(rooms)}")
+        logger.info(f"  - Total area: {total_area:.0f} sq ft")
+        logger.info(f"  - Floors processed: {sorted(floors_found)}")
+        logger.info(f"  - Avg area per floor: {avg_area_per_floor:.0f} sq ft")
 
 
 # Global instance
