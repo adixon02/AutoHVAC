@@ -971,6 +971,8 @@ class BlueprintParser:
                     pdf_path = self.current_pdf_path if hasattr(self, 'current_pdf_path') else None
                     if pdf_path and os.path.exists(pdf_path):
                         gpt4v = get_gpt4v_analyzer()
+                        # Set project_id for S3 saving
+                        gpt4v.current_project_id = project_id
                         # Pass explicit page number for multi-floor processing
                         analysis = gpt4v.analyze_blueprint(
                             pdf_path, 

@@ -280,6 +280,23 @@ def calculate_hvac_loads(
             logger.info(f"  - Rooms identified: {len(blueprint_schema.rooms)}")
             logger.info(f"  - Total area: {blueprint_schema.sqft_total} sqft")
             
+            # Save blueprint analysis to S3 for debugging
+            try:
+                from services.s3_storage import storage_service
+                analysis_data = {
+                    'timestamp': time.time(),
+                    'blueprint_schema': safe_dict(blueprint_schema),
+                    'parsing_metadata': safe_dict(parsing_metadata),
+                    'page_analysis': audit_data.get('page_analysis'),
+                    'rooms_count': len(blueprint_schema.rooms),
+                    'total_area': blueprint_schema.sqft_total,
+                    'processing_time': parsing_duration
+                }
+                storage_service.save_json(project_id, 'analysis.json', analysis_data)
+                logger.info(f"[S3] Saved blueprint analysis to jobs/{project_id}/analysis.json")
+            except Exception as e:
+                logger.warning(f"Failed to save analysis JSON (non-critical): {e}")
+            
             update_progress_sync("blueprint_parsed", 50, f"Successfully parsed {len(blueprint_schema.rooms)} rooms from page {getattr(parsing_metadata, 'selected_page', 1) if parsing_metadata else 1}")
             
         except BlueprintValidationError as e:
@@ -453,6 +470,22 @@ def calculate_hvac_loads(
             update_progress_sync("failed", 0, f"Load calculations failed: {str(e)[:100]}")
             raise CriticalError(error_msg, {'original_error': type(e).__name__})
         
+        # Save HVAC calculation results to S3
+        try:
+            from services.s3_storage import storage_service
+            hvac_data = {
+                'timestamp': time.time(),
+                'project_id': project_id,
+                'calculation_results': manualj_results,
+                'climate_data': safe_dict(climate_data),
+                'envelope_data': safe_dict(envelope_data) if envelope_data else None,
+                'processing_time': time.time() - calculation_start_time
+            }
+            storage_service.save_json(project_id, 'hvac_results.json', hvac_data)
+            logger.info(f"[S3] Saved HVAC results to jobs/{project_id}/hvac_results.json")
+        except Exception as e:
+            logger.warning(f"Failed to save HVAC results JSON (non-critical): {e}")
+        
         # Stage 7: Result compilation and audit
         update_progress_sync("finalizing", 95, "Compiling results and creating audit trail")
         
@@ -514,6 +547,32 @@ def calculate_hvac_loads(
         except Exception as e:
             logger.error(f"Failed to create comprehensive audit record (non-critical): {type(e).__name__}: {str(e)}")
             logger.info("Calculation results are still valid, continuing without audit record")
+        
+        # Save complete metadata for debugging
+        try:
+            from services.s3_storage import storage_service
+            metadata = {
+                'project_id': project_id,
+                'filename': filename,
+                'email': email,
+                'zip_code': zip_code,
+                'timestamp': time.time(),
+                'processing_time_seconds': time.time() - calculation_start_time,
+                'stages_completed': audit_data['stages_completed'],
+                'errors_encountered': audit_data.get('errors_encountered', []),
+                'file_size_mb': file_size_mb,
+                'parsing_duration': parsing_duration,
+                'rooms_count': len(blueprint_schema.rooms) if blueprint_schema and hasattr(blueprint_schema, 'rooms') else 0,
+                'total_area_sqft': getattr(blueprint_schema, 'sqft_total', 0) if blueprint_schema else 0,
+                'heating_load_btu': manualj_results['heating_total'],
+                'cooling_load_btu': manualj_results['cooling_total'],
+                'calculation_method': 'ACCA Manual J 8th Edition',
+                'audit_id': final_results.get('comprehensive_audit_id')
+            }
+            storage_service.save_json(project_id, 'metadata.json', metadata)
+            logger.info(f"[S3] Saved job metadata to jobs/{project_id}/metadata.json")
+        except Exception as e:
+            logger.warning(f"Failed to save metadata JSON (non-critical): {e}")
         
         # Stage 8: Store results and complete
         update_progress_sync("completed", 100, "Calculation completed successfully")

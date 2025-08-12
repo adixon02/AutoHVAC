@@ -18,6 +18,7 @@ from PIL import Image
 import io
 
 from services.page_classifier import page_classifier
+from services.gpt4v_prompts import blueprint_prompt_manager
 from services.scale_extractor import scale_extractor
 
 logger = logging.getLogger(__name__)
@@ -242,17 +243,70 @@ class GPT4VBlueprintAnalyzer:
         # Render page to high-quality image
         image_base64 = self._render_page_to_base64(pdf_path, page_num)
         
-        # Prepare the analysis prompt - Start with simplified if env var set
-        use_simplified = os.getenv('USE_SIMPLIFIED_PROMPTS', 'false').lower() == 'true'
-        if use_simplified:
-            logger.info("Using simplified prompt (USE_SIMPLIFIED_PROMPTS=true)")
-            prompt = self._create_simplified_prompt(zip_code)
-        else:
-            prompt = self._create_analysis_prompt(zip_code)
+        # Try different prompt versions until one works
+        response = None
+        prompt_version = "v1_structured"
+        max_attempts = 4
         
-        # Send to GPT-4o for analysis
-        logger.info("Sending blueprint to GPT-4o Vision for analysis...")
-        response = self._analyze_with_gpt4v(image_base64, prompt)
+        for attempt in range(max_attempts):
+            # Get prompt for current version
+            prompt = blueprint_prompt_manager.get_prompt(prompt_version, zip_code, floor_hint=page_num + 1)
+            
+            logger.info(f"Attempt {attempt + 1}/{max_attempts}: Using prompt version {prompt_version}")
+            
+            # Send to GPT-4o for analysis
+            try:
+                raw_response = self._analyze_with_gpt4v(image_base64, prompt)
+                
+                # Validate the response
+                is_valid, error_msg = blueprint_prompt_manager.validate_response(raw_response)
+                
+                if is_valid:
+                    logger.info(f"✅ Prompt version {prompt_version} succeeded")
+                    response = raw_response
+                    response['prompt_version_used'] = prompt_version
+                    break
+                else:
+                    logger.warning(f"Prompt version {prompt_version} validation failed: {error_msg}")
+                    
+                    # Save debug info for failed validation
+                    if hasattr(self, 'current_project_id') and self.current_project_id:
+                        try:
+                            from services.s3_storage import storage_service
+                            debug_data = {
+                                'prompt_version': prompt_version,
+                                'validation_error': error_msg,
+                                'response': raw_response,
+                                'timestamp': time.time()
+                            }
+                            storage_service.save_debug_json(
+                                self.current_project_id, 
+                                f'validation_failure_{prompt_version}.json', 
+                                debug_data
+                            )
+                        except Exception as e:
+                            logger.debug(f"Could not save debug data: {e}")
+                    
+                    # Try next version
+                    next_version = blueprint_prompt_manager.get_next_version(prompt_version)
+                    if next_version:
+                        prompt_version = next_version
+                    else:
+                        logger.error("All prompt versions exhausted")
+                        break
+                        
+            except Exception as e:
+                logger.error(f"Prompt version {prompt_version} failed: {e}")
+                next_version = blueprint_prompt_manager.get_next_version(prompt_version)
+                if next_version:
+                    prompt_version = next_version
+                else:
+                    break
+        
+        if not response:
+            logger.error("All prompt versions failed, using fallback")
+            # Use the last attempt's response or create minimal fallback
+            response = raw_response if 'raw_response' in locals() else {}
         
         # Parse the response
         analysis = self._parse_gpt_response(response)
@@ -554,6 +608,23 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                 
                 # Extract JSON from response
                 content = response.choices[0].message.content
+                
+                # Save raw GPT-4V response for debugging (if project_id is available)
+                if hasattr(self, 'current_project_id') and self.current_project_id:
+                    try:
+                        from services.s3_storage import storage_service
+                        raw_response = {
+                            'model': model,
+                            'timestamp': time.time(),
+                            'prompt_length': len(prompt),
+                            'response': content,
+                            'token_params': {config['max_tokens_param']: config['max_tokens_value']},
+                            'temperature': config['temperature']
+                        }
+                        storage_service.save_json(self.current_project_id, 'gpt4v_raw.json', raw_response)
+                        logger.info(f"[S3] Saved GPT-4V raw response to jobs/{self.current_project_id}/gpt4v_raw.json")
+                    except Exception as e:
+                        logger.debug(f"Could not save GPT-4V raw response: {e}")
                 
                 # Check if model claims it can't see images
                 if any(phrase in content.lower() for phrase in [

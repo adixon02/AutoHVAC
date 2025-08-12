@@ -4,9 +4,10 @@ Handles all file operations using AWS S3 instead of local disk
 """
 import os
 import io
+import json
 import logging
 import asyncio
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
@@ -75,7 +76,7 @@ class S3StorageService:
     
     async def save_upload(self, project_id: str, content: bytes) -> str:
         """
-        Save uploaded file to S3
+        Save uploaded file to S3 using job-based folder structure
         
         Args:
             project_id: Unique project identifier
@@ -84,7 +85,8 @@ class S3StorageService:
         Returns:
             str: S3 key of the uploaded file
         """
-        s3_key = self._get_s3_key("uploads", f"{project_id}.pdf")
+        # Use new job-based folder structure
+        s3_key = f"jobs/{project_id}/blueprint.pdf"
         
         logger.info(f"[S3 SAVE] Starting upload for project {project_id}")
         logger.info(f"[S3 SAVE] S3 key: {s3_key}")
@@ -131,31 +133,180 @@ class S3StorageService:
     
     def cleanup(self, project_id: str):
         """
-        Remove uploaded file from S3
+        Remove entire job folder from S3
         
         Args:
             project_id: Project identifier
         """
-        s3_key = self._get_s3_key("uploads", f"{project_id}.pdf")
+        prefix = f"jobs/{project_id}/"
         
         try:
             logger.info(f"[S3 CLEANUP] Starting cleanup for project {project_id}")
-            logger.info(f"[S3 CLEANUP] S3 key: {s3_key}")
+            logger.info(f"[S3 CLEANUP] Removing all files under: {prefix}")
             
-            self.s3_client.delete_object(
+            # List all objects in the job folder
+            paginator = self.s3_client.get_paginator('list_objects_v2')
+            pages = paginator.paginate(
+                Bucket=self.bucket_name,
+                Prefix=prefix
+            )
+            
+            # Collect all keys to delete
+            keys_to_delete = []
+            for page in pages:
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        keys_to_delete.append({'Key': obj['Key']})
+            
+            # Delete all objects
+            if keys_to_delete:
+                self.s3_client.delete_objects(
+                    Bucket=self.bucket_name,
+                    Delete={'Objects': keys_to_delete}
+                )
+                logger.info(f"[S3 CLEANUP] Successfully deleted {len(keys_to_delete)} files for project {project_id}")
+            else:
+                logger.info(f"[S3 CLEANUP] No files found for project {project_id}")
+            
+        except Exception as e:
+            logger.error(f"[S3 CLEANUP] Failed to cleanup files for project {project_id}: {e}")
+            # Don't raise - cleanup failures shouldn't break the flow
+    
+    def save_json(self, project_id: str, filename: str, data: Dict[str, Any]) -> str:
+        """
+        Save JSON data to S3 in the job folder
+        
+        Args:
+            project_id: Project identifier
+            filename: JSON filename (e.g., 'analysis.json', 'hvac_results.json')
+            data: Dictionary to save as JSON
+            
+        Returns:
+            str: S3 key of the saved file
+        """
+        s3_key = f"jobs/{project_id}/{filename}"
+        
+        try:
+            # Convert data to JSON string
+            json_content = json.dumps(data, indent=2, default=str)
+            
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                Body=json_content.encode('utf-8'),
+                ContentType='application/json',
+                Metadata={
+                    'project_id': project_id,
+                    'file_type': 'json',
+                    'json_type': filename.replace('.json', '')
+                }
+            )
+            logger.info(f"[S3 JSON] Saved JSON file: {s3_key} ({len(json_content)} bytes)")
+            return s3_key
+            
+        except Exception as e:
+            logger.error(f"Failed to save JSON for project {project_id}/{filename}: {e}")
+            raise
+    
+    def get_json(self, project_id: str, filename: str) -> Dict[str, Any]:
+        """
+        Retrieve JSON data from S3
+        
+        Args:
+            project_id: Project identifier
+            filename: JSON filename to retrieve
+            
+        Returns:
+            Dict containing the JSON data
+        """
+        s3_key = f"jobs/{project_id}/{filename}"
+        
+        try:
+            response = self.s3_client.get_object(
                 Bucket=self.bucket_name,
                 Key=s3_key
             )
+            json_content = response['Body'].read().decode('utf-8')
+            return json.loads(json_content)
             
-            logger.info(f"[S3 CLEANUP] Successfully deleted file for project {project_id}")
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                raise FileNotFoundError(f"JSON file not found: {s3_key}")
+            raise
+    
+    def list_job_files(self, project_id: str) -> List[str]:
+        """
+        List all files for a specific job
+        
+        Args:
+            project_id: Project identifier
+            
+        Returns:
+            List of file paths relative to the job folder
+        """
+        prefix = f"jobs/{project_id}/"
+        
+        try:
+            paginator = self.s3_client.get_paginator('list_objects_v2')
+            pages = paginator.paginate(
+                Bucket=self.bucket_name,
+                Prefix=prefix
+            )
+            
+            files = []
+            for page in pages:
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        # Remove the prefix to get relative path
+                        relative_path = obj['Key'].replace(prefix, '')
+                        files.append(relative_path)
+            
+            logger.info(f"[S3 LIST] Found {len(files)} files for project {project_id}")
+            return files
             
         except Exception as e:
-            logger.error(f"[S3 CLEANUP] Failed to cleanup file for project {project_id}: {e}")
-            # Don't raise - cleanup failures shouldn't break the flow
+            logger.error(f"Failed to list files for project {project_id}: {e}")
+            raise
+    
+    def save_debug_json(self, project_id: str, filename: str, data: Dict[str, Any]) -> str:
+        """
+        Save debug JSON data to the debug subfolder
+        
+        Args:
+            project_id: Project identifier
+            filename: Debug JSON filename
+            data: Debug data to save
+            
+        Returns:
+            str: S3 key of the saved file
+        """
+        s3_key = f"jobs/{project_id}/debug/{filename}"
+        
+        try:
+            json_content = json.dumps(data, indent=2, default=str)
+            
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                Body=json_content.encode('utf-8'),
+                ContentType='application/json',
+                Metadata={
+                    'project_id': project_id,
+                    'file_type': 'debug',
+                    'debug_type': filename.replace('.json', '')
+                }
+            )
+            logger.debug(f"[S3 DEBUG] Saved debug file: {s3_key}")
+            return s3_key
+            
+        except Exception as e:
+            logger.error(f"Failed to save debug JSON for project {project_id}/{filename}: {e}")
+            # Don't raise for debug files - they're non-critical
+            return ""
     
     def get_file_content(self, project_id: str) -> bytes:
         """
-        Get file content from S3
+        Get file content from S3 (checks both new and old locations)
         
         Args:
             project_id: Project identifier
@@ -163,7 +314,19 @@ class S3StorageService:
         Returns:
             bytes: File content
         """
-        s3_key = self._get_s3_key("uploads", f"{project_id}.pdf")
+        # Try new location first
+        s3_key = f"jobs/{project_id}/blueprint.pdf"
+        
+        try:
+            response = self.s3_client.get_object(
+                Bucket=self.bucket_name,
+                Key=s3_key
+            )
+            return response['Body'].read()
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                # Fallback to old location for backward compatibility
+                s3_key = self._get_s3_key("uploads", f"{project_id}.pdf")
         
         try:
             response = self.s3_client.get_object(
@@ -179,7 +342,7 @@ class S3StorageService:
     
     def file_exists(self, project_id: str) -> bool:
         """
-        Check if file exists in S3
+        Check if file exists in S3 (checks both new and old locations)
         
         Args:
             project_id: Project identifier
@@ -187,7 +350,8 @@ class S3StorageService:
         Returns:
             bool: True if file exists
         """
-        s3_key = self._get_s3_key("uploads", f"{project_id}.pdf")
+        # Try new location first
+        s3_key = f"jobs/{project_id}/blueprint.pdf"
         
         try:
             self.s3_client.head_object(
@@ -197,8 +361,20 @@ class S3StorageService:
             return True
         except ClientError as e:
             if e.response['Error']['Code'] == '404':
-                return False
-            raise
+                # Try old location
+                s3_key = self._get_s3_key("uploads", f"{project_id}.pdf")
+                try:
+                    self.s3_client.head_object(
+                        Bucket=self.bucket_name,
+                        Key=s3_key
+                    )
+                    return True
+                except ClientError as e2:
+                    if e2.response['Error']['Code'] == '404':
+                        return False
+                    raise
+            else:
+                raise
     
     def save_processed_data(self, project_id: str, filename: str, content: bytes) -> str:
         """
@@ -400,7 +576,18 @@ class S3StorageService:
         """
         import tempfile
         
-        s3_key = self._get_s3_key("uploads", f"{project_id}.pdf")
+        # Try new location first
+        s3_key = f"jobs/{project_id}/blueprint.pdf"
+        
+        # Check if file exists in new location
+        try:
+            self.s3_client.head_object(
+                Bucket=self.bucket_name,
+                Key=s3_key
+            )
+        except ClientError:
+            # Fallback to old location
+            s3_key = self._get_s3_key("uploads", f"{project_id}.pdf")
         
         try:
             # Create a temporary file
