@@ -167,6 +167,7 @@ This section documents the complete call chain and data flow through the AutoHVA
 
 1. **S3 Storage** (`services/s3_storage.py`)
    - Download PDF from S3 to temp file
+   - Initialize artifact manager for debugging
    
 2. **Climate Data** (`services/climate_data.py`)
    - Fetch ASHRAE climate data for zip code
@@ -175,23 +176,50 @@ This section documents the complete call chain and data flow through the AutoHVA
    - **PDF Analysis** (`services/pdf_page_analyzer.py`)
      - Analyze all pages, score them, select best floor plan
    
-   - **AI Parser Path** (`services/blueprint_ai_parser.py`)
-     - Convert PDF → Images (`pdf2image`)
-     - **GPT-4 Vision Analysis** (`services/gpt4v_blueprint_analyzer.py`)
-       - Send images to OpenAI API
-       - Use prompts from `services/gpt4v_prompts.py`
-       - Extract rooms, dimensions, areas
+   - **Geometry-First Processing** (NEW):
+     - **Vector Extraction** (`services/vector_extractor.py`)
+       - Extract vector paths, text, dimensions directly from PDF
+       - No OCR needed for vector content
+     - **RANSAC Scale Detection** (`services/scale_detector.py`)
+       - Edge-dimension pairing with RANSAC algorithm
+       - 95% confidence threshold for Gate A validation
+       - KD-tree clustering for robust scale detection
+     - **North Arrow Detection** (`services/north_arrow_detector.py`)
+       - Detect orientation from vector glyphs and text
+       - Apply rotation corrections
    
-   - **Fallback Paths** (if AI fails):
-     - Geometry Parser (`services/geometry_parser.py`)
+   - **AI Classification Path** (`services/blueprint_ai_parser.py`)
+     - Convert PDF → Images (`pdf2image`)
+     - **GPT-4o Vision** (`services/gpt4v_blueprint_analyzer.py`)
+       - Single attempt, 60s timeout (no retries)
+       - Classification only via `services/gpt_classifier.py`
+       - Tight schema, no numerical extraction
+   
+   - **Validation Gates** (`services/validation_gates.py`)
+     - Gate A: Scale detection (95% confidence required)
+     - Gate B: Pre-Manual-J validation
+   
+   - **Room Processing**:
+     - **Geometry Extraction** (`services/geometry_extractor.py`)
+       - Deterministic room polygon extraction
+     - **Room Graph Validation** (`services/room_graph_validator.py`)
+       - Validate polygons with Shapely
+       - Build adjacency graph with NetworkX
+       - Check overlaps, gaps, connectivity
+   
+   - **Fallback Paths** (if geometry extraction fails):
      - Text Parser (`services/text_parser.py`)
      - OCR Extractor (`services/ocr_extractor.py`)
 
 4. **Envelope Extraction** (`services/envelope_extractor.py`)
    - Extract R-values, insulation data
-   - Uses GPT-5 text model (not vision)
+   - Uses GPT-4 text model (not vision)
 
 5. **Manual J Calculations** (`services/manualj.py::calculate_manualj_with_audit()`)
+   - **Pre-Processing**:
+     - Filter unconditioned spaces BEFORE calculations
+     - Correct floor assembly assignment (slab losses on ground floor only)
+   
    - **Load Calculators:**
      - `services/cltd_clf.py` - Cooling Load Temperature Difference
      - `services/infiltration.py` - Air infiltration loads
@@ -201,6 +229,7 @@ This section documents the complete call chain and data flow through the AutoHVA
    - **Equipment Sizing** - Generate HVAC recommendations
 
 6. **Audit & Storage**
+   - `services/artifact_manager.py` - Versioned artifact saving (NEW)
    - `services/audit_tracker.py` - Create audit trail
    - `services/job_service.py` - Update database status
    - Save results to S3 (`analysis.json`, `hvac_results.json`, `metadata.json`)
@@ -218,30 +247,44 @@ This section documents the complete call chain and data flow through the AutoHVA
 - `services/blueprint_validator.py` - Data validation
 - `services/data_quality_validator.py` - Quality scoring
 - `services/confidence_scorer.py` - Confidence assessment
+- `services/validation_gates.py` - Two-gate validation system
+- `services/room_graph_validator.py` - Room polygon and adjacency validation
 
 **Error Handling:**
 - `services/error_types.py` - Error categorization
 - `app/parser/exceptions.py` - Custom exceptions
 
+**Geometry Processing:**
+- `services/vector_extractor.py` - Direct PDF vector/text extraction
+- `services/scale_detector.py` - RANSAC-based scale detection
+- `services/north_arrow_detector.py` - Orientation detection
+- `services/geometry_extractor.py` - Room polygon extraction
+
 **Utilities:**
 - `services/pdf_thread_manager.py` - Thread-safe PDF operations
 - `utils/json_utils.py` - JSON serialization helpers
+- `services/artifact_manager.py` - Versioned artifact saving for debugging
 
 #### Data Flow
 ```
 PDF Upload → FastAPI Router → S3 Storage → Celery Task Queue
     ↓
-PDF Processing → AI Analysis (GPT-4 Vision) → BlueprintSchema JSON
+Vector Extraction → RANSAC Scale Detection → Validation Gate A
     ↓
-Manual J Calculations → HVAC Load Results → Database + S3
+Geometry Processing → Room Graph Validation → GPT-4o Classification (optional)
+    ↓
+BlueprintSchema JSON → Validation Gate B → Manual J Calculations
+    ↓
+HVAC Load Results → Database + S3 + Artifacts
     ↓
 Email Notification → User Report
 ```
 
 #### AI Service Usage
-- **GPT-4o Vision** (gpt-4o-2024-11-20): Blueprint visual analysis only
-- **GPT-5/GPT-5-mini**: Text analysis only (envelope data extraction)
-- **OCR Fallback**: PaddleOCR or Tesseract for text extraction
+- **GPT-4o Vision** (gpt-4o-2024-11-20): Classification only, single attempt with 60s timeout
+- **GPT-4/GPT-4-mini**: Text analysis only (envelope data extraction)
+- **Vector Extraction**: Direct PDF vector/text extraction (primary method)
+- **OCR Fallback**: PaddleOCR or Tesseract for rasterized content only
 
 #### Processing Stages & Timeouts
 1. **File Validation**: 5% progress
