@@ -9,6 +9,7 @@ import logging
 import json
 import base64
 import time
+import math
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 import fitz  # PyMuPDF
@@ -98,6 +99,25 @@ class GPTBlueprintAnalysis:
     estimated_total_cooling_btu_hr: Optional[float] = None  # Whole building estimate
     heating_system_tons: Optional[float] = None
     cooling_system_tons: Optional[float] = None
+    
+    @property
+    def total_area_sqft(self) -> float:
+        """Backward compatibility property for legacy code expecting total_area_sqft"""
+        # Return the best estimate we have
+        if self.estimated_total_area_sqft and self.estimated_total_area_sqft > 0:
+            return self.estimated_total_area_sqft
+        else:
+            return self.current_floor_area_sqft
+    
+    @property
+    def total_heating_btu_hr(self) -> Optional[float]:
+        """Backward compatibility property for legacy code"""
+        return self.estimated_total_heating_btu_hr or self.floor_heating_btu_hr
+    
+    @property
+    def total_cooling_btu_hr(self) -> Optional[float]:
+        """Backward compatibility property for legacy code"""
+        return self.estimated_total_cooling_btu_hr or self.floor_cooling_btu_hr
 
 
 class GPT4VBlueprintAnalyzer:
@@ -117,16 +137,54 @@ class GPT4VBlueprintAnalyzer:
             api_key=api_key,
             max_retries=3  # Retry failed requests up to 3 times
         )
-        # Vision-capable models (gpt-4o-mini does NOT support vision)
-        # Try specific versions if generic fails
+        
+        # Model configurations with proper parameter names
+        # Different models require different parameter names for token limits
+        self.model_configs = {
+            "gpt-4o": {
+                "supports_vision": True,
+                "max_tokens_param": "max_completion_tokens",  # New parameter name
+                "max_tokens_value": 8192,
+                "timeout": 120,
+                "temperature": 0.1
+            },
+            "gpt-4o-2024-11-20": {
+                "supports_vision": True,
+                "max_tokens_param": "max_completion_tokens",  # New parameter name
+                "max_tokens_value": 8192,
+                "timeout": 120,
+                "temperature": 0.1
+            },
+            "gpt-4-turbo-2024-04-09": {
+                "supports_vision": True,
+                "max_tokens_param": "max_tokens",  # Old parameter name
+                "max_tokens_value": 4096,
+                "timeout": 90,
+                "temperature": 0.1
+            },
+            "gpt-4-turbo": {
+                "supports_vision": True,
+                "max_tokens_param": "max_tokens",  # Old parameter name
+                "max_tokens_value": 4096,
+                "timeout": 90,
+                "temperature": 0.1
+            },
+            "gpt-4-vision-preview": {
+                "supports_vision": True,
+                "max_tokens_param": "max_tokens",  # Old parameter name
+                "max_tokens_value": 4096,
+                "timeout": 90,
+                "temperature": 0.1
+            }
+        }
+        
+        # Models to try in order
         self.models_to_try = [
             "gpt-4o",                 # Primary multimodal model with vision
             "gpt-4o-2024-11-20",      # Specific version if generic fails
             "gpt-4-turbo-2024-04-09", # Latest GPT-4 Turbo with vision
             "gpt-4-turbo",            # Generic fallback
         ]
-        self.model = self.models_to_try[0]  # Start with GPT-4o
-        self.max_tokens = 8192  # GPT-4o supports large outputs
         
         # Configurable timeouts with sensible defaults
         self.gpt4o_timeout = float(os.getenv("GPT4O_TIMEOUT", "120"))  # 120 seconds for GPT-4o
@@ -154,6 +212,9 @@ class GPT4VBlueprintAnalyzer:
         start_time = time.time()
         logger.info(f"Starting GPT-4o Vision analysis of {pdf_path}")
         
+        # Store zip code for use in retry logic
+        self.current_zip_code = zip_code
+        
         # Use page from pipeline context if available, otherwise from parameter or auto-detect
         if pipeline_context:
             try:
@@ -173,8 +234,13 @@ class GPT4VBlueprintAnalyzer:
         # Render page to high-quality image
         image_base64 = self._render_page_to_base64(pdf_path, page_num)
         
-        # Prepare the analysis prompt - BE SPECIFIC!
-        prompt = self._create_analysis_prompt(zip_code)
+        # Prepare the analysis prompt - Start with simplified if env var set
+        use_simplified = os.getenv('USE_SIMPLIFIED_PROMPTS', 'false').lower() == 'true'
+        if use_simplified:
+            logger.info("Using simplified prompt (USE_SIMPLIFIED_PROMPTS=true)")
+            prompt = self._create_simplified_prompt(zip_code)
+        else:
+            prompt = self._create_analysis_prompt(zip_code)
         
         # Send to GPT-4o for analysis
         logger.info("Sending blueprint to GPT-4o Vision for analysis...")
@@ -183,9 +249,18 @@ class GPT4VBlueprintAnalyzer:
         # Parse the response
         analysis = self._parse_gpt_response(response)
         
+        # Validate and improve the analysis
+        if not self._validate_analysis(analysis):
+            logger.warning("Analysis validation failed, using fallback values")
+            analysis = self._add_fallback_values(analysis)
+        
         processing_time = time.time() - start_time
         logger.info(f"GPT-4o Vision analysis complete in {processing_time:.2f}s")
         logger.info(f"Found {len(analysis.rooms)} rooms, total area: {analysis.total_area_sqft} sq ft")
+        
+        # Clean up temporary attributes
+        if hasattr(self, 'current_zip_code'):
+            delattr(self, 'current_zip_code')
         
         return analysis
     
@@ -218,7 +293,52 @@ class GPT4VBlueprintAnalyzer:
         doc.close()
         return img_base64
     
-    def _create_analysis_prompt(self, zip_code: str) -> str:
+    def _create_simplified_prompt(self, zip_code: str) -> str:
+        """Create a simplified prompt for GPT-4o that avoids confusion"""
+        return f"""Analyze this blueprint image and identify all rooms with their dimensions.
+
+Location: ZIP code {zip_code}
+
+Please identify:
+1. Each room's name and type
+2. Room dimensions in feet
+3. Which walls are exterior (touching outside)
+4. What floor this is (first, second, basement, etc.)
+5. Calculate heating and cooling loads
+
+Return a JSON object with this structure:
+{{
+  "zip_code": "{zip_code}",
+  "floor_analysis": {{
+    "current_floor_number": 1,
+    "current_floor_name": "First Floor",
+    "total_floors_in_building": 2
+  }},
+  "areas": {{
+    "current_floor_sqft": 1500,
+    "estimated_total_building_sqft": 3000
+  }},
+  "rooms": [
+    {{
+      "name": "Living Room",
+      "room_type": "living_room",
+      "width_ft": 20,
+      "length_ft": 15,
+      "area_sqft": 300,
+      "surfaces": {{
+        "exterior_walls": 2
+      }},
+      "heating_btu_hr": 5000,
+      "cooling_btu_hr": 6000
+    }}
+  ],
+  "hvac_loads": {{
+    "floor_heating_btu_hr": 25000,
+    "floor_cooling_btu_hr": 30000
+  }}
+}}"""
+
+    def _create_analysis_prompt(self, zip_code: str, use_simplified: bool = False) -> str:
         """Create enhanced prompt for GPT-4o blueprint analysis with multimodal vision AND HVAC calculation"""
         return f"""You are an expert HVAC load calculation specialist using GPT-4o's advanced multimodal vision capabilities.
         
@@ -377,32 +497,49 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
             try:
                 logger.info(f"Attempting blueprint analysis with {model}...")
                 
-                # Use consistent timeout - gpt-4o models need more time
-                timeout = self.gpt4o_timeout if model.startswith("gpt-4o") else self.gpt4_timeout
-                logger.info(f"Using {timeout}s timeout for {model}")
+                # Get model-specific configuration
+                config = self.model_configs.get(model, {
+                    "supports_vision": True,
+                    "max_tokens_param": "max_tokens",
+                    "max_tokens_value": 4096,
+                    "timeout": 90,
+                    "temperature": 0.1
+                })
                 
-                # All vision models use the same format
-                response = self.client.chat.completions.create(
-                    model=model,
-                    timeout=timeout,
-                    messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{image_base64}",
-                                    "detail": "high"
+                if not config["supports_vision"]:
+                    logger.warning(f"{model} does not support vision, skipping")
+                    continue
+                
+                logger.info(f"Using {config['timeout']}s timeout for {model}")
+                logger.info(f"Using parameter '{config['max_tokens_param']}' with value {config['max_tokens_value']}")
+                
+                # Build request parameters with model-specific token parameter
+                request_params = {
+                    "model": model,
+                    "timeout": config["timeout"],
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/png;base64,{image_base64}",
+                                        "detail": "high"
+                                    }
                                 }
-                            }
-                        ]
-                    }
+                            ]
+                        }
                     ],
-                    max_tokens=self.max_tokens,
-                    temperature=0.1  # Low temperature for consistent output
-                )
+                    "temperature": config["temperature"]
+                }
+                
+                # Add the correct token parameter based on model
+                request_params[config["max_tokens_param"]] = config["max_tokens_value"]
+                
+                # Make the API call with model-specific parameters
+                response = self.client.chat.completions.create(**request_params)
                 
                 # Successfully got a response with this model
                 logger.info(f"✅ {model} responded successfully")
@@ -416,12 +553,38 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                     "can't analyze images",
                     "cannot analyze images",
                     "unable to view images",
-                    "can't see images"
+                    "can't see images",
+                    "i cannot see",
+                    "i can't see",
+                    "no image provided",
+                    "text-based ai"
                 ]):
-                    logger.error(f"❌ {model} claims no vision support despite being a vision model!")
-                    logger.error(f"Response: {content[:200]}")
-                    logger.debug(f"Request check - model: {model}, image size: {len(image_base64)} chars")
-                    last_error = f"{model} claims no vision support"
+                    logger.warning(f"⚠️ {model} seems confused about vision capabilities")
+                    logger.info("Retrying with simplified prompt...")
+                    
+                    # Retry with simplified prompt
+                    simplified_prompt = self._create_simplified_prompt(
+                        self.current_zip_code if hasattr(self, 'current_zip_code') else "99006"
+                    )
+                    
+                    try:
+                        retry_params = request_params.copy()
+                        retry_params["messages"][0]["content"][0]["text"] = simplified_prompt
+                        retry_response = self.client.chat.completions.create(**retry_params)
+                        retry_content = retry_response.choices[0].message.content
+                        
+                        # Try to parse the simplified response
+                        import re
+                        json_match = re.search(r'\{.*\}', retry_content, re.DOTALL)
+                        if json_match:
+                            result = json.loads(json_match.group())
+                            result['model_used'] = f"{model} (simplified)"
+                            logger.info(f"✅ {model} succeeded with simplified prompt")
+                            return result
+                    except Exception as retry_error:
+                        logger.warning(f"Simplified prompt also failed: {retry_error}")
+                    
+                    last_error = f"{model} vision confusion"
                     continue
                 
                 # Try to parse JSON from the response
@@ -562,6 +725,88 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
         )
         
         return analysis
+    
+    def _validate_analysis(self, analysis: GPTBlueprintAnalysis) -> bool:
+        """Validate that the analysis has all required fields with reasonable values"""
+        try:
+            # Check for required fields
+            if not analysis.rooms or len(analysis.rooms) == 0:
+                logger.warning("No rooms found in analysis")
+                return False
+            
+            # Check area calculations
+            if analysis.current_floor_area_sqft <= 0:
+                logger.warning(f"Invalid floor area: {analysis.current_floor_area_sqft}")
+                return False
+            
+            # Check that rooms have valid dimensions
+            for room in analysis.rooms:
+                if room.area_sqft <= 0:
+                    logger.warning(f"Room {room.name} has invalid area: {room.area_sqft}")
+                    return False
+            
+            # Check floor analysis
+            if not analysis.floor_analysis or analysis.floor_analysis.current_floor_number < 0:
+                logger.warning("Invalid floor analysis")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating analysis: {e}")
+            return False
+    
+    def _add_fallback_values(self, analysis: GPTBlueprintAnalysis) -> GPTBlueprintAnalysis:
+        """Add reasonable fallback values for missing or invalid data"""
+        try:
+            # Ensure rooms have minimum valid values
+            for room in analysis.rooms:
+                if room.area_sqft <= 0:
+                    # Estimate from dimensions if available
+                    if room.dimensions_ft[0] > 0 and room.dimensions_ft[1] > 0:
+                        room.area_sqft = room.dimensions_ft[0] * room.dimensions_ft[1]
+                    else:
+                        room.area_sqft = 100  # Default fallback
+                
+                # Ensure surfaces are set
+                if not hasattr(room, 'surfaces') or room.surfaces is None:
+                    room.surfaces = RoomSurfaces(exterior_walls=1)  # Conservative default
+            
+            # Ensure floor analysis is valid
+            if not analysis.floor_analysis:
+                analysis.floor_analysis = FloorAnalysis(
+                    current_floor_number=1,
+                    current_floor_name="First Floor",
+                    total_floors_in_building=1,
+                    floors_above=0,
+                    floors_below=0,
+                    is_complete_building=True
+                )
+            
+            # Ensure building envelope exists
+            if not analysis.building_envelope:
+                analysis.building_envelope = BuildingEnvelope(
+                    total_exterior_wall_area=analysis.current_floor_area_sqft * 0.4,
+                    total_interior_wall_area=analysis.current_floor_area_sqft * 0.3,
+                    perimeter_length_ft=math.sqrt(analysis.current_floor_area_sqft) * 4,
+                    envelope_tightness="average",
+                    stairwells=[],
+                    open_floor_connections=[]
+                )
+            
+            # Calculate areas if missing
+            if analysis.current_floor_area_sqft <= 0:
+                analysis.current_floor_area_sqft = sum(r.area_sqft for r in analysis.rooms)
+            
+            if analysis.estimated_total_area_sqft <= 0:
+                analysis.estimated_total_area_sqft = analysis.current_floor_area_sqft * \
+                    analysis.floor_analysis.total_floors_in_building
+            
+            return analysis
+            
+        except Exception as e:
+            logger.error(f"Error adding fallback values: {e}")
+            return analysis
     
     def format_for_hvac(self, analysis: GPTBlueprintAnalysis) -> Dict[str, Any]:
         """Format GPT-4o Vision analysis for HVAC load calculations with multi-floor awareness"""
