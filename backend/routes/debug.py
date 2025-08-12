@@ -3,13 +3,12 @@ Debug API endpoints for job analysis and troubleshooting
 """
 
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import logging
 
 from services.s3_storage import storage_service
 from services.job_service import job_service
 from database import get_async_session, AsyncSession
-from core.auth import get_current_user_optional
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,6 @@ router = APIRouter(prefix="/api/debug", tags=["debug"])
 @router.get("/jobs/{project_id}/analysis")
 async def get_job_analysis(
     project_id: str,
-    current_user: Optional[Dict] = Depends(get_current_user_optional),
     session: AsyncSession = Depends(get_async_session)
 ):
     """
@@ -29,13 +27,10 @@ async def get_job_analysis(
     parsing metadata, and confidence scores.
     """
     try:
-        # Check if project exists and user has access
-        if current_user:
-            project = await job_service.get_project_by_user_and_id(
-                project_id, current_user['email'], session
-            )
-            if not project:
-                raise HTTPException(status_code=404, detail="Project not found")
+        # Debug endpoints don't check user ownership for easier troubleshooting
+        project = await job_service.get_project(project_id, session)
+        if not project:
+            logger.warning(f"Project {project_id} not found in database")
         
         # Get analysis JSON from S3
         try:
@@ -61,7 +56,6 @@ async def get_job_analysis(
 @router.get("/jobs/{project_id}/hvac-results")
 async def get_hvac_results(
     project_id: str,
-    current_user: Optional[Dict] = Depends(get_current_user_optional),
     session: AsyncSession = Depends(get_async_session)
 ):
     """
@@ -71,13 +65,10 @@ async def get_hvac_results(
     heating/cooling loads per room and total building loads.
     """
     try:
-        # Check if project exists and user has access
-        if current_user:
-            project = await job_service.get_project_by_user_and_id(
-                project_id, current_user['email'], session
-            )
-            if not project:
-                raise HTTPException(status_code=404, detail="Project not found")
+        # Debug endpoints don't check user ownership for easier troubleshooting
+        project = await job_service.get_project(project_id, session)
+        if not project:
+            logger.warning(f"Project {project_id} not found in database")
         
         # Get HVAC results from S3
         try:
@@ -103,7 +94,6 @@ async def get_hvac_results(
 @router.get("/jobs/{project_id}/gpt4v-raw")
 async def get_gpt4v_raw(
     project_id: str,
-    current_user: Optional[Dict] = Depends(get_current_user_optional),
     session: AsyncSession = Depends(get_async_session)
 ):
     """
@@ -113,13 +103,10 @@ async def get_gpt4v_raw(
     prompt, and unprocessed response text.
     """
     try:
-        # Check if project exists and user has access
-        if current_user:
-            project = await job_service.get_project_by_user_and_id(
-                project_id, current_user['email'], session
-            )
-            if not project:
-                raise HTTPException(status_code=404, detail="Project not found")
+        # Debug endpoints don't check user ownership for easier troubleshooting
+        project = await job_service.get_project(project_id, session)
+        if not project:
+            logger.warning(f"Project {project_id} not found in database")
         
         # Get GPT-4V raw response from S3
         try:
@@ -145,7 +132,6 @@ async def get_gpt4v_raw(
 @router.get("/jobs/{project_id}/metadata")
 async def get_job_metadata(
     project_id: str,
-    current_user: Optional[Dict] = Depends(get_current_user_optional),
     session: AsyncSession = Depends(get_async_session)
 ):
     """
@@ -155,13 +141,10 @@ async def get_job_metadata(
     processing duration, stages completed, and any errors.
     """
     try:
-        # Check if project exists and user has access
-        if current_user:
-            project = await job_service.get_project_by_user_and_id(
-                project_id, current_user['email'], session
-            )
-            if not project:
-                raise HTTPException(status_code=404, detail="Project not found")
+        # Debug endpoints don't check user ownership for easier troubleshooting
+        project = await job_service.get_project(project_id, session)
+        if not project:
+            logger.warning(f"Project {project_id} not found in database")
         
         # Get metadata from S3
         try:
@@ -173,7 +156,7 @@ async def get_job_metadata(
             }
         except FileNotFoundError:
             # Try to construct basic metadata from database
-            if current_user:
+            if project:
                 return {
                     "success": True,
                     "project_id": project_id,
@@ -200,7 +183,6 @@ async def get_job_metadata(
 @router.get("/jobs/{project_id}/files")
 async def list_job_files(
     project_id: str,
-    current_user: Optional[Dict] = Depends(get_current_user_optional),
     session: AsyncSession = Depends(get_async_session)
 ):
     """
@@ -210,13 +192,10 @@ async def list_job_files(
     useful for understanding what data is available.
     """
     try:
-        # Check if project exists and user has access
-        if current_user:
-            project = await job_service.get_project_by_user_and_id(
-                project_id, current_user['email'], session
-            )
-            if not project:
-                raise HTTPException(status_code=404, detail="Project not found")
+        # Debug endpoints don't check user ownership for easier troubleshooting
+        project = await job_service.get_project(project_id, session)
+        if not project:
+            logger.warning(f"Project {project_id} not found in database")
         
         # List files from S3
         files = storage_service.list_job_files(project_id)
@@ -264,7 +243,6 @@ async def list_job_files(
 async def get_debug_file(
     project_id: str,
     filename: str,
-    current_user: Optional[Dict] = Depends(get_current_user_optional),
     session: AsyncSession = Depends(get_async_session)
 ):
     """
@@ -274,13 +252,10 @@ async def get_debug_file(
     other diagnostic information.
     """
     try:
-        # Check if project exists and user has access
-        if current_user:
-            project = await job_service.get_project_by_user_and_id(
-                project_id, current_user['email'], session
-            )
-            if not project:
-                raise HTTPException(status_code=404, detail="Project not found")
+        # Debug endpoints don't check user ownership for easier troubleshooting
+        project = await job_service.get_project(project_id, session)
+        if not project:
+            logger.warning(f"Project {project_id} not found in database")
         
         # Get debug file from S3
         try:
