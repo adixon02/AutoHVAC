@@ -6,7 +6,7 @@ Per ACCA Manual J and ASHRAE standards
 
 import logging
 import math
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 
