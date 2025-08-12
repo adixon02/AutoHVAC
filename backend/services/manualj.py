@@ -742,19 +742,29 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
     
     # Add floor losses (only for ground floor rooms with exterior walls)
     # Interior rooms don't have slab edge losses
+    # Floor numbering: 0 = basement/ground, 1 = main/first floor, 2+ = upper floors
     exterior_walls_count = room.source_elements.get('exterior_walls', 1) if hasattr(room, 'source_elements') else 1
     
-    if room.floor == 1 and exterior_walls_count > 0:
+    # Determine if this is a ground floor room
+    # Floor 0 = basement, Floor 1 = main floor (ground level), Floor 2+ = upper floors
+    is_ground_floor = room.floor <= 1  # Both basement (0) and main floor (1) can have floor losses
+    
+    if is_ground_floor and exterior_walls_count > 0:
         # Determine floor type from envelope data or use default
-        floor_type = "slab"  # Default assumption
-        if envelope_data:
-            if envelope_data.floor_construction:
-                if "slab" in envelope_data.floor_construction.lower():
-                    floor_type = "slab"
-                elif "crawl" in envelope_data.floor_construction.lower():
-                    floor_type = "crawlspace"
-                elif "basement" in envelope_data.floor_construction.lower():
-                    floor_type = "basement"
+        if room.floor == 0:
+            # Basement floor
+            floor_type = "basement"
+        else:
+            # Main floor - check construction type
+            floor_type = "slab"  # Default assumption for main floor
+            if envelope_data:
+                if envelope_data.floor_construction:
+                    if "slab" in envelope_data.floor_construction.lower():
+                        floor_type = "slab"
+                    elif "crawl" in envelope_data.floor_construction.lower():
+                        floor_type = "crawlspace"
+                    elif "basement" in envelope_data.floor_construction.lower():
+                        floor_type = "basement"
         
         # Calculate floor losses
         floor_losses = _calculate_floor_losses(
@@ -769,7 +779,11 @@ def _calculate_room_loads_cltd_clf(room: Room, room_type: str, climate_data: Dic
         heating_load += floor_losses['heating']
         cooling_load += floor_losses['cooling']
         
-        logger.info(f"Room {room.name}: Added floor losses - Heating: {floor_losses['heating']:.0f} BTU/hr, Type: {floor_type}")
+        logger.info(f"Room {room.name} (Floor {room.floor}): Added floor losses - Heating: {floor_losses['heating']:.0f} BTU/hr, Type: {floor_type}")
+    else:
+        # Upper floors (floor > 1) have no floor losses - floor over conditioned space
+        if room.floor > 1:
+            logger.debug(f"Room {room.name} (Floor {room.floor}): No floor losses - floor over conditioned space")
     
     # Apply thermal mass adjustments
     if envelope_data:
@@ -1173,11 +1187,50 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     total_heating = 0.0
     total_cooling = 0.0
     
+    # Define unconditioned room types that should be excluded from load calculations
+    UNCONDITIONED_ROOM_TYPES = {
+        'garage', 'porch', 'attic', 'crawlspace', 'mechanical', 
+        'deck', 'patio', 'storage', 'unfinished', 'exterior'
+    }
+    
+    # Filter out unconditioned spaces BEFORE any calculations
+    conditioned_rooms = []
+    excluded_rooms = []
+    
+    for room in schema.rooms:
+        room_name_lower = room.name.lower()
+        room_type = _classify_room_type(room.name)
+        
+        # Check if room name contains any unconditioned keywords
+        is_unconditioned = any(uncond in room_name_lower for uncond in UNCONDITIONED_ROOM_TYPES)
+        
+        if is_unconditioned:
+            excluded_rooms.append(room)
+            logger.info(f"Excluded unconditioned room '{room.name}' ({room.area:.0f} sqft) from load calculations")
+        else:
+            conditioned_rooms.append(room)
+    
+    if excluded_rooms:
+        excluded_area = sum(r.area for r in excluded_rooms)
+        logger.info(f"Excluded {len(excluded_rooms)} unconditioned rooms totaling {excluded_area:.0f} sqft")
+        validation_warnings.append({
+            "severity": "INFO",
+            "message": f"Excluded {len(excluded_rooms)} unconditioned spaces from load calculations",
+            "fix": "This is expected - unconditioned spaces don't require heating/cooling",
+            "details": {
+                "excluded_rooms": [r.name for r in excluded_rooms],
+                "excluded_area": excluded_area
+            }
+        })
+    
+    if not conditioned_rooms:
+        raise ValueError("No conditioned rooms found after filtering - cannot perform load calculations")
+    
     # Check if we need to generate missing common spaces
-    total_room_area = sum(room.area for room in schema.rooms)
+    total_room_area = sum(room.area for room in conditioned_rooms)
     area_discrepancy_percent = abs(total_room_area - schema.sqft_total) / schema.sqft_total * 100 if schema.sqft_total > 0 else 0
     
-    rooms_to_process = list(schema.rooms)  # Create a copy to avoid modifying original
+    rooms_to_process = list(conditioned_rooms)  # Process only conditioned rooms
     
     # Apply building orientation
     if building_orientation == "unknown":

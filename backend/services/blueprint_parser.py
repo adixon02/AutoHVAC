@@ -672,15 +672,14 @@ class BlueprintParser:
                     # Check if we can proceed
                     if not quality_report.can_proceed:
                         raise BlueprintValidationError(
+                            error_type="DATA_QUALITY_TOO_LOW",
                             message="Data quality too low to proceed with calculations",
                             details={
                                 "quality_level": quality_report.overall_quality.value,
                                 "confidence": quality_report.overall_confidence,
                                 "critical_issues": quality_report.critical_issues
                             },
-                            severity=ValidationSeverity.ERROR,
-                            can_continue=False,
-                            user_actions=["Review blueprint scale", "Check page selection", "Verify room detection"]
+                            recovery_suggestions=["Review blueprint scale", "Check page selection", "Verify room detection"]
                         )
                     
                     if metrics_collector.current_stage:
