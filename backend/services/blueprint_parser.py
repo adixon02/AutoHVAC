@@ -527,16 +527,23 @@ class BlueprintParser:
                             floor_rooms = self._perform_ai_analysis(
                                 page_geometry, page_text, zip_code, parsing_metadata, 
                                 project_id=project_id, page_num=page_idx,
-                                floor_label=page_analysis.floor_name,
-                                previous_floors=previous_floors_context if i > 0 else None
+                                floor_label=page_analysis.floor_name,  # Pass as hint only
+                                previous_floors=previous_floors_context if i > 0 else None,
+                                use_discovery_mode=True  # Let GPT-4V determine floor type
                             )
                             
                             rooms_by_page[i] = floor_rooms
                             logger.info(f"Page {page_analysis.page_number}: Found {len(floor_rooms)} rooms")
                             
                             # Build context for next floor
+                            # Check if rooms have detected floor type from GPT-4V
+                            detected_floor_type = None
+                            if floor_rooms and hasattr(floor_rooms[0], 'detected_floor_type'):
+                                detected_floor_type = floor_rooms[0].detected_floor_type
+                            
                             floor_context = {
                                 "floor_name": page_analysis.floor_name or f"Floor {i+1}",
+                                "floor_type": detected_floor_type or "unknown",  # Use GPT-4V detected type
                                 "rooms": [{"name": r.name, "type": r.room_type if hasattr(r, 'room_type') else 'unknown'} for r in floor_rooms],
                                 "total_area": sum(r.area for r in floor_rooms),
                                 "has_kitchen": any('kitchen' in r.name.lower() for r in floor_rooms),
@@ -1051,7 +1058,7 @@ class BlueprintParser:
             })
             return {}, [], []
     
-    def _perform_ai_analysis(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], zip_code: str, metadata: ParsingMetadata, project_id: Optional[str] = None, page_num: Optional[int] = None, floor_label: Optional[str] = None, previous_floors: Optional[List[Dict]] = None) -> List[Room]:
+    def _perform_ai_analysis(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], zip_code: str, metadata: ParsingMetadata, project_id: Optional[str] = None, page_num: Optional[int] = None, floor_label: Optional[str] = None, previous_floors: Optional[List[Dict]] = None, use_discovery_mode: bool = False) -> List[Room]:
         """Perform AI analysis to identify rooms with validation"""
         try:
             # First try GPT-4 Vision if available for maximum accuracy
@@ -1077,9 +1084,10 @@ class BlueprintParser:
                             zip_code, 
                             pipeline_context=pipeline_context,
                             override_page=page_num,  # Pass specific page for this floor
-                            floor_label=floor_label,  # Pass floor label for context
+                            floor_label=floor_label,  # Pass floor label as hint only
                             previous_floors=previous_floors,  # Pass previous floor analyses
-                            building_typology=None  # Will be determined later
+                            building_typology=None,  # Will be determined later
+                            use_discovery_mode=use_discovery_mode  # Let GPT-4V discover floor type
                         )
                         
                         if analysis and hasattr(analysis, 'total_area_sqft') and analysis.total_area_sqft and analysis.total_area_sqft > 100:
@@ -1087,11 +1095,22 @@ class BlueprintParser:
                             
                             # Convert GPT-4V results to Room schema
                             enhanced_rooms = []
+                            
+                            # Check if GPT-4V detected floor type in discovery mode
+                            detected_floor_info = None
+                            if hasattr(analysis, 'detected_floor_type'):
+                                detected_floor_info = {
+                                    'type': analysis.detected_floor_type,
+                                    'confidence': getattr(analysis, 'floor_confidence', 0),
+                                    'reasoning': getattr(analysis, 'floor_reasoning', '')
+                                }
+                                logger.info(f"Using GPT-4V detected floor type: {detected_floor_info['type']} (confidence: {detected_floor_info['confidence']:.2f})")
+                            
                             for gpt_room in analysis.rooms:
                                 room = Room(
                                     name=gpt_room.name,
                                     dimensions_ft=gpt_room.dimensions_ft,
-                                    floor=1,  # Default to first floor
+                                    floor=1,  # Default to first floor (will be updated by semantic validator)
                                     windows=0,  # Extract from features if needed
                                     orientation="unknown",
                                     area=gpt_room.area_sqft,
@@ -1101,6 +1120,9 @@ class BlueprintParser:
                                     label_found=True,
                                     dimensions_source="gpt4o_vision"
                                 )
+                                # Store detected floor info if available
+                                if detected_floor_info:
+                                    room.detected_floor_type = detected_floor_info['type']
                                 enhanced_rooms.append(room)
                             
                             metadata.ai_status = ParsingStatus.SUCCESS

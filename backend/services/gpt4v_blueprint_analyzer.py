@@ -200,7 +200,8 @@ class GPT4VBlueprintAnalyzer:
         override_page: Optional[int] = None,  # New parameter for explicit page selection
         floor_label: Optional[str] = None,  # Floor label from page analysis
         previous_floors: Optional[List[Dict]] = None,  # Previous floor analyses for context
-        building_typology: Optional[str] = None  # Building type hint
+        building_typology: Optional[str] = None,  # Building type hint
+        use_discovery_mode: bool = False  # Let GPT-4V discover floor type
     ) -> GPTBlueprintAnalysis:
         """
         Analyze blueprint using GPT-4 Vision for maximum accuracy
@@ -251,8 +252,19 @@ class GPT4VBlueprintAnalyzer:
         max_attempts = 4
         
         for attempt in range(max_attempts):
+            # Use discovery mode if requested
+            if use_discovery_mode:
+                from services.gpt4v_floor_discovery_prompts import create_floor_discovery_prompt
+                prompt = create_floor_discovery_prompt(
+                    zip_code=zip_code,
+                    page_number=page_num or 0,
+                    page_text_hint=floor_label,  # Pass label as hint only
+                    previous_floors=previous_floors,
+                    building_context={'building_typology': building_typology} if building_typology else None
+                )
+                logger.info(f"Attempt {attempt + 1}/{max_attempts}: Using floor discovery mode")
             # Use multi-floor context prompt if we have context
-            if previous_floors or floor_label or building_typology:
+            elif previous_floors or floor_label or building_typology:
                 prompt = create_multi_floor_prompt(
                     zip_code=zip_code,
                     page_number=page_num or 0,
@@ -324,6 +336,20 @@ class GPT4VBlueprintAnalyzer:
         
         # Parse the response
         analysis = self._parse_gpt_response(response)
+        
+        # If in discovery mode, store the floor determination
+        if use_discovery_mode and 'floor_determination' in response:
+            floor_det = response['floor_determination']
+            detected_floor_type = floor_det.get('detected_floor_type', 'unknown')
+            logger.info(f"GPT-4V determined floor type: {detected_floor_type} (confidence: {floor_det.get('confidence', 0):.2f})")
+            if floor_det.get('contradicts_label'):
+                logger.warning(f"Floor type contradicts PDF label! PDF says '{floor_label}' but content shows '{detected_floor_type}'")
+            
+            # Store floor determination in analysis for later use
+            if hasattr(analysis, '__dict__'):
+                analysis.detected_floor_type = detected_floor_type
+                analysis.floor_confidence = floor_det.get('confidence', 0)
+                analysis.floor_reasoning = floor_det.get('reasoning', '')
         
         # Validate and improve the analysis
         if not self._validate_analysis(analysis):
@@ -719,6 +745,11 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
     
     def _parse_gpt_response(self, response: Dict[str, Any]) -> GPTBlueprintAnalysis:
         """Parse GPT-4V response into structured analysis with multi-floor awareness"""
+        
+        # Handle floor determination if present (discovery mode)
+        floor_determination = None
+        if 'floor_determination' in response:
+            floor_determination = response['floor_determination']
         
         # Parse floor analysis
         floor_data = response.get("floor_analysis", {})
