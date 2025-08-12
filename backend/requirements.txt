@@ -45,3 +45,6 @@ paddleocr==2.7.3
 opencv-python==4.6.0.66
 opencv-contrib-python==4.6.0.66
 scipy>=1.11.0
+scikit-learn>=1.3.0
+shapely>=2.0.0
+networkx>=3.0

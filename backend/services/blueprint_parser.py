@@ -31,6 +31,8 @@ from services.blueprint_validator import (
     calculate_data_quality_score
 )
 from services.deterministic_scale_detector import deterministic_scale_detector, ScaleResult
+from services.scale_detector import get_scale_detector, ScaleResult as RANSACScaleResult
+from services.vector_extractor import get_vector_extractor
 from services.room_filter import room_filter, RoomFilterConfig
 from services.metrics_collector import metrics_collector, PipelineStage, track_stage
 from services.pipeline_context import pipeline_context
@@ -2104,58 +2106,101 @@ class BlueprintParser:
         parsed_dimensions: List[ParsedDimension],
         rooms: List[Room]
     ) -> float:
-        """Detect scale using multiple methods and vote on the result"""
+        """Detect scale using RANSAC-based geometry-first approach"""
+        
+        # Check for environment variable override first
+        scale_override = os.getenv('SCALE_OVERRIDE')
+        if scale_override:
+            try:
+                override_value = float(scale_override)
+                logger.info(f"Using scale override from environment: {override_value} px/ft")
+                return override_value
+            except ValueError:
+                pass
+        
+        # Use our new RANSAC scale detector
+        try:
+            # Get the PDF path from pipeline context
+            pdf_path = pipeline_context.get('pdf_path')
+            if not pdf_path:
+                # Try to get from metadata
+                pdf_path = raw_geometry.get('pdf_path') or raw_text.get('pdf_path')
+            
+            if pdf_path:
+                # Get the current page from context
+                page_num = self.page_context.get_page() if hasattr(self, 'page_context') else 0
+                
+                # Use RANSAC scale detector
+                scale_detector = get_scale_detector()
+                scale_result = scale_detector.detect_scale(
+                    pdf_path=pdf_path,
+                    page_num=page_num,
+                    override_scale=None  # Already handled above
+                )
+                
+                logger.info(f"RANSAC scale detection: {scale_result.scale_px_per_ft} px/ft "
+                           f"(confidence: {scale_result.confidence:.2%}, method: {scale_result.method})")
+                
+                # Store in validation gates if high confidence
+                if hasattr(self, 'validation_gates') and scale_result.confidence >= 0.95:
+                    from services.validation_gates import get_validation_gates
+                    gates = get_validation_gates()
+                    gate_result = gates.check_gate_a_scale(
+                        scale_confidence=scale_result.confidence,
+                        scale_px_per_ft=scale_result.scale_px_per_ft,
+                        detection_method=scale_result.method
+                    )
+                    logger.info(f"Scale Gate A: {gate_result.status.value} - {gate_result.message}")
+                
+                # Validate scale with room sizes if available
+                if rooms and scale_result.confidence < 0.95:
+                    room_areas = [room.area for room in rooms]
+                    avg_area = sum(room_areas) / len(room_areas) if room_areas else 0
+                    
+                    # Apply scale and check if realistic
+                    test_areas = [a * (scale_result.scale_px_per_ft / 48.0)**2 for a in room_areas]
+                    test_avg = sum(test_areas) / len(test_areas) if test_areas else 0
+                    
+                    if 50 < test_avg < 400:  # Realistic room sizes
+                        logger.info(f"Scale validated by room sizes: avg {test_avg:.1f} sqft")
+                        return scale_result.scale_px_per_ft
+                    else:
+                        logger.warning(f"Scale produces unrealistic room sizes: avg {test_avg:.1f} sqft")
+                        # Fall back to default if room sizes are unrealistic
+                        if scale_result.confidence < 0.5:
+                            logger.info(f"Low confidence scale, using default: {self.default_scale_override}")
+                            return float(self.default_scale_override)
+                
+                return scale_result.scale_px_per_ft
+                
+        except Exception as e:
+            logger.warning(f"RANSAC scale detection failed: {e}")
+        
+        # Fallback to simple voting if RANSAC fails
+        logger.info("Falling back to legacy voting-based scale detection")
+        
         votes = {}
         
-        # Method 1: OCR-extracted scale (highest confidence)
+        # OCR-extracted scale
         ocr_scale = raw_text.get('ocr_scale')
         if ocr_scale:
-            # Parse scale notation (e.g., "1/4\"=1'-0\"")
             if "1/4" in ocr_scale:
-                votes[48] = 3  # 1/4" = 1' is 48 px/ft
+                votes[48] = 3
             elif "1/8" in ocr_scale:
-                votes[96] = 3  # 1/8" = 1' is 96 px/ft
+                votes[96] = 3
             elif "3/8" in ocr_scale:
-                votes[32] = 3  # 3/8" = 1' is 32 px/ft
-            logger.info(f"OCR scale detection: {ocr_scale} -> votes: {votes}")
+                votes[32] = 3
         
-        # Method 2: Geometry-based scale
+        # Geometry-based scale
         if raw_geometry and 'scale_factor' in raw_geometry:
             geom_scale = raw_geometry['scale_factor']
             if geom_scale and geom_scale > 0:
                 votes[geom_scale] = votes.get(geom_scale, 0) + 2
-                logger.info(f"Geometry scale detection: {geom_scale}")
         
-        # Method 3: Statistical validation from room sizes
-        if rooms:
-            room_areas = [room.area for room in rooms]
-            avg_area = sum(room_areas) / len(room_areas) if room_areas else 0
-            
-            # Check if room sizes are realistic
-            if 50 < avg_area < 400:  # Realistic room sizes
-                # Current scale is probably correct
-                votes[48] = votes.get(48, 0) + 1
-            elif avg_area < 10:  # Too small, scale might be wrong
-                votes[96] = votes.get(96, 0) + 1  # Try doubling
-            elif avg_area > 1000:  # Too large, scale might be wrong
-                votes[24] = votes.get(24, 0) + 1  # Try halving
-            
-            logger.info(f"Statistical validation: avg room size {avg_area:.1f} sqft")
-        
-        # Method 4: Check environment variable override
-        scale_override = os.getenv('SCALE_OVERRIDE')
-        if scale_override:
-            try:
-                override_value = int(scale_override)
-                votes[override_value] = 10  # Override has highest priority
-                logger.info(f"Scale override from environment: {override_value}")
-            except ValueError:
-                pass
-        
-        # Return scale with most votes, default to 48 (1/4"=1')
+        # Return scale with most votes, default to 48
         if votes:
             winning_scale = max(votes, key=votes.get)
-            logger.info(f"Scale voting results: {votes} -> selected: {winning_scale}")
+            logger.info(f"Legacy voting results: {votes} -> selected: {winning_scale}")
             return float(winning_scale)
         else:
             logger.info(f"No scale detected, using default: {self.default_scale_override}")
