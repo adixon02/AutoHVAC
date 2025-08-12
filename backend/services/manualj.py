@@ -1298,15 +1298,6 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     # Log final orientation decision
     if orientation_applied:
         logger.info(f"Orientation applied to {len(rooms_to_process)} rooms")
-            if room.orientation in ['unknown', 'N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']:
-                # Set orientation based on user input
-                # Assume front door faces the given direction
-                # Rooms on different sides get appropriate orientations
-                room.orientation = building_orientation
-                # Mark that this is user-provided with high confidence
-                if hasattr(room, 'source_elements'):
-                    room.source_elements['orientation_confidence'] = 0.9
-                    room.source_elements['orientation_source'] = 'user_provided'
     
     # If significant area is missing and we have few rooms, generate common spaces
     if area_discrepancy_percent > 30 and len(schema.rooms) < 10:
