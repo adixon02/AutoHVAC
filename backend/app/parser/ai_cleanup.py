@@ -61,7 +61,7 @@ async def cleanup(raw_geo: RawGeometry, raw_text: RawText, zip_code: str = "9021
                 {"role": "user", "content": context}
             ],
             temperature=0.1,  # Low temperature for consistent output
-            max_tokens=2000,
+            max_completion_tokens=2000,  # Use new parameter for GPT-5 models
             response_format={"type": "json_object"}
         )
         

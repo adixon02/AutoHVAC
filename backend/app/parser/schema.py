@@ -117,6 +117,9 @@ class Room(BaseModel):
     dimensions_source: str = Field("inferred", description="How dimensions were determined: measured, inferred, estimated")
     source_page: Optional[int] = Field(None, description="Source PDF page number (1-based) for multi-floor processing")
     
+    # Floor detection from GPT-4V discovery mode
+    detected_floor_type: Optional[str] = Field(None, description="Floor type detected by GPT-4V: main/upper/bonus/basement")
+    
     @validator('center_position', pre=True, always=True)
     def set_default_center_position(cls, v):
         """Set default center position if not provided"""

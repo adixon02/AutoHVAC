@@ -801,12 +801,25 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                 width = room_data.get("width_ft", 10) or 10
                 length = room_data.get("length_ft", 10) or 10
                 
+                # Calculate area fallback: if dimensions exist but area is 0 or missing, calculate it
+                provided_area = room_data.get("area_sqft", 0)
+                if provided_area and provided_area > 0:
+                    area = float(provided_area)
+                elif width and length and width > 0 and length > 0:
+                    # Fallback: calculate area from dimensions
+                    area = float(width) * float(length)
+                    logger.info(f"Calculated area for {room_data.get('name', 'Unknown')}: {width}×{length}={area} sqft")
+                else:
+                    # Last resort: use reasonable default
+                    area = 100.0
+                    logger.warning(f"Using default area for {room_data.get('name', 'Unknown')} (no dimensions provided)")
+                
                 room = GPTRoom(
                     name=room_data.get("name", "Unknown"),
                     room_type=room_data.get("room_type", "unknown"),
                     floor_level=room_data.get("floor_level", floor_analysis.current_floor_number),
                     dimensions_ft=(float(width), float(length)),
-                    area_sqft=float(room_data.get("area_sqft", 100) or 100),
+                    area_sqft=area,
                     surfaces=surfaces,
                     vertical_connections=vertical_connections,
                     location=room_data.get("location", "") or "",

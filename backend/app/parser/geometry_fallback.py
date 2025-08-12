@@ -133,7 +133,12 @@ class GeometryFallbackParser:
         
         # First try polygon detection from wall lines
         rooms = []
-        if raw_geo and raw_geo.lines and len(raw_geo.lines) > 10:
+        
+        # PERFORMANCE FIX: Skip polygon detection if we're just using this as a last-resort fallback
+        # Polygon detection can take 4+ minutes and often fails anyway
+        skip_polygon = error_msg and "AI analysis" in error_msg
+        
+        if not skip_polygon and raw_geo and raw_geo.lines and len(raw_geo.lines) > 10:
             logger.info(f"Attempting polygon-based room detection from wall lines (scale: {scale_factor} px/ft)")
             try:
                 polygon_rooms = polygon_detector.detect_rooms(

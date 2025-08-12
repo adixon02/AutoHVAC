@@ -41,7 +41,8 @@ class PolygonRoomDetector:
         lines: List[Dict[str, Any]],
         page_width: float,
         page_height: float,
-        scale_factor: Optional[float] = None
+        scale_factor: Optional[float] = None,
+        max_time_seconds: int = 30  # Add timeout to prevent 4+ minute runs
     ) -> List[Dict[str, Any]]:
         """
         Main entry point - detects rooms from wall lines
@@ -51,11 +52,14 @@ class PolygonRoomDetector:
             page_width: PDF page width in pixels
             page_height: PDF page height in pixels
             scale_factor: Pixels per foot for scaling
+            max_time_seconds: Maximum time to spend on detection
             
         Returns:
             List of detected room polygons with metadata
         """
-        logger.info(f"Starting polygon room detection with {len(lines)} lines")
+        import time
+        start_time = time.time()
+        logger.info(f"Starting polygon room detection with {len(lines)} lines (max {max_time_seconds}s)")
         
         # Step 1: Filter and classify lines as walls
         walls = self.extract_wall_segments(lines)
@@ -65,17 +69,32 @@ class PolygonRoomDetector:
             logger.warning("No wall segments found - cannot detect rooms")
             return []
         
+        # Check timeout
+        if time.time() - start_time > max_time_seconds:
+            logger.warning(f"Polygon detection timeout after wall extraction ({max_time_seconds}s)")
+            return []
+        
         # Step 2: Build wall connectivity graph
         graph = self.build_wall_graph(walls)
         logger.info(f"Built connectivity graph with {len(graph)} nodes")
+        
+        # Check timeout
+        if time.time() - start_time > max_time_seconds:
+            logger.warning(f"Polygon detection timeout after graph building ({max_time_seconds}s)")
+            return []
         
         # Step 3: Find closed polygons (rooms)
         polygons = self.find_closed_polygons(graph, walls)
         logger.info(f"Found {len(polygons)} closed polygons")
         
+        # Check timeout
+        if time.time() - start_time > max_time_seconds:
+            logger.warning(f"Polygon detection timeout after polygon finding ({max_time_seconds}s)")
+            return polygons[:5] if polygons else []  # Return first 5 if we have any
+        
         # Step 4: Filter and validate polygons as rooms
         rooms = self.filter_valid_rooms(polygons, scale_factor)
-        logger.info(f"Validated {len(rooms)} rooms from {len(polygons)} polygons")
+        logger.info(f"Validated {len(rooms)} rooms from {len(polygons)} polygons in {time.time()-start_time:.1f}s")
         
         # Step 5: Generate debug visualization
         self.save_debug_artifacts(walls, polygons, rooms, page_width, page_height)

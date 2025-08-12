@@ -147,6 +147,11 @@ IMPORTANT: This label may be wrong! Determine the actual floor type from the roo
 
 YOUR TASK: Determine what floor this blueprint page shows based on the rooms present.
 
+CRITICAL: For EVERY room you identify:
+1. MEASURE the dimensions in feet from the blueprint
+2. CALCULATE the area (width × length) in square feet
+3. DO NOT RETURN 0 for area - if you can see a room, estimate its size
+
 FLOOR TYPE IDENTIFICATION GUIDE:
 1. MAIN FLOOR indicators:
    - Has kitchen (critical indicator)
@@ -206,9 +211,9 @@ OUTPUT FORMAT:
     {{
       "name": "exact name from blueprint",
       "type": "bedroom/bathroom/kitchen/living/bonus/storage/etc",
-      "width_ft": 0.0,
-      "length_ft": 0.0,
-      "area_sqft": 0.0,
+      "width_ft": <MEASURE FROM BLUEPRINT>,
+      "length_ft": <MEASURE FROM BLUEPRINT>,
+      "area_sqft": <CALCULATE: width × length, NEVER 0>,
       "exterior_walls": 0-4,
       "has_windows": true/false,
       "is_over_garage": true/false,
@@ -217,7 +222,7 @@ OUTPUT FORMAT:
   ],
   "validation": {{
     "all_rooms_found": true/false,
-    "total_area_sqft": 0.0,
+    "total_area_sqft": <SUM OF ALL ROOM AREAS>,
     "floor_assignment": {{
       "recommended_floor_number": 1/2/3,
       "recommended_floor_name": "Main Floor/Upper Floor/Bonus Room/etc"

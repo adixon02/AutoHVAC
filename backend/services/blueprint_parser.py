@@ -1783,7 +1783,8 @@ class BlueprintParser:
         self,
         raw_geometry: Dict[str, Any],
         raw_text: Dict[str, Any],
-        parsing_metadata: ParsingMetadata
+        parsing_metadata: ParsingMetadata,
+        skip_polygon: bool = False  # Add flag to skip expensive polygon detection
     ) -> List[Room]:
         """Perform traditional room detection using geometry and text"""
         logger.info("Starting traditional room detection")
@@ -1798,8 +1799,8 @@ class BlueprintParser:
         
         rooms = []
         
-        # Method 1: Polygon detection from walls
-        if geometry_obj and hasattr(geometry_obj, 'lines'):
+        # Method 1: Polygon detection from walls (SKIP if we already have AI results)
+        if not skip_polygon and geometry_obj and hasattr(geometry_obj, 'lines'):
             logger.info("Attempting polygon-based room detection")
             scale_factor = getattr(geometry_obj, 'scale_factor', None)
             polygon_rooms = polygon_detector.detect_rooms(
