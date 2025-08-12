@@ -36,6 +36,7 @@ from services.metrics_collector import metrics_collector, PipelineStage, track_s
 from services.pipeline_context import pipeline_context
 from services.building_typology import detect_building_typology, BuildingTypologyDetector
 from services.semantic_floor_validator import validate_floor_assignments
+from services.data_quality_validator import validate_blueprint_quality
 
 # Import our new lean components
 try:
@@ -511,8 +512,9 @@ class BlueprintParser:
                     if 'selected_pages' in locals() and len(selected_pages) > 1:
                         # Process each floor separately then combine
                         rooms_by_page = {}
+                        previous_floors_context = []
                         
-                        # First, get rooms for each page
+                        # First, get rooms for each page with context from previous floors
                         for i, page_analysis in enumerate(selected_pages):
                             logger.info(f"AI analysis for page {page_analysis.page_number} ({page_analysis.floor_name or 'Unknown floor'})")
                             
@@ -520,12 +522,27 @@ class BlueprintParser:
                             page_geometry = all_raw_geometry[i] if i < len(all_raw_geometry) else {}
                             page_text = all_raw_text[i] if i < len(all_raw_text) else {}
                             
-                            # Pass the specific page number for this floor (0-indexed)
+                            # Pass the specific page number and floor context
                             page_idx = page_analysis.page_number - 1
-                            floor_rooms = self._perform_ai_analysis(page_geometry, page_text, zip_code, parsing_metadata, project_id=project_id, page_num=page_idx)
+                            floor_rooms = self._perform_ai_analysis(
+                                page_geometry, page_text, zip_code, parsing_metadata, 
+                                project_id=project_id, page_num=page_idx,
+                                floor_label=page_analysis.floor_name,
+                                previous_floors=previous_floors_context if i > 0 else None
+                            )
                             
                             rooms_by_page[i] = floor_rooms
                             logger.info(f"Page {page_analysis.page_number}: Found {len(floor_rooms)} rooms")
+                            
+                            # Build context for next floor
+                            floor_context = {
+                                "floor_name": page_analysis.floor_name or f"Floor {i+1}",
+                                "rooms": [{"name": r.name, "type": r.room_type if hasattr(r, 'room_type') else 'unknown'} for r in floor_rooms],
+                                "total_area": sum(r.area for r in floor_rooms),
+                                "has_kitchen": any('kitchen' in r.name.lower() for r in floor_rooms),
+                                "has_master": any('master' in r.name.lower() for r in floor_rooms)
+                            }
+                            previous_floors_context.append(floor_context)
                         
                         # Validate floor assignments using semantic analysis
                         logger.info("Validating floor assignments with semantic analysis...")
@@ -608,6 +625,47 @@ class BlueprintParser:
                     floors_processed=floors_processed,
                     building_typology=building_typology
                     )
+                    
+                    # Stage 6: Data Quality Validation
+                    logger.info("Stage 6: Validating data quality")
+                    quality_report = validate_blueprint_quality(blueprint_schema)
+                    
+                    logger.info(f"Data quality: {quality_report.overall_quality.value}, "
+                               f"Confidence: {quality_report.overall_confidence:.2f}")
+                    
+                    if quality_report.critical_issues > 0:
+                        logger.warning(f"Found {quality_report.critical_issues} critical data quality issues")
+                        for issue in quality_report.issues:
+                            if issue.severity == "critical":
+                                logger.error(f"CRITICAL: {issue.message}")
+                                logger.error(f"  Action: {issue.suggested_action}")
+                    
+                    # Add quality report to metadata
+                    if parsing_metadata:
+                        parsing_metadata.data_quality_score = quality_report.overall_confidence * 100
+                        parsing_metadata.validation_warnings = [
+                            {
+                                "severity": issue.severity,
+                                "message": issue.message,
+                                "action": issue.suggested_action
+                            }
+                            for issue in quality_report.issues
+                        ]
+                    
+                    # Check if we can proceed
+                    if not quality_report.can_proceed:
+                        raise BlueprintValidationError(
+                            message="Data quality too low to proceed with calculations",
+                            details={
+                                "quality_level": quality_report.overall_quality.value,
+                                "confidence": quality_report.overall_confidence,
+                                "critical_issues": quality_report.critical_issues
+                            },
+                            severity=ValidationSeverity.CRITICAL,
+                            can_continue=False,
+                            user_actions=["Review blueprint scale", "Check page selection", "Verify room detection"]
+                        )
+                    
                     if metrics_collector.current_stage:
                         metrics_collector.current_stage.output_data = {
                             "total_heating_load": 0,  # Loads are calculated separately in HVAC calculator
@@ -993,7 +1051,7 @@ class BlueprintParser:
             })
             return {}, [], []
     
-    def _perform_ai_analysis(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], zip_code: str, metadata: ParsingMetadata, project_id: Optional[str] = None, page_num: Optional[int] = None) -> List[Room]:
+    def _perform_ai_analysis(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], zip_code: str, metadata: ParsingMetadata, project_id: Optional[str] = None, page_num: Optional[int] = None, floor_label: Optional[str] = None, previous_floors: Optional[List[Dict]] = None) -> List[Room]:
         """Perform AI analysis to identify rooms with validation"""
         try:
             # First try GPT-4 Vision if available for maximum accuracy
@@ -1013,12 +1071,15 @@ class BlueprintParser:
                             gpt4v.current_project_id = project_id
                         elif pipeline_context.project_id:
                             gpt4v.current_project_id = pipeline_context.project_id
-                        # Pass explicit page number for multi-floor processing
+                        # Pass explicit page number and floor context for multi-floor processing
                         analysis = gpt4v.analyze_blueprint(
                             pdf_path, 
                             zip_code, 
                             pipeline_context=pipeline_context,
-                            override_page=page_num  # Pass specific page for this floor
+                            override_page=page_num,  # Pass specific page for this floor
+                            floor_label=floor_label,  # Pass floor label for context
+                            previous_floors=previous_floors,  # Pass previous floor analyses
+                            building_typology=None  # Will be determined later
                         )
                         
                         if analysis and hasattr(analysis, 'total_area_sqft') and analysis.total_area_sqft and analysis.total_area_sqft > 100:

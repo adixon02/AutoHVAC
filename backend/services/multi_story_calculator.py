@@ -79,7 +79,8 @@ class MultiStoryCalculator:
         outdoor_temp_heating: float = 0,
         outdoor_temp_cooling: float = 95,
         indoor_temp: float = 70,
-        total_cfm50: float = None
+        total_cfm50: float = None,
+        building_typology: Optional[Dict] = None
     ) -> BuildingLoad:
         """
         Calculate complete building loads with multi-floor effects
@@ -94,7 +95,18 @@ class MultiStoryCalculator:
         Returns:
             BuildingLoad with all calculations
         """
-        logger.info(f"Calculating loads for {len(floors)}-story building")
+        # Use building typology if provided
+        if building_typology:
+            building_type = building_typology.get('building_type', 'unknown')
+            has_bonus = building_typology.get('has_bonus_room', False)
+            bonus_area = building_typology.get('bonus_room_area', 0)
+            
+            logger.info(f"Calculating loads for {building_type} building")
+            if has_bonus:
+                logger.info(f"Building has bonus room: {bonus_area:.0f} sqft")
+                self.notes.append(f"Bonus room over garage: {bonus_area:.0f} sqft with enhanced load factors")
+        else:
+            logger.info(f"Calculating loads for {len(floors)}-story building")
         
         # Calculate building geometry
         building_height = self._calculate_building_height(floors)
@@ -174,13 +186,23 @@ class MultiStoryCalculator:
             floor_num = floor_rooms[0].floor if hasattr(floor_rooms[0], 'floor') else floor_idx + 1
             floor_name = f"Floor {floor_num}"
             
+            # Check if this is a bonus floor
+            is_bonus_floor = any('bonus' in r.name.lower() for r in floor_rooms)
+            if is_bonus_floor:
+                floor_name = "Bonus Floor"
+                logger.info(f"Detected bonus floor with {len(floor_rooms)} rooms")
+            
             heating_total = 0
             cooling_total = 0
             
             for room in floor_rooms:
+                # Check if this specific room is a bonus room
+                is_bonus_room = 'bonus' in room.name.lower() or is_bonus_floor
+                
                 # Only calculate load for EXTERIOR surfaces
                 heating, cooling = self._calculate_room_exterior_load(
-                    room, outdoor_heating, outdoor_cooling, indoor, floor_num
+                    room, outdoor_heating, outdoor_cooling, indoor, floor_num,
+                    is_bonus_room=is_bonus_room
                 )
                 heating_total += heating
                 cooling_total += cooling
@@ -202,7 +224,8 @@ class MultiStoryCalculator:
         outdoor_heating: float,
         outdoor_cooling: float,
         indoor: float,
-        floor_num: int
+        floor_num: int,
+        is_bonus_room: bool = False
     ) -> Tuple[float, float]:
         """
         Calculate load for exterior surfaces of a room
@@ -247,7 +270,32 @@ class MultiStoryCalculator:
         if hasattr(room, 'surfaces'):
             has_exterior_floor = room.surfaces.has_exterior_floor
         
-        if has_exterior_floor:
+        # Special handling for bonus rooms over garage
+        if is_bonus_room or 'bonus' in room.name.lower():
+            # Bonus rooms have exposed floor over unconditioned garage
+            has_exterior_floor = True
+            floor_r_value = 11  # Often less insulated over garage
+            
+            # Higher infiltration for bonus rooms
+            infiltration_multiplier = 1.5
+            
+            # Exposed floor load (garage is semi-conditioned)
+            garage_temp_winter = outdoor_heating + 10  # Garage warmer than outside
+            garage_temp_summer = outdoor_cooling - 5   # Garage cooler than outside
+            
+            floor_delta_t_heating = indoor - garage_temp_winter
+            floor_delta_t_cooling = garage_temp_summer - indoor
+            
+            heating_load += room.area * floor_delta_t_heating / floor_r_value
+            cooling_load += room.area * max(0, floor_delta_t_cooling) / floor_r_value
+            
+            # Additional infiltration load for bonus rooms
+            heating_load *= infiltration_multiplier
+            cooling_load *= infiltration_multiplier
+            
+            logger.debug(f"Bonus room '{room.name}': Additional floor load due to garage exposure")
+            
+        elif has_exterior_floor:
             floor_r_value = 19  # R-19 typical
             if floor_num == 0:  # Basement
                 # Ground coupling reduces load

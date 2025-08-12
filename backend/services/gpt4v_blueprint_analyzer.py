@@ -19,6 +19,7 @@ import io
 
 from services.page_classifier import page_classifier
 from services.gpt4v_prompts import blueprint_prompt_manager
+from services.gpt4v_multi_floor_prompts import create_multi_floor_prompt
 from services.scale_extractor import scale_extractor
 
 logger = logging.getLogger(__name__)
@@ -196,7 +197,10 @@ class GPT4VBlueprintAnalyzer:
         zip_code: str = "99006",
         page_num: Optional[int] = None,
         pipeline_context=None,
-        override_page: Optional[int] = None  # New parameter for explicit page selection
+        override_page: Optional[int] = None,  # New parameter for explicit page selection
+        floor_label: Optional[str] = None,  # Floor label from page analysis
+        previous_floors: Optional[List[Dict]] = None,  # Previous floor analyses for context
+        building_typology: Optional[str] = None  # Building type hint
     ) -> GPTBlueprintAnalysis:
         """
         Analyze blueprint using GPT-4 Vision for maximum accuracy
@@ -247,10 +251,20 @@ class GPT4VBlueprintAnalyzer:
         max_attempts = 4
         
         for attempt in range(max_attempts):
-            # Get prompt for current version
-            prompt = blueprint_prompt_manager.get_prompt(prompt_version, zip_code, floor_hint=page_num + 1)
-            
-            logger.info(f"Attempt {attempt + 1}/{max_attempts}: Using prompt version {prompt_version}")
+            # Use multi-floor context prompt if we have context
+            if previous_floors or floor_label or building_typology:
+                prompt = create_multi_floor_prompt(
+                    zip_code=zip_code,
+                    page_number=page_num or 0,
+                    floor_label=floor_label,
+                    previous_floors=previous_floors,
+                    building_typology=building_typology
+                )
+                logger.info(f"Attempt {attempt + 1}/{max_attempts}: Using multi-floor context prompt")
+            else:
+                # Fall back to standard prompt
+                prompt = blueprint_prompt_manager.get_prompt(prompt_version, zip_code, floor_hint=page_num + 1)
+                logger.info(f"Attempt {attempt + 1}/{max_attempts}: Using prompt version {prompt_version}")
             
             # Send to GPT-4o for analysis
             try:

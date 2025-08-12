@@ -6,6 +6,7 @@ Implements simplified Manual J algorithms for HVAC sizing
 from typing import Dict, Any, List, Optional
 from app.parser.schema import BlueprintSchema, Room
 from .climate_data import get_climate_data, get_climate_zone_factors, get_construction_vintage_values
+from .multi_story_calculator import MultiStoryCalculator, BuildingLoad
 from .cltd_clf import (
     calculate_wall_load_cltd, calculate_roof_load_cltd, 
     calculate_window_solar_load, calculate_window_conduction_load,
@@ -1215,7 +1216,17 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
             
             logger.info(f"Added generated space: {space_data['name']} ({space_data['area']:.0f} sqft)")
     
+    # Check if we have multi-story with bonus room
+    has_bonus_room = False
+    if hasattr(schema, 'building_typology') and schema.building_typology:
+        has_bonus_room = schema.building_typology.get('has_bonus_room', False)
+        if has_bonus_room:
+            logger.info(f"Building has bonus room - applying enhanced load factors")
+    
     for room in rooms_to_process:
+        # Check if this is a bonus room
+        is_bonus_room = 'bonus' in room.name.lower()
+        
         # Validate and cap room area to prevent calculation errors
         original_area = room.area
         max_residential_room_area = 1000.0  # Maximum reasonable residential room area
@@ -1241,6 +1252,13 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
         
         room_type = _classify_room_type(room.name)
         
+        # Apply bonus room multiplier if detected
+        bonus_multiplier = 1.0
+        if is_bonus_room:
+            # Bonus rooms over garage have 30-50% higher loads
+            bonus_multiplier = 1.4  # 40% increase
+            logger.info(f"Room '{room.name}' identified as bonus room - applying {bonus_multiplier}x load multiplier")
+        
         # Use enhanced CLF/CLTD calculations if construction vintage or envelope data is provided
         if (construction_vintage and construction_values) or envelope_data:
             room_loads = _calculate_room_loads_cltd_clf(
@@ -1259,8 +1277,8 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
             )
             calculation_method = "Simplified"
         
-        room_heating = room_loads['heating']
-        room_cooling = room_loads['cooling']
+        room_heating = room_loads['heating'] * bonus_multiplier
+        room_cooling = room_loads['cooling'] * bonus_multiplier
         
         zone_data = {
             "name": room.name,
