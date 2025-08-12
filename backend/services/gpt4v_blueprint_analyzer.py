@@ -147,35 +147,35 @@ class GPT4VBlueprintAnalyzer:
                 "supports_vision": True,
                 "max_tokens_param": "max_completion_tokens",  # New parameter name
                 "max_tokens_value": 8192,
-                "timeout": 120,
+                "timeout": self.gpt_timeout,  # Use single timeout
                 "temperature": 0.1
             },
             "gpt-4o-2024-11-20": {
                 "supports_vision": True,
                 "max_tokens_param": "max_completion_tokens",  # New parameter name
                 "max_tokens_value": 8192,
-                "timeout": 120,
+                "timeout": self.gpt_timeout,  # Use single timeout
                 "temperature": 0.1
             },
             "gpt-4-turbo-2024-04-09": {
                 "supports_vision": True,
                 "max_tokens_param": "max_tokens",  # Old parameter name
                 "max_tokens_value": 4096,
-                "timeout": 90,
+                "timeout": self.gpt_timeout,  # Use single timeout
                 "temperature": 0.1
             },
             "gpt-4-turbo": {
                 "supports_vision": True,
                 "max_tokens_param": "max_tokens",  # Old parameter name
                 "max_tokens_value": 4096,
-                "timeout": 90,
+                "timeout": self.gpt_timeout,  # Use single timeout
                 "temperature": 0.1
             },
             "gpt-4-vision-preview": {
                 "supports_vision": True,
                 "max_tokens_param": "max_tokens",  # Old parameter name
                 "max_tokens_value": 4096,
-                "timeout": 90,
+                "timeout": self.gpt_timeout,  # Use single timeout
                 "temperature": 0.1
             }
         }
@@ -186,10 +186,9 @@ class GPT4VBlueprintAnalyzer:
             "gpt-4o",                 # Fallback if specific version not available
         ]
         
-        # Configurable timeouts with sensible defaults
-        self.gpt4o_timeout = float(os.getenv("GPT4O_TIMEOUT", "120"))  # 120 seconds for GPT-4o
-        self.gpt4_timeout = float(os.getenv("GPT4_TIMEOUT", "90"))     # 90 seconds for GPT-4
-        logger.info(f"GPT-4o timeout: {self.gpt4o_timeout}s, GPT-4 timeout: {self.gpt4_timeout}s")
+        # Single reasonable timeout - no retries so can be shorter
+        self.gpt_timeout = float(os.getenv("GPT_TIMEOUT", "60"))  # 60 seconds max, single attempt
+        logger.info(f"GPT timeout: {self.gpt_timeout}s (single attempt, no retries)")
         
     def analyze_blueprint(
         self,
@@ -246,93 +245,78 @@ class GPT4VBlueprintAnalyzer:
         # Render page to high-quality image
         image_base64 = self._render_page_to_base64(pdf_path, page_num)
         
-        # Try different prompt versions until one works
+        # SINGLE ATTEMPT - NO RETRIES, NO MULTIPLE VERSIONS
+        # If GPT fails, we use geometry-based extraction as the source of truth
         response = None
-        prompt_version = "v1_structured"
-        max_attempts = 4
+        raw_response = None
         
-        for attempt in range(max_attempts):
-            # Use discovery mode if requested
-            if use_discovery_mode:
-                from services.gpt4v_floor_discovery_prompts import create_floor_discovery_prompt
-                prompt = create_floor_discovery_prompt(
-                    zip_code=zip_code,
-                    page_number=page_num or 0,
-                    page_text_hint=floor_label,  # Pass label as hint only
-                    previous_floors=previous_floors,
-                    building_context={'building_typology': building_typology} if building_typology else None
-                )
-                logger.info(f"Attempt {attempt + 1}/{max_attempts}: Using floor discovery mode")
-            # Use multi-floor context prompt if we have context
-            elif previous_floors or floor_label or building_typology:
-                prompt = create_multi_floor_prompt(
-                    zip_code=zip_code,
-                    page_number=page_num or 0,
-                    floor_label=floor_label,
-                    previous_floors=previous_floors,
-                    building_typology=building_typology
-                )
-                logger.info(f"Attempt {attempt + 1}/{max_attempts}: Using multi-floor context prompt")
-            else:
-                # Fall back to standard prompt
-                prompt = blueprint_prompt_manager.get_prompt(prompt_version, zip_code, floor_hint=page_num + 1)
-                logger.info(f"Attempt {attempt + 1}/{max_attempts}: Using prompt version {prompt_version}")
+        # Choose the appropriate prompt based on context
+        if use_discovery_mode:
+            from services.gpt4v_floor_discovery_prompts import create_floor_discovery_prompt
+            prompt = create_floor_discovery_prompt(
+                zip_code=zip_code,
+                page_number=page_num or 0,
+                page_text_hint=floor_label,  # Pass label as hint only
+                previous_floors=previous_floors,
+                building_context={'building_typology': building_typology} if building_typology else None
+            )
+            logger.info("Using floor discovery mode prompt")
+        # Use multi-floor context prompt if we have context
+        elif previous_floors or floor_label or building_typology:
+            prompt = create_multi_floor_prompt(
+                zip_code=zip_code,
+                page_number=page_num or 0,
+                floor_label=floor_label,
+                previous_floors=previous_floors,
+                building_typology=building_typology
+            )
+            logger.info("Using multi-floor context prompt")
+        else:
+            # Use the simplest, most reliable prompt
+            prompt = blueprint_prompt_manager.get_prompt("v1_structured", zip_code, floor_hint=page_num + 1)
+            logger.info("Using standard prompt")
+        
+        # SINGLE GPT-4o attempt with reasonable timeout
+        try:
+            logger.info("Making single GPT-4o Vision call (no retries)...")
+            raw_response = self._analyze_with_gpt4v(image_base64, prompt)
             
-            # Send to GPT-4o for analysis
-            try:
-                raw_response = self._analyze_with_gpt4v(image_base64, prompt)
-                
-                # Validate the response
-                # For upper floors (page_num > 0), be more lenient with room count
-                min_rooms = 3 if page_num and page_num > 0 else 5
-                is_valid, error_msg = blueprint_prompt_manager.validate_response(raw_response, min_rooms=min_rooms)
-                
-                if is_valid:
-                    logger.info(f"✅ Prompt version {prompt_version} succeeded")
-                    response = raw_response
-                    response['prompt_version_used'] = prompt_version
-                    break
-                else:
-                    logger.warning(f"Prompt version {prompt_version} validation failed: {error_msg}")
-                    
-                    # Save debug info for failed validation
-                    if hasattr(self, 'current_project_id') and self.current_project_id:
-                        try:
-                            from services.s3_storage import storage_service
-                            debug_data = {
-                                'prompt_version': prompt_version,
-                                'validation_error': error_msg,
-                                'response': raw_response,
-                                'timestamp': time.time()
-                            }
-                            storage_service.save_debug_json(
-                                self.current_project_id, 
-                                f'validation_failure_{prompt_version}.json', 
-                                debug_data
-                            )
-                        except Exception as e:
-                            logger.debug(f"Could not save debug data: {e}")
-                    
-                    # Try next version
-                    next_version = blueprint_prompt_manager.get_next_version(prompt_version)
-                    if next_version:
-                        prompt_version = next_version
-                    else:
-                        logger.error("All prompt versions exhausted")
-                        break
+            # Quick validation - don't be too strict
+            min_rooms = 3 if page_num and page_num > 0 else 5
+            is_valid, error_msg = blueprint_prompt_manager.validate_response(raw_response, min_rooms=min_rooms)
+            
+            if is_valid:
+                logger.info("✅ GPT-4o Vision succeeded on first attempt")
+                response = raw_response
+                response['prompt_version_used'] = "single_attempt"
+            else:
+                logger.warning(f"GPT-4o Vision response invalid: {error_msg}")
+                logger.info("Will use geometry-based fallback instead of retrying")
+                # Save debug info for analysis
+                if hasattr(self, 'current_project_id') and self.current_project_id:
+                    try:
+                        from services.s3_storage import storage_service
+                        debug_data = {
+                            'validation_error': error_msg,
+                            'response': raw_response,
+                            'timestamp': time.time()
+                        }
+                        storage_service.save_debug_json(
+                            self.current_project_id, 
+                            f'gpt_validation_failure.json', 
+                            debug_data
+                        )
+                    except Exception as e:
+                        logger.debug(f"Could not save debug data: {e}")
                         
-            except Exception as e:
-                logger.error(f"Prompt version {prompt_version} failed: {e}")
-                next_version = blueprint_prompt_manager.get_next_version(prompt_version)
-                if next_version:
-                    prompt_version = next_version
-                else:
-                    break
+        except Exception as e:
+            logger.error(f"GPT-4o Vision call failed: {e}")
+            logger.info("Will use geometry-based fallback instead of retrying")
         
         if not response:
-            logger.error("All prompt versions failed, using fallback")
-            # Use the last attempt's response or create minimal fallback
-            response = raw_response if 'raw_response' in locals() else {}
+            logger.info("Using geometry-based fallback (GPT-4o unavailable or failed)")
+            # Use the raw response if available, otherwise empty dict
+            response = raw_response if raw_response else {}
         
         # Parse the response
         analysis = self._parse_gpt_response(response)

@@ -146,3 +146,125 @@ python -c "from paddleocr import PaddleOCR; print('PaddleOCR installed successfu
 ```
 
 If PaddleOCR is not available, the system will fall back to basic text extraction.
+
+## System Architecture & Call Chain
+
+### Software Logic Map
+
+This section documents the complete call chain and data flow through the AutoHVAC system.
+
+#### Entry Point: Worker Startup
+`/Users/austindixon/Documents/AutoHVAC/backend/start_worker.sh`
+- Launches Celery worker with `tasks.calculate_hvac_loads` module
+- Sets concurrency=2, memory limits (1.5GB), and 30-minute timeout
+
+#### Main Processing Pipeline
+
+##### 1. Celery Task Orchestration
+**File:** `tasks/calculate_hvac_loads.py::calculate_hvac_loads()`
+
+**Call sequence:**
+
+1. **S3 Storage** (`services/s3_storage.py`)
+   - Download PDF from S3 to temp file
+   
+2. **Climate Data** (`services/climate_data.py`)
+   - Fetch ASHRAE climate data for zip code
+
+3. **Blueprint Parser** (`services/blueprint_parser.py::parse_blueprint_to_json()`)
+   - **PDF Analysis** (`services/pdf_page_analyzer.py`)
+     - Analyze all pages, score them, select best floor plan
+   
+   - **AI Parser Path** (`services/blueprint_ai_parser.py`)
+     - Convert PDF → Images (`pdf2image`)
+     - **GPT-4 Vision Analysis** (`services/gpt4v_blueprint_analyzer.py`)
+       - Send images to OpenAI API
+       - Use prompts from `services/gpt4v_prompts.py`
+       - Extract rooms, dimensions, areas
+   
+   - **Fallback Paths** (if AI fails):
+     - Geometry Parser (`services/geometry_parser.py`)
+     - Text Parser (`services/text_parser.py`)
+     - OCR Extractor (`services/ocr_extractor.py`)
+
+4. **Envelope Extraction** (`services/envelope_extractor.py`)
+   - Extract R-values, insulation data
+   - Uses GPT-5 text model (not vision)
+
+5. **Manual J Calculations** (`services/manualj.py::calculate_manualj_with_audit()`)
+   - **Load Calculators:**
+     - `services/cltd_clf.py` - Cooling Load Temperature Difference
+     - `services/infiltration.py` - Air infiltration loads
+     - `services/multi_story_calculator.py` - Multi-floor aggregation
+     - `services/thermal_mass.py` - Thermal mass calculations
+   
+   - **Equipment Sizing** - Generate HVAC recommendations
+
+6. **Audit & Storage**
+   - `services/audit_tracker.py` - Create audit trail
+   - `services/job_service.py` - Update database status
+   - Save results to S3 (`analysis.json`, `hvac_results.json`, `metadata.json`)
+
+7. **Notifications**
+   - `core/email.py` - Send completion email
+
+#### Key Service Dependencies
+
+**Database Layer:**
+- `database.py` - PostgreSQL sessions
+- `models/` - SQLAlchemy models
+
+**Validation & Quality:**
+- `services/blueprint_validator.py` - Data validation
+- `services/data_quality_validator.py` - Quality scoring
+- `services/confidence_scorer.py` - Confidence assessment
+
+**Error Handling:**
+- `services/error_types.py` - Error categorization
+- `app/parser/exceptions.py` - Custom exceptions
+
+**Utilities:**
+- `services/pdf_thread_manager.py` - Thread-safe PDF operations
+- `utils/json_utils.py` - JSON serialization helpers
+
+#### Data Flow
+```
+PDF Upload → FastAPI Router → S3 Storage → Celery Task Queue
+    ↓
+PDF Processing → AI Analysis (GPT-4 Vision) → BlueprintSchema JSON
+    ↓
+Manual J Calculations → HVAC Load Results → Database + S3
+    ↓
+Email Notification → User Report
+```
+
+#### AI Service Usage
+- **GPT-4o Vision** (gpt-4o-2024-11-20): Blueprint visual analysis only
+- **GPT-5/GPT-5-mini**: Text analysis only (envelope data extraction)
+- **OCR Fallback**: PaddleOCR or Tesseract for text extraction
+
+#### Processing Stages & Timeouts
+1. **File Validation**: 5% progress
+2. **Blueprint Parsing**: 20-50% progress (AI timeout: 300s)
+3. **Envelope Analysis**: 65% progress (optional, non-critical)
+4. **HVAC Calculations**: 80% progress
+5. **Result Compilation**: 95% progress
+6. **Completion**: 100% progress
+
+Total processing timeout: 600 seconds (10 minutes)
+
+#### Critical Performance Requirements
+- Blueprint processing: <30 seconds target
+- Multi-story processing: Must handle ALL floors
+- Target accuracy: 74,000 BTU/hr for 2-story test home
+- Max PDF size: 50MB
+- Max PDF pages: 100
+
+#### File Storage Structure (S3)
+```
+jobs/{project_id}/
+├── blueprint.pdf         # Original uploaded file
+├── analysis.json        # Blueprint parsing results
+├── hvac_results.json    # Manual J calculation results
+└── metadata.json        # Processing metadata and audit
+```
