@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
 import fitz  # PyMuPDF
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,8 @@ class PageClassification:
     features: Dict[str, Any]
     keywords_found: List[str]
     processing_time: float
+    floor_number: Optional[int] = None
+    floor_name: Optional[str] = None
 
 
 class PageClassifier:
@@ -52,7 +55,10 @@ class PageClassifier:
     ELEVATION_KEYWORDS = [
         "ELEVATION", "NORTH ELEVATION", "SOUTH ELEVATION",
         "EAST ELEVATION", "WEST ELEVATION", "FRONT ELEVATION",
-        "REAR ELEVATION", "SIDE ELEVATION", "LEFT ELEVATION", "RIGHT ELEVATION"
+        "REAR ELEVATION", "SIDE ELEVATION", "LEFT ELEVATION", "RIGHT ELEVATION",
+        "EXTERIOR ELEVATION", "BUILDING ELEVATION", "HOUSE ELEVATION",
+        "FRONT VIEW", "SIDE VIEW", "REAR VIEW", "STREET VIEW",
+        "EXTERIOR VIEW", "FACADE"
     ]
     
     SECTION_KEYWORDS = [
@@ -116,6 +122,11 @@ class PageClassifier:
                     quick_mode
                 )
                 
+                # Detect floor information if it's a floor plan
+                if classification.page_type == PageType.FLOOR_PLAN:
+                    classification.floor_number, classification.floor_name = \
+                        self._detect_floor_info(doc[page_num])
+                
                 classification.processing_time = time.time() - start_time
                 classifications.append(classification)
                 
@@ -139,6 +150,57 @@ class PageClassifier:
         classifications.sort(key=sort_key)
         
         return classifications
+    
+    def find_all_floor_plan_pages(self, pdf_path: str) -> List[int]:
+        """
+        Find all pages that are likely floor plans
+        
+        Args:
+            pdf_path: Path to PDF file
+            
+        Returns:
+            List of 0-indexed page numbers that are floor plans
+        """
+        classifications = self.classify_pages(pdf_path, quick_mode=True)
+        
+        floor_plan_pages = []
+        for c in classifications:
+            if c.page_type == PageType.FLOOR_PLAN and c.confidence >= 0.5:
+                floor_plan_pages.append(c.page_num)
+                logger.info(f"Found floor plan on page {c.page_num + 1}: "
+                          f"{c.floor_name or 'Unknown floor'} (confidence: {c.confidence:.2f})")
+        
+        return floor_plan_pages
+    
+    def _detect_floor_info(self, page: fitz.Page) -> Tuple[Optional[int], Optional[str]]:
+        """
+        Detect floor number and name from page
+        
+        Returns:
+            Tuple of (floor_number, floor_name)
+        """
+        try:
+            text = page.get_text()[:1000].upper()
+            
+            # Floor patterns with priority order
+            floor_patterns = [
+                (r'FIRST\s+FLOOR|1ST\s+FLOOR', 1, "First Floor"),
+                (r'SECOND\s+FLOOR|2ND\s+FLOOR|UPPER\s+LEVEL', 2, "Second Floor"),
+                (r'THIRD\s+FLOOR|3RD\s+FLOOR', 3, "Third Floor"),
+                (r'BASEMENT|LOWER\s+LEVEL', 0, "Basement"),
+                (r'MAIN\s+FLOOR|MAIN\s+LEVEL|GROUND\s+FLOOR', 1, "Main Floor"),
+                (r'UPPER\s+FLOOR|UPSTAIRS', 2, "Upper Floor"),
+                (r'ATTIC|LOFT', 3, "Attic/Loft"),
+            ]
+            
+            for pattern, floor_num, floor_name in floor_patterns:
+                if re.search(pattern, text):
+                    return floor_num, floor_name
+            
+            return None, None
+            
+        except Exception:
+            return None, None
     
     def _classify_page(
         self,

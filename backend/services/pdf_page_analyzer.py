@@ -28,7 +28,8 @@ ROOM_KEYWORDS = [
 FLOOR_PLAN_INDICATORS = [
     'floor plan', 'floorplan', 'floor-plan', 'layout', 'main level',
     'first floor', 'second floor', 'upper level', 'lower level',
-    'basement plan', 'ground floor', 'site plan'
+    'basement plan', 'ground floor', 'third floor', 'loft plan',
+    'attic plan', 'mezzanine', 'penthouse'
 ]
 
 SPECIFICATION_INDICATORS = [
@@ -42,7 +43,18 @@ SPECIFICATION_INDICATORS = [
 ELEVATION_INDICATORS = [
     'elevation', 'front elevation', 'rear elevation', 'side elevation',
     'north elevation', 'south elevation', 'east elevation', 'west elevation',
-    'section', 'cross section', 'detail', 'perspective'
+    'section', 'cross section', 'detail', 'perspective', 'front view',
+    'side view', 'rear view', 'street view', 'exterior view', 'facade',
+    'building elevation', 'house elevation', 'exterior elevation'
+]
+
+# Additional elevation rejection patterns
+ELEVATION_REJECTION_PATTERNS = [
+    'roof pitch', 'roof slope', 'grade line', 'finish floor',
+    'top of plate', 'ridge', 'eave', 'gutter', 'downspout',
+    'siding', 'brick veneer', 'stone veneer', 'stucco',
+    'shingle', 'fascia', 'soffit', 'window head', 'window sill',
+    'foundation wall', 'footing', 'grade', 'finish grade'
 ]
 
 # Dimension patterns for scoring
@@ -70,6 +82,8 @@ class PageAnalysis:
     too_complex: bool = False
     error: Optional[str] = None
     page_type: str = "unknown"  # floor_plan, specification, elevation, unknown
+    floor_number: Optional[int] = None  # Detected floor number (1, 2, etc.)
+    floor_name: Optional[str] = None  # Floor name ("Main Floor", "Upper Level", etc.)
 
 
 class PDFPageAnalyzer:
@@ -81,15 +95,19 @@ class PDFPageAnalyzer:
         self.timeout_per_page = timeout_per_page
         self.max_pages = max_pages
     
-    def analyze_pdf_pages(self, pdf_path: str) -> Tuple[int, List[PageAnalysis]]:
+    def analyze_pdf_pages(self, pdf_path: str, return_multiple: bool = False, 
+                          min_score_threshold: float = 100.0) -> Tuple[int, List[PageAnalysis]]:
         """
-        Analyze all pages in PDF and select the best floor plan page
+        Analyze all pages in PDF and select the best floor plan page(s)
         
         Args:
             pdf_path: Path to PDF file
+            return_multiple: If True, marks multiple high-scoring pages as selected
+            min_score_threshold: Minimum score to consider a page as floor plan
             
         Returns:
             Tuple of (best_page_number, list_of_page_analyses)
+            Note: If return_multiple=True, multiple pages may be marked as selected
             
         Raises:
             ValueError: If no suitable pages found or PDF invalid
@@ -126,10 +144,14 @@ class PDFPageAnalyzer:
                     analysis.processing_time = time.time() - page_start
                     
                     analyses.append(analysis)
+                    # Try to detect floor number
+                    analysis.floor_number, analysis.floor_name = self._detect_floor_info(doc[page_num])
+                    
                     logger.info(f"Page {page_num + 1} - Type: {analysis.page_type}, Score: {analysis.score:.1f} "
                               f"(rectangles: {analysis.rectangle_count}, "
                               f"room_labels: {analysis.room_label_count}, "
-                              f"dimensions: {analysis.dimension_count})")
+                              f"dimensions: {analysis.dimension_count}, "
+                              f"floor: {analysis.floor_name or 'unknown'})")
                     
                 except Exception as e:
                     logger.error(f"Error analyzing page {page_num + 1}: {str(e)}")
@@ -145,15 +167,20 @@ class PDFPageAnalyzer:
                         error=str(e)
                     ))
             
-            # Select best page
-            best_page_num = self._select_best_page(analyses)
+            # Select best page(s)
+            if return_multiple:
+                best_page_num = self._select_multiple_pages(analyses, min_score_threshold)
+                selected_count = sum(1 for a in analyses if a.selected)
+                logger.info(f"Selected {selected_count} floor plan pages with scores >= {min_score_threshold}")
+            else:
+                best_page_num = self._select_best_page(analyses)
             
             total_time = time.time() - start_time
             logger.info(f"Multi-page analysis completed in {total_time:.2f}s")
             # Log detailed selection reasoning
             for analysis in analyses:
                 if analysis.selected:
-                    logger.info(f"Selected page {best_page_num} as best floor plan - "
+                    logger.info(f"Selected page {analysis.page_number} as floor plan - "
                               f"Type: {analysis.page_type}, Score: {analysis.score}, "
                               f"Rectangles: {analysis.rectangle_count}, "
                               f"Room Labels: {analysis.room_label_count}")
@@ -280,20 +307,34 @@ class PDFPageAnalyzer:
         
         text_lower = text.lower()
         
-        # Check for floor plan indicators (highest priority)
+        # Check for elevation indicators FIRST (to catch them early)
+        # Count elevation indicators
+        elevation_count = sum(1 for indicator in ELEVATION_INDICATORS 
+                            if indicator in text_lower[:2000])  # Check more text
+        elevation_rejection_count = sum(1 for pattern in ELEVATION_REJECTION_PATTERNS 
+                                      if pattern in text_lower)
+        
+        # Strong elevation detection
+        if elevation_count >= 1 and elevation_rejection_count >= 2:
+            return "elevation"
+        if any(indicator in text_lower[:500] for indicator in 
+               ['elevation', 'front view', 'side view', 'rear view', 'facade']):
+            # Check if it's really an elevation (not "floor plan elevation" etc)
+            if 'floor plan' not in text_lower[:500]:
+                return "elevation"
+        
+        # Check for floor plan indicators (high priority)
         for indicator in FLOOR_PLAN_INDICATORS:
-            if indicator in text_lower[:1000]:  # Check in first 1000 chars (usually title area)
-                return "floor_plan"
+            if indicator in text_lower[:1500]:  # Check in first 1500 chars
+                # Make sure it's not in a list of elevations
+                if 'elevation' not in text_lower[max(0, text_lower.find(indicator)-50):
+                                                text_lower.find(indicator)+50]:
+                    return "floor_plan"
         
         # Check for specification indicators
         spec_count = sum(1 for indicator in SPECIFICATION_INDICATORS if indicator in text_lower)
         if spec_count >= 2:  # Multiple spec indicators = likely a spec page
             return "specification"
-        
-        # Check for elevation indicators
-        for indicator in ELEVATION_INDICATORS:
-            if indicator in text_lower[:1000]:
-                return "elevation"
         
         return "unknown"
     
@@ -353,16 +394,16 @@ class PDFPageAnalyzer:
         """
         score = 0.0
         
-        # Page type bonuses/penalties
+        # Page type bonuses/penalties (ADJUSTED)
         if page_type == "floor_plan":
             score += 50  # Strong bonus for detected floor plans
             logger.debug(f"Added 50 points for floor_plan page type")
         elif page_type == "specification":
-            score -= 30  # Strong penalty for specification pages
-            logger.debug(f"Subtracted 30 points for specification page type")
+            score -= 50  # Stronger penalty for specification pages
+            logger.debug(f"Subtracted 50 points for specification page type")
         elif page_type == "elevation":
-            score -= 20  # Penalty for elevation pages
-            logger.debug(f"Subtracted 20 points for elevation page type")
+            score -= 60  # Much stronger penalty for elevation pages
+            logger.debug(f"Subtracted 60 points for elevation page type")
         
         # Rectangle count (potential rooms): +2 points per rectangle, up to 40 points
         rect_score = min(rectangles * 2, 40)
@@ -478,6 +519,95 @@ class PDFPageAnalyzer:
         
         return best_analysis.page_number
     
+    def _select_multiple_pages(self, analyses: List[PageAnalysis], 
+                              min_score_threshold: float = 100.0) -> int:
+        """
+        Select multiple floor plan pages that meet the threshold
+        
+        Args:
+            analyses: List of PageAnalysis objects
+            min_score_threshold: Minimum score to select a page
+            
+        Returns:
+            Page number of the best page (for compatibility)
+            Side effect: Marks all qualifying pages as selected
+        """
+        # Filter to non-error pages
+        non_error_analyses = [a for a in analyses if not a.error]
+        
+        if not non_error_analyses:
+            non_error_analyses = analyses
+            logger.warning("All pages have errors, considering all for selection")
+        
+        # Find all pages that:
+        # 1. Are detected as floor_plan type OR have high enough score
+        # 2. Meet the minimum score threshold
+        # 3. Are not too complex (unless they're the only option)
+        floor_plan_pages = []
+        
+        for analysis in non_error_analyses:
+            # Strong floor plan detection
+            if analysis.page_type == "floor_plan" and analysis.score >= min_score_threshold:
+                floor_plan_pages.append(analysis)
+                logger.info(f"Page {analysis.page_number} selected as floor plan: "
+                          f"score={analysis.score}, type={analysis.page_type}")
+            # High score even if type is unknown (but not elevation/spec)
+            elif (analysis.page_type not in ["elevation", "specification"] and 
+                  analysis.score >= min_score_threshold * 1.2):  # Higher threshold for unknown
+                floor_plan_pages.append(analysis)
+                logger.info(f"Page {analysis.page_number} selected based on high score: "
+                          f"score={analysis.score}, type={analysis.page_type}")
+        
+        # If no pages qualify, select the single best one
+        if not floor_plan_pages:
+            logger.warning(f"No pages meet threshold {min_score_threshold}, selecting single best")
+            best = max(non_error_analyses, key=lambda x: x.score)
+            floor_plan_pages = [best]
+        
+        # Mark all selected pages
+        best_score = 0
+        best_page_num = 1
+        
+        for analysis in floor_plan_pages:
+            analysis.selected = True
+            if analysis.score > best_score:
+                best_score = analysis.score
+                best_page_num = analysis.page_number
+        
+        logger.info(f"Selected {len(floor_plan_pages)} floor plan pages")
+        return best_page_num
+    
+    def _detect_floor_info(self, page: fitz.Page) -> Tuple[Optional[int], Optional[str]]:
+        """
+        Detect floor number and name from page text
+        
+        Returns:
+            Tuple of (floor_number, floor_name)
+        """
+        try:
+            text = page.get_text()[:1000].upper()  # Check first 1000 chars
+            
+            # Common floor patterns
+            floor_patterns = [
+                (r'FIRST\s+FLOOR|1ST\s+FLOOR|LEVEL\s+1', 1, "First Floor"),
+                (r'SECOND\s+FLOOR|2ND\s+FLOOR|LEVEL\s+2|UPPER\s+LEVEL|UPSTAIRS', 2, "Second Floor"),
+                (r'THIRD\s+FLOOR|3RD\s+FLOOR|LEVEL\s+3', 3, "Third Floor"),
+                (r'BASEMENT|LOWER\s+LEVEL|GARDEN\s+LEVEL', 0, "Basement"),
+                (r'MAIN\s+FLOOR|MAIN\s+LEVEL|GROUND\s+FLOOR', 1, "Main Floor"),
+                (r'UPPER\s+FLOOR', 2, "Upper Floor"),
+                (r'ATTIC|LOFT', 3, "Attic/Loft"),
+            ]
+            
+            for pattern, floor_num, floor_name in floor_patterns:
+                if re.search(pattern, text):
+                    return floor_num, floor_name
+            
+            return None, None
+            
+        except Exception as e:
+            logger.debug(f"Error detecting floor info: {e}")
+            return None, None
+    
     def get_analysis_summary(self, analyses: List[PageAnalysis]) -> Dict[str, Any]:
         """Generate summary of multi-page analysis results"""
         return {
@@ -505,18 +635,21 @@ class PDFPageAnalyzer:
         }
 
 
-def analyze_pdf_for_best_page(pdf_path: str) -> Tuple[int, Dict[str, Any]]:
+def analyze_pdf_for_best_page(pdf_path: str, return_multiple: bool = False,
+                             min_score_threshold: float = 100.0) -> Tuple[int, Dict[str, Any]]:
     """
-    Convenience function to analyze PDF and return best page with summary
+    Convenience function to analyze PDF and return best page(s) with summary
     
     Args:
         pdf_path: Path to PDF file
+        return_multiple: If True, select multiple floor plan pages
+        min_score_threshold: Minimum score for floor plan selection
         
     Returns:
         Tuple of (best_page_number, analysis_summary)
     """
     analyzer = PDFPageAnalyzer()
-    best_page, analyses = analyzer.analyze_pdf_pages(pdf_path)
+    best_page, analyses = analyzer.analyze_pdf_pages(pdf_path, return_multiple, min_score_threshold)
     summary = analyzer.get_analysis_summary(analyses)
     
     return best_page, summary

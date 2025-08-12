@@ -60,6 +60,9 @@ class PageAnalysisResult(BaseModel):
     processing_time_seconds: float = Field(..., description="Time to analyze page")
     too_complex: bool = Field(False, description="Page exceeded complexity limits")
     errors: List[str] = Field(default_factory=list, description="Processing errors")
+    page_type: Optional[str] = Field(None, description="Detected page type: floor_plan, elevation, etc.")
+    floor_number: Optional[int] = Field(None, description="Detected floor number if floor plan")
+    floor_name: Optional[str] = Field(None, description="Detected floor name if floor plan")
 
 
 class ParsingMetadata(BaseModel):
@@ -68,7 +71,9 @@ class ParsingMetadata(BaseModel):
     processing_time_seconds: float = Field(..., description="Total processing time")
     pdf_filename: str = Field(..., description="Original PDF filename")
     pdf_page_count: int = Field(..., description="Total pages in PDF")
-    selected_page: int = Field(..., description="Page selected for processing (1-based)")
+    selected_page: int = Field(..., description="Primary page selected for processing (1-based)")
+    selected_pages: Optional[List[int]] = Field(default=None, description="All pages selected for multi-floor processing")
+    multi_floor_processing: bool = Field(False, description="Whether multiple floors were processed")
     
     # Parsing results by stage
     geometry_status: ParsingStatus = Field(..., description="Geometry extraction status")
@@ -110,6 +115,7 @@ class Room(BaseModel):
     # Parsing details
     label_found: bool = Field(False, description="Whether a text label was found for this room")
     dimensions_source: str = Field("inferred", description="How dimensions were determined: measured, inferred, estimated")
+    source_page: Optional[int] = Field(None, description="Source PDF page number (1-based) for multi-floor processing")
     
     @validator('center_position', pre=True, always=True)
     def set_default_center_position(cls, v):
@@ -140,13 +146,14 @@ class BlueprintSchema(BaseModel):
     """Complete parsed blueprint structure with comprehensive metadata"""
     project_id: Union[UUID, str] = Field(default_factory=uuid4, description="Unique project identifier")
     zip_code: str = Field(..., description="Project location zip code")
-    sqft_total: float = Field(..., description="Total square footage")
-    stories: int = Field(..., description="Number of stories/floors")
-    rooms: List[Room] = Field(..., description="List of all rooms")
+    sqft_total: float = Field(..., description="Total square footage across all floors")
+    stories: int = Field(..., description="Number of stories/floors detected")
+    rooms: List[Room] = Field(..., description="List of all rooms from all floors")
+    floors_processed: Optional[Dict[int, str]] = Field(None, description="Map of floor numbers to floor names processed")
     
     # Raw data preservation
-    raw_geometry: Optional[Dict[str, Any]] = Field(None, description="Raw geometry data for reference")
-    raw_text: Optional[Dict[str, Any]] = Field(None, description="Raw text data for reference")
+    raw_geometry: Optional[Dict[str, Any]] = Field(None, description="Raw geometry data (may be combined from multiple pages)")
+    raw_text: Optional[Dict[str, Any]] = Field(None, description="Raw text data (may be combined from multiple pages)")
     
     # Structured parsed elements
     dimensions: List[ParsedDimension] = Field(default_factory=list, description="All dimensions found in blueprint")

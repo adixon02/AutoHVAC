@@ -368,53 +368,109 @@ class BlueprintParser:
                     # In traditional_first mode, ALWAYS do traditional extraction
                     logger.info("[TRADITIONAL-FIRST] Performing traditional geometry and text extraction")
                 
-                    # Stage 1: Analyze PDF pages
+                    # Stage 1: Analyze PDF pages (with multi-floor support)
                     logger.info("Stage 1: Analyzing PDF pages")
                     with track_stage(PipelineStage.PAGE_CLASSIFICATION):
-                        best_page, pages_analysis = self.page_analyzer.analyze_pdf_pages(pdf_path)
+                        # Check if multi-floor processing is enabled
+                        multi_floor_enabled = os.getenv('MULTI_FLOOR_ENABLED', 'true').lower() == 'true'
+                        min_floor_score = float(os.getenv('MIN_FLOOR_PLAN_SCORE', '100'))
+                        
+                        best_page, pages_analysis = self.page_analyzer.analyze_pdf_pages(
+                            pdf_path, 
+                            return_multiple=multi_floor_enabled,
+                            min_score_threshold=min_floor_score
+                        )
                         parsing_metadata.pdf_page_count = len(pages_analysis)
                         
-                        # Lock page selection in context (convert to 0-indexed)
+                        # Get all selected pages
+                        selected_pages = [p for p in pages_analysis if p.selected]
+                        if not selected_pages:
+                            # Fallback to best page
+                            selected_pages = [p for p in pages_analysis if p.page_number == best_page]
+                        
+                        logger.info(f"Selected {len(selected_pages)} floor plan pages for processing")
+                        
+                        # For now, still set primary page in context (for compatibility)
                         selected_page = best_page - 1
                         pipeline_context.set_page(selected_page, source="traditional_analyzer")
                         
+                        # Track multi-floor metadata
+                        if len(selected_pages) > 1:
+                            parsing_metadata.selected_pages = [p.page_number for p in selected_pages]
+                            parsing_metadata.multi_floor_processing = True
+                        
                         metrics_collector.track_decision(
                             "page_selection",
-                            "Selected best page for extraction",
+                            f"Selected {len(selected_pages)} pages for extraction",
                             best_page,
-                            alternatives=[p.page_number for p in pages_analysis],
-                            reason="Highest score based on content analysis"
+                            alternatives=[p.page_number for p in selected_pages],
+                            reason="Multi-floor detection" if len(selected_pages) > 1 else "Highest score"
                         )
                     
-                    # Stage 2: Extract geometry from selected page
-                    logger.info("Stage 2: Extracting geometry from selected page")
-                    # Get the locked page from context
-                    selected_page = pipeline_context.get_page()
-                    parsing_metadata.selected_page = selected_page + 1  # 1-indexed for display
+                    # Stage 2: Extract geometry from selected pages (multi-floor support)
+                    logger.info(f"Stage 2: Extracting geometry from {len(selected_pages)} selected page(s)")
+                    
+                    all_raw_geometry = []
+                    all_raw_text = []
+                    all_parsed_labels = []
+                    all_parsed_dimensions = []
+                    all_geometry_elements = []
                     
                     with track_stage(PipelineStage.GEOMETRY_EXTRACTION):
-                        # Try lean extraction if available
-                        if USE_LEAN_EXTRACTION:
-                            logger.info("Using lean extraction components")
-                            raw_geometry, raw_text = self._perform_lean_extraction(pdf_path, selected_page)
+                        for page_analysis in selected_pages:
+                            page_idx = page_analysis.page_number - 1  # Convert to 0-indexed
+                            logger.info(f"Processing page {page_analysis.page_number}: {page_analysis.floor_name or 'Unknown floor'}")
+                            
+                            # Try lean extraction if available
+                            if USE_LEAN_EXTRACTION:
+                                logger.info(f"Using lean extraction for page {page_analysis.page_number}")
+                                page_geometry, page_text = self._perform_lean_extraction(pdf_path, page_idx)
+                            else:
+                                # Legacy extraction
+                                page_geometry = self.geometry_parser.parse_geometry(pdf_path, page_idx)
+                                page_text = self.text_parser.parse_text(pdf_path, page_idx)
+                            
+                            # Store with page metadata
+                            page_geometry = page_geometry or {}
+                            page_text = page_text or {}
+                            page_geometry['source_page'] = page_analysis.page_number
+                            page_geometry['floor_number'] = page_analysis.floor_number
+                            page_geometry['floor_name'] = page_analysis.floor_name
+                            page_text['source_page'] = page_analysis.page_number
+                            page_text['floor_number'] = page_analysis.floor_number
+                            
+                            all_raw_geometry.append(page_geometry)
+                            all_raw_text.append(page_text)
+                            
+                            # Parse labels and dimensions for this page
+                            page_labels = self._convert_raw_text_to_labels(page_text)
+                            page_dimensions = self._convert_raw_text_to_dimensions(page_text)
+                            page_elements = self._convert_raw_geometry_to_elements(page_geometry)
+                            
+                            all_parsed_labels.extend(page_labels)
+                            all_parsed_dimensions.extend(page_dimensions)
+                            all_geometry_elements.extend(page_elements)
+                        
+                        # Combine geometry and text from all pages (for backward compatibility)
+                        if all_raw_geometry:
+                            raw_geometry = self._combine_raw_geometry(all_raw_geometry)
+                            raw_text = self._combine_raw_text(all_raw_text)
                         else:
-                            # Legacy extraction
-                            raw_geometry = self.geometry_parser.parse_geometry(pdf_path, selected_page)
-                            raw_text = self.text_parser.parse_text(pdf_path, selected_page)
+                            raw_geometry = {}
+                            raw_text = {}
+                        
+                        parsed_labels = all_parsed_labels
+                        parsed_dimensions = all_parsed_dimensions
+                        geometry_elements = all_geometry_elements
+                        
+                        # Track metadata for primary page
+                        parsing_metadata.selected_page = best_page
                         
                         metrics_collector.current_stage.output_data = {
-                            "geometry_elements": len(raw_geometry.get('lines', [])) + len(raw_geometry.get('rectangles', [])),
-                            "text_elements": len(raw_text.get('words', [])) if raw_text else 0
+                            "pages_processed": len(selected_pages),
+                            "geometry_elements": len(geometry_elements),
+                            "text_elements": len(parsed_labels)
                         }
-                    
-                    # Ensure they're not None
-                    raw_geometry = raw_geometry or {}
-                    raw_text = raw_text or {}
-                    
-                    # Parse labels and dimensions
-                    parsed_labels = self._convert_raw_text_to_labels(raw_text)
-                    parsed_dimensions = self._convert_raw_text_to_dimensions(raw_text)
-                    geometry_elements = self._convert_raw_geometry_to_elements(raw_geometry)
                     
                     # Update metadata
                     parsing_metadata.geometry_status = ParsingStatus.SUCCESS if raw_geometry else ParsingStatus.FAILED
@@ -446,18 +502,57 @@ class BlueprintParser:
                 # Store PDF path for GPT-4o to use
                 self.current_pdf_path = pdf_path
                 
-                # Stage 4: GPT-4o Vision analysis OR GPT-5 text reasoning
-                logger.info("Stage 4: AI analysis (GPT-4o vision or GPT-5 text) and HVAC calculation")
+                # Stage 4: AI analysis with multi-floor support
+                logger.info(f"Stage 4: AI analysis for {len(selected_pages) if 'selected_pages' in locals() else 1} floor(s) and HVAC calculation")
                 with track_stage(PipelineStage.SEMANTIC_ANALYSIS):
-                    rooms = self._perform_ai_analysis(raw_geometry, raw_text, zip_code, parsing_metadata)
+                    if 'selected_pages' in locals() and len(selected_pages) > 1:
+                        # Process each floor separately then combine
+                        all_rooms = []
+                        for i, page_analysis in enumerate(selected_pages):
+                            logger.info(f"AI analysis for {page_analysis.floor_name or f'Floor {i+1}'}")
+                            
+                            # Use geometry/text for this specific page
+                            page_geometry = all_raw_geometry[i] if i < len(all_raw_geometry) else {}
+                            page_text = all_raw_text[i] if i < len(all_raw_text) else {}
+                            
+                            floor_rooms = self._perform_ai_analysis(page_geometry, page_text, zip_code, parsing_metadata)
+                            
+                            # Set floor number for these rooms
+                            floor_num = page_analysis.floor_number if page_analysis.floor_number is not None else (i + 1)
+                            for room in floor_rooms:
+                                room.floor = floor_num
+                                # Add floor name to room name if not already present
+                                if page_analysis.floor_name and page_analysis.floor_name.lower() not in room.name.lower():
+                                    room.name = f"{room.name} ({page_analysis.floor_name})"
+                            
+                            all_rooms.extend(floor_rooms)
+                        
+                        rooms = all_rooms
+                        logger.info(f"Combined {len(rooms)} rooms from {len(selected_pages)} floors")
+                    else:
+                        # Single page processing (original behavior)
+                        rooms = self._perform_ai_analysis(raw_geometry, raw_text, zip_code, parsing_metadata)
+                    
                     metrics_collector.current_stage.output_data = {
                         "num_rooms": len(rooms),
-                        "total_area": sum(r.area for r in rooms) if rooms else 0
+                        "total_area": sum(r.area for r in rooms) if rooms else 0,
+                        "floors_processed": len(selected_pages) if 'selected_pages' in locals() else 1
                     }
                 
                 # Stage 5: Compile final blueprint schema
                 logger.info("Stage 5: Compiling final blueprint schema")
                 with track_stage(PipelineStage.LOAD_CALCULATION):
+                    # Build floors_processed dict
+                    floors_processed = {}
+                    if 'selected_pages' in locals():
+                        for page in selected_pages:
+                            floor_num = page.floor_number if page.floor_number is not None else 1
+                            floor_name = page.floor_name or f"Floor {floor_num}"
+                            floors_processed[floor_num] = floor_name
+                    else:
+                        # Default single floor
+                        floors_processed = {1: "Main Floor"}
+                    
                     blueprint_schema = self._compile_blueprint_schema(
                     project_id=project_id or str(uuid4()),
                     zip_code=zip_code,
@@ -467,7 +562,8 @@ class BlueprintParser:
                     parsed_labels=parsed_labels,
                     parsed_dimensions=parsed_dimensions,
                     geometry_elements=geometry_elements,
-                    parsing_metadata=parsing_metadata
+                    parsing_metadata=parsing_metadata,
+                    floors_processed=floors_processed
                     )
                     if metrics_collector.current_stage:
                         metrics_collector.current_stage.output_data = {
@@ -650,6 +746,61 @@ class BlueprintParser:
             metadata.page_analyses = [fallback_analysis]
             
             return [fallback_analysis], 1
+    
+    def _combine_raw_geometry(self, geometries: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Combine geometry from multiple pages into single structure"""
+        if not geometries:
+            return {}
+        
+        # Start with first page as base
+        combined = geometries[0].copy() if geometries else {}
+        
+        # Combine elements from all pages
+        all_lines = combined.get('lines', [])
+        all_rectangles = combined.get('rectangles', [])
+        all_polylines = combined.get('polylines', [])
+        
+        for geom in geometries[1:]:
+            all_lines.extend(geom.get('lines', []))
+            all_rectangles.extend(geom.get('rectangles', []))
+            all_polylines.extend(geom.get('polylines', []))
+        
+        combined['lines'] = all_lines
+        combined['rectangles'] = all_rectangles
+        combined['polylines'] = all_polylines
+        combined['multi_page'] = len(geometries) > 1
+        combined['page_count'] = len(geometries)
+        
+        return combined
+    
+    def _combine_raw_text(self, texts: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Combine text from multiple pages into single structure"""
+        if not texts:
+            return {}
+        
+        # Start with first page as base
+        combined = texts[0].copy() if texts else {}
+        
+        # Combine elements from all pages
+        all_words = combined.get('words', [])
+        all_labels = combined.get('room_labels', [])
+        all_dimensions = combined.get('dimensions', [])
+        all_notes = combined.get('notes', [])
+        
+        for text in texts[1:]:
+            all_words.extend(text.get('words', []))
+            all_labels.extend(text.get('room_labels', []))
+            all_dimensions.extend(text.get('dimensions', []))
+            all_notes.extend(text.get('notes', []))
+        
+        combined['words'] = all_words
+        combined['room_labels'] = all_labels
+        combined['dimensions'] = all_dimensions
+        combined['notes'] = all_notes
+        combined['multi_page'] = len(texts) > 1
+        combined['page_count'] = len(texts)
+        
+        return combined
     
     def _extract_geometry(self, pdf_path: str, page_number: int, metadata: ParsingMetadata) -> tuple[Dict[str, Any], List[GeometricElement]]:
         """Extract geometry from PDF page with thread safety and validation"""
@@ -1211,7 +1362,8 @@ class BlueprintParser:
         parsed_dimensions: List[ParsedDimension],
         geometry_elements: List[GeometricElement],
         parsing_metadata: ParsingMetadata,
-        detected_scale: float = 48
+        detected_scale: float = 48,
+        floors_processed: Optional[Dict[int, str]] = None
     ) -> BlueprintSchema:
         """Compile all parsed data into final BlueprintSchema with scale information"""
         
@@ -1319,7 +1471,8 @@ class BlueprintParser:
             dimensions=parsed_dimensions,
             labels=parsed_labels,
             geometric_elements=geometry_elements,
-            parsing_metadata=parsing_metadata
+            parsing_metadata=parsing_metadata,
+            floors_processed=floors_processed or {r.floor: f"Floor {r.floor}" for r in rooms if r.floor is not None}
         )
     
     def _create_typical_fallback_rooms(self, target_sqft: Optional[float] = None) -> List[Room]:
