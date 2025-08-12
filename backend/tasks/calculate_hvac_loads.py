@@ -33,7 +33,7 @@ from services.climate_data import get_climate_data
 from services.blueprint_parser import parse_blueprint_to_json, BlueprintParsingError
 from services.envelope_extractor import extract_envelope_data, EnvelopeExtractorError
 from services.audit_tracker import create_calculation_audit
-from services.s3_storage import storage_service
+from services.s3_storage import storage_service  # Import at module level for use throughout
 from services.error_types import (
     CriticalError, NonCriticalError, AuditError, 
     ValidationError, categorize_exception, log_error_with_context
@@ -282,7 +282,6 @@ def calculate_hvac_loads(
             
             # Save blueprint analysis to S3 for debugging
             try:
-                from services.s3_storage import storage_service
                 analysis_data = {
                     'timestamp': time.time(),
                     'blueprint_schema': safe_dict(blueprint_schema),
@@ -472,7 +471,6 @@ def calculate_hvac_loads(
         
         # Save HVAC calculation results to S3
         try:
-            from services.s3_storage import storage_service
             hvac_data = {
                 'timestamp': time.time(),
                 'project_id': project_id,
@@ -550,7 +548,6 @@ def calculate_hvac_loads(
         
         # Save complete metadata for debugging
         try:
-            from services.s3_storage import storage_service
             metadata = {
                 'project_id': project_id,
                 'filename': filename,
