@@ -17,12 +17,15 @@ class User(SQLModel, table=True):
     
     id: Optional[int] = Field(default=None, primary_key=True)
     email: str = Field(unique=True, index=True, max_length=255)
+    name: Optional[str] = Field(default=None, max_length=255)
     password: Optional[str] = Field(default=None, max_length=255)  # Hashed password
     email_verified: bool = Field(default=False)
     free_report_used: bool = Field(default=False)
     stripe_customer_id: Optional[str] = Field(default=None, max_length=255)
     active_subscription: bool = Field(default=False)
+    signup_method: Optional[str] = Field(default="email_only", max_length=50)  # "password" or "email_only"
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
     
     # Relationships
     projects: List["Project"] = Relationship(back_populates="user")

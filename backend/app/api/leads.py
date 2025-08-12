@@ -166,10 +166,11 @@ async def convert_lead_to_user(
             
             existing_user.password = hashed_password
             existing_user.signup_method = "password"
+            existing_user.updated_at = datetime.utcnow()
             db.commit()
             
             return ConvertLeadResponse(
-                user_id=existing_user.id,
+                user_id=str(existing_user.id),  # Convert int id to string for response
                 email=existing_user.email,
                 success=True
             )
@@ -181,7 +182,6 @@ async def convert_lead_to_user(
         ).decode('utf-8')
         
         new_user = User(
-            id=str(uuid.uuid4()),
             email=request.email,
             password=hashed_password,
             signup_method="password",
@@ -191,6 +191,8 @@ async def convert_lead_to_user(
         )
         
         db.add(new_user)
+        db.commit()
+        db.refresh(new_user)  # Get the auto-generated id
         
         # Transfer any lead projects to the new user
         lead_projects = db.query(Project).filter(
@@ -198,7 +200,7 @@ async def convert_lead_to_user(
         ).all()
         
         for project in lead_projects:
-            project.user_id = new_user.id
+            project.user_email = new_user.email  # Use user_email, not user_id
             project.lead_email = None
             project.claimed_at = datetime.utcnow()
         
@@ -207,7 +209,7 @@ async def convert_lead_to_user(
         logger.info(f"Lead converted to user: {request.email} -> {new_user.id}")
         
         return ConvertLeadResponse(
-            user_id=new_user.id,
+            user_id=str(new_user.id),  # Convert int id to string for response
             email=new_user.email,
             success=True
         )
