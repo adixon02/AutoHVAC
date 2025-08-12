@@ -427,14 +427,26 @@ class BlueprintParser:
                             page_idx = page_analysis.page_number - 1  # Convert to 0-indexed
                             logger.info(f"Processing page {page_analysis.page_number}: {page_analysis.floor_name or 'Unknown floor'}")
                             
-                            # Try lean extraction if available
-                            if USE_LEAN_EXTRACTION:
-                                logger.info(f"Using lean extraction for page {page_analysis.page_number}")
-                                page_geometry, page_text = self._perform_lean_extraction(pdf_path, page_idx)
-                            else:
-                                # Legacy extraction
-                                page_geometry = self.geometry_parser.parse_geometry(pdf_path, page_idx)
-                                page_text = self.text_parser.parse_text(pdf_path, page_idx)
+                            # Try geometry-first extraction (new primary method)
+                            try:
+                                logger.info(f"Using geometry-first extraction for page {page_analysis.page_number}")
+                                page_geometry, page_text = self._perform_geometry_first_extraction(pdf_path, page_idx)
+                                
+                                # If we got good rooms from geometry, we don't need estimated rooms
+                                if page_geometry.get('rooms') and len(page_geometry['rooms']) >= 5:
+                                    logger.info(f"Geometry extraction successful with {len(page_geometry['rooms'])} rooms")
+                            except Exception as e:
+                                logger.warning(f"Geometry-first extraction failed: {e}")
+                                import traceback
+                                logger.debug(f"Geometry-first extraction traceback: {traceback.format_exc()}")
+                                # Fall back to lean extraction if available
+                                if USE_LEAN_EXTRACTION:
+                                    logger.info(f"Falling back to lean extraction for page {page_analysis.page_number}")
+                                    page_geometry, page_text = self._perform_lean_extraction(pdf_path, page_idx)
+                                else:
+                                    # Legacy extraction
+                                    page_geometry = self.geometry_parser.parse_geometry(pdf_path, page_idx)
+                                    page_text = self.text_parser.parse_text(pdf_path, page_idx)
                             
                             # Store with page metadata
                             page_geometry = page_geometry or {}
@@ -576,9 +588,12 @@ class BlueprintParser:
                                 logger.warning(f"Page {page_analysis.page_number} floor assignment issues: {validation.issues}")
                                 logger.info(f"Using floor {floor_num} instead of original {validation.floor_number}")
                             
-                            # Assign floor numbers to rooms
+                            # Assign floor numbers to rooms based on page analysis
+                            # floor_num from page analysis is 1 for main, 2 for upper
+                            actual_floor = page_analysis.floor_number if page_analysis.floor_number else floor_num
                             for room in floor_rooms:
-                                room.floor = floor_num
+                                room.floor = actual_floor
+                                logger.debug(f"Room {room.name} assigned to floor {actual_floor}")
                             
                             all_rooms.extend(floor_rooms)
                             
@@ -1300,7 +1315,10 @@ class BlueprintParser:
                 'error': f"AI analysis timed out after {self.ai_timeout} seconds",
                 'error_type': 'timeout'
             })
-            return self._create_fallback_rooms(raw_geometry, raw_text)
+            # Determine floor number from raw_geometry if available
+            floor_num = raw_geometry.get('floor_number', 1) if raw_geometry else 1
+            floor_name = raw_geometry.get('floor_name', None) if raw_geometry else None
+            return self._create_fallback_rooms(raw_geometry, raw_text, floor_number=floor_num, floor_label=floor_name)
             
         except Exception as e:
             logger.error(f"AI analysis failed: {type(e).__name__}: {str(e)}")
@@ -1310,22 +1328,55 @@ class BlueprintParser:
                 'error': str(e),
                 'error_type': type(e).__name__
             })
-            return self._create_fallback_rooms(raw_geometry, raw_text)
+            # Determine floor number from raw_geometry if available
+            floor_num = raw_geometry.get('floor_number', 1) if raw_geometry else 1
+            floor_name = raw_geometry.get('floor_name', None) if raw_geometry else None
+            return self._create_fallback_rooms(raw_geometry, raw_text, floor_number=floor_num, floor_label=floor_name)
     
-    def _create_fallback_rooms(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any]) -> List[Room]:
+    def _create_fallback_rooms(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], floor_number: int = 1, floor_label: Optional[str] = None) -> List[Room]:
         """Create fallback rooms when AI analysis fails using intelligent geometry analysis"""
         
-        logger.warning("⚠️ CREATING FALLBACK ROOMS - GPT-4V analysis failed validation")
+        logger.warning(f"⚠️ CREATING FALLBACK ROOMS for floor {floor_number} ({floor_label or 'Unknown'}) - GPT-4V analysis failed validation")
         
         # Convert dictionaries to schema objects for the fallback parser
         from app.parser.schema import RawGeometry, RawText
         
         try:
+            # Log what we're trying to convert
+            if raw_geometry:
+                logger.info(f"Converting raw_geometry with {len(raw_geometry.get('rectangles', []))} rectangles")
+                logger.debug(f"Raw geometry keys: {raw_geometry.keys()}")
+            
             geometry_obj = RawGeometry(**raw_geometry) if raw_geometry else None
+            
+            if geometry_obj and hasattr(geometry_obj, 'rectangles'):
+                logger.info(f"RawGeometry object created with {len(geometry_obj.rectangles)} rectangles")
+            
             text_obj = RawText(**raw_text) if raw_text else None
         except Exception as e:
             logger.error(f"Failed to convert raw data to schema objects: {e}")
-            geometry_obj = None
+            logger.error(f"Raw geometry keys: {raw_geometry.keys() if raw_geometry else 'None'}")
+            logger.error(f"Raw text keys: {raw_text.keys() if raw_text else 'None'}")
+            
+            # Try to create minimal valid objects
+            try:
+                if raw_geometry and 'rectangles' in raw_geometry:
+                    # Create minimal valid RawGeometry
+                    geometry_obj = RawGeometry(
+                        page_width=raw_geometry.get('page_width', 2550),
+                        page_height=raw_geometry.get('page_height', 3300),
+                        scale_factor=raw_geometry.get('scale_factor', 48),
+                        lines=raw_geometry.get('lines', []),
+                        rectangles=raw_geometry.get('rectangles', []),
+                        polylines=raw_geometry.get('polylines', [])
+                    )
+                    logger.info(f"Created minimal RawGeometry with {len(geometry_obj.rectangles)} rectangles")
+                else:
+                    geometry_obj = None
+            except Exception as e2:
+                logger.error(f"Failed to create minimal RawGeometry: {e2}")
+                geometry_obj = None
+            
             text_obj = None
         
         # Use the geometry fallback parser
@@ -1339,7 +1390,10 @@ class BlueprintParser:
             
             # Extract rooms from the fallback blueprint
             if fallback_blueprint and fallback_blueprint.rooms:
-                logger.info(f"Geometry fallback created {len(fallback_blueprint.rooms)} rooms")
+                logger.info(f"Geometry fallback created {len(fallback_blueprint.rooms)} rooms for floor {floor_number}")
+                # Update floor number for all rooms
+                for room in fallback_blueprint.rooms:
+                    room.floor = floor_number
                 return fallback_blueprint.rooms
             
         except RoomDetectionFailedError as e:
@@ -1583,8 +1637,16 @@ class BlueprintParser:
         else:
             # Fallback to simple calculation
             total_area = sum(room.area for room in rooms)
+            
+            # Count unique floor numbers
+            floor_numbers = set(room.floor for room in rooms)
+            stories = len(floor_numbers) if floor_numbers else 1
+            
+            # Also check max floor number (in case floors are numbered 1, 2, etc.)
             max_floor = max((room.floor for room in rooms), default=1)
-            stories = max_floor
+            stories = max(stories, max_floor)
+            
+            logger.info(f"Detected {stories} stories from {len(floor_numbers)} unique floor numbers: {floor_numbers}")
         
         # VALIDATION: Square footage sanity checks
         if rooms:
@@ -1702,11 +1764,12 @@ class BlueprintParser:
             building_typology=typology_dict
         )
     
-    def _create_typical_fallback_rooms(self, target_sqft: Optional[float] = None) -> List[Room]:
+    def _create_typical_fallback_rooms(self, target_sqft: Optional[float] = None, floor_number: int = 1) -> List[Room]:
         """Create typical residential room layout when parsing fails
         
         Args:
             target_sqft: Target square footage for the home (if None, uses 2329 sqft default)
+            floor_number: Floor number to assign to the rooms (default 1)
         """
         import random
         
@@ -1793,7 +1856,7 @@ class BlueprintParser:
             room = Room(
                 name=f"{name} (Estimated)",
                 dimensions_ft=(width, height),
-                floor=1,
+                floor=floor_number,
                 windows=window_count,
                 orientation="unknown",
                 area=area,
@@ -1819,7 +1882,8 @@ class BlueprintParser:
         """
         # Create a more realistic fallback room structure
         # Use target square footage if available, otherwise default
-        rooms = self._create_typical_fallback_rooms(target_sqft)
+        # Floor 1 for partial blueprint fallback
+        rooms = self._create_typical_fallback_rooms(target_sqft, floor_number=1)
         total_area = sum(room.area for room in rooms)
         
         # Update metadata with error information
@@ -1860,7 +1924,15 @@ class BlueprintParser:
         from app.parser.polygon_detector import polygon_detector
         from app.parser.geometry_fallback import geometry_fallback_parser
         
+        # Log what we have before conversion
+        if raw_geometry:
+            logger.info(f"Creating RawGeometry from dict with {len(raw_geometry.get('rectangles', []))} rectangles")
+        
         geometry_obj = RawGeometry(**raw_geometry) if raw_geometry else None
+        
+        if geometry_obj:
+            logger.info(f"RawGeometry object has {len(geometry_obj.rectangles)} rectangles")
+        
         text_obj = RawText(**raw_text) if raw_text else None
         
         rooms = []
@@ -2224,6 +2296,111 @@ class BlueprintParser:
                 best_page = i
         
         return best_page
+    
+    def _perform_geometry_first_extraction(self, pdf_path: str, selected_page: int) -> tuple[Dict, Dict]:
+        """
+        Perform geometry-first extraction using vector extractor and RANSAC scale detection
+        This is the new primary extraction method - no LLM dependency
+        """
+        # Use our new vector extractor
+        from services.vector_extractor import get_vector_extractor
+        from services.scale_detector import get_scale_detector
+        from services.north_arrow_detector import get_north_arrow_detector
+        from services.geometry_extractor import GeometryExtractor
+        
+        logger.info(f"Starting geometry-first extraction for page {selected_page + 1}")
+        
+        # Step 1: Extract vectors directly from PDF
+        vector_extractor = get_vector_extractor()
+        vector_data = vector_extractor.extract_vectors(pdf_path, selected_page)
+        
+        logger.info(f"Extracted {len(vector_data.paths)} paths, {len(vector_data.texts)} texts, "
+                   f"{len(vector_data.dimensions)} dimensions")
+        
+        # Step 2: Detect scale using RANSAC
+        scale_detector = get_scale_detector()
+        scale_result = scale_detector.detect_scale(pdf_path, selected_page)
+        
+        logger.info(f"Scale detection: {scale_result.scale_px_per_ft} px/ft "
+                   f"(confidence: {scale_result.confidence:.2%}, method: {scale_result.method})")
+        
+        # Step 3: Detect north arrow
+        north_detector = get_north_arrow_detector()
+        north_result = north_detector.detect_north_arrow(pdf_path, selected_page)
+        
+        logger.info(f"North arrow: {north_result.angle_degrees}° "
+                   f"(confidence: {north_result.confidence:.2%})")
+        
+        # Step 4: Extract room geometry using detected scale
+        geometry_extractor = GeometryExtractor(scale_result.scale_px_per_ft)
+        rooms, building_footprint = geometry_extractor.extract_rooms(pdf_path, selected_page)
+        
+        logger.info(f"Extracted {len(rooms)} rooms from geometry")
+        
+        # Convert to legacy format for compatibility
+        rectangles = []
+        for room in rooms:
+            if 'polygon' in room and len(room['polygon']) >= 4:
+                # Convert polygon to rectangle (use bounding box)
+                xs = [p[0] for p in room['polygon']]
+                ys = [p[1] for p in room['polygon']]
+                rectangles.append({
+                    'x0': min(xs) * scale_result.scale_px_per_ft,
+                    'y0': min(ys) * scale_result.scale_px_per_ft,
+                    'x1': max(xs) * scale_result.scale_px_per_ft,
+                    'y1': max(ys) * scale_result.scale_px_per_ft,
+                    'width_ft': max(xs) - min(xs),
+                    'height_ft': max(ys) - min(ys),
+                    'area_sqft': room.get('area', 0)
+                })
+        
+        raw_geometry = {
+            'page_width': vector_data.page_width,
+            'page_height': vector_data.page_height,
+            'lines': [],  # Could convert vector paths if needed
+            'rectangles': rectangles,
+            'polylines': [],
+            'scale_factor': scale_result.scale_px_per_ft,
+            'north_angle': north_result.angle_degrees,
+            'building_footprint': building_footprint,
+            'rooms': rooms  # Include full room data
+        }
+        
+        # Extract text labels
+        room_labels = []
+        dimensions_list = []
+        
+        for text in vector_data.texts:
+            text_lower = text.text.lower()
+            # Check if it's a room label
+            if any(room_type in text_lower for room_type in 
+                   ['bedroom', 'bathroom', 'kitchen', 'living', 'dining', 'family', 
+                    'master', 'closet', 'hallway', 'entry', 'laundry', 'garage']):
+                room_labels.append({
+                    'text': text.text,
+                    'x': text.position[0],
+                    'y': text.position[1]
+                })
+        
+        # Dimensions are already extracted
+        for dim in vector_data.dimensions:
+            dimensions_list.append({
+                'text': dim.text,
+                'value_ft': dim.value_ft,
+                'x': dim.position[0],
+                'y': dim.position[1]
+            })
+        
+        raw_text = {
+            'page_text': '',  # Could aggregate all text
+            'blocks': [],
+            'room_labels': room_labels,
+            'dimensions': dimensions_list,
+            'words': [],
+            'notes': []
+        }
+        
+        return raw_geometry, raw_text
     
     def _perform_lean_extraction(self, pdf_path: str, selected_page: int) -> tuple[Dict, Dict]:
         """Perform lean extraction using optimized components"""

@@ -148,14 +148,14 @@ class GPT4VBlueprintAnalyzer:
                 "max_tokens_param": "max_completion_tokens",  # New parameter name
                 "max_tokens_value": 8192,
                 "timeout": self.gpt_timeout,  # Use single timeout
-                "temperature": 0.1
+                # GPT-4o only supports default temperature (1.0)
             },
             "gpt-4o-2024-11-20": {
                 "supports_vision": True,
                 "max_tokens_param": "max_completion_tokens",  # New parameter name
                 "max_tokens_value": 8192,
                 "timeout": self.gpt_timeout,  # Use single timeout
-                "temperature": 0.1
+                # GPT-4o only supports default temperature (1.0)
             },
             "gpt-4-turbo-2024-04-09": {
                 "supports_vision": True,
@@ -617,9 +617,12 @@ REMEMBER: Use ZIP code {zip_code} for all climate-specific calculations!"""
                                 }
                             ]
                         }
-                    ],
-                    "temperature": config["temperature"]
+                    ]
                 }
+                
+                # Add temperature only if specified in config (GPT-4o doesn't support it)
+                if "temperature" in config:
+                    request_params["temperature"] = config["temperature"]
                 
                 # Add the correct token parameter based on model
                 request_params[config["max_tokens_param"]] = config["max_tokens_value"]

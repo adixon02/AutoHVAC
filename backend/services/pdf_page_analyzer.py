@@ -587,23 +587,47 @@ class PDFPageAnalyzer:
         try:
             text = page.get_text()[:1000].upper()  # Check first 1000 chars
             
-            # Common floor patterns
+            # Common floor patterns - ORDER MATTERS (check more specific first)
             floor_patterns = [
+                # Check for MAIN/FIRST floor patterns first (these are ground level)
+                (r'MAIN\s+FLOOR|MAIN\s+LEVEL|GROUND\s+FLOOR', 1, "Main Floor"),
                 (r'FIRST\s+FLOOR|1ST\s+FLOOR|LEVEL\s+1', 1, "First Floor"),
-                (r'SECOND\s+FLOOR|2ND\s+FLOOR|LEVEL\s+2|UPPER\s+LEVEL|UPSTAIRS', 2, "Second Floor"),
+                # Then check for upper floors
+                (r'SECOND\s+FLOOR|2ND\s+FLOOR|LEVEL\s+2', 2, "Second Floor"),
+                (r'UPPER\s+LEVEL|UPSTAIRS|UPPER\s+FLOOR', 2, "Upper Floor"),
+                (r'BONUS\s+FLOOR|BONUS\s+ROOM|BONUS\s+SPACE', 2, "Bonus Floor"),
                 (r'THIRD\s+FLOOR|3RD\s+FLOOR|LEVEL\s+3', 3, "Third Floor"),
                 (r'BASEMENT|LOWER\s+LEVEL|GARDEN\s+LEVEL', 0, "Basement"),
-                (r'MAIN\s+FLOOR|MAIN\s+LEVEL|GROUND\s+FLOOR', 1, "Main Floor"),
-                (r'UPPER\s+FLOOR', 2, "Upper Floor"),
-                (r'BONUS\s+FLOOR|BONUS\s+ROOM', 2, "Bonus Floor"),
                 (r'ATTIC|LOFT', 3, "Attic/Loft"),
             ]
             
+            # Also check if this appears to be the main floor based on room content
+            has_main_floor_indicators = any(indicator in text for indicator in [
+                'KITCHEN', 'DINING', 'LIVING ROOM', 'ENTRY', 'FOYER', 'GARAGE'
+            ])
+            
+            detected_floor = None
+            detected_name = None
+            
             for pattern, floor_num, floor_name in floor_patterns:
                 if re.search(pattern, text):
-                    return floor_num, floor_name
+                    detected_floor = floor_num
+                    detected_name = floor_name
+                    break
             
-            return None, None
+            # Override if we have strong main floor indicators but detected upper floor
+            if detected_floor == 2 and has_main_floor_indicators:
+                # Check if we have more main floor rooms than upper floor rooms
+                main_floor_rooms = sum(1 for room in ['KITCHEN', 'DINING', 'LIVING', 'FAMILY', 'ENTRY', 'GARAGE'] 
+                                      if room in text)
+                upper_floor_rooms = sum(1 for room in ['BEDROOM', 'BATH', 'MASTER'] 
+                                       if room in text)
+                
+                if main_floor_rooms > upper_floor_rooms:
+                    logger.info(f"Overriding floor detection: detected '{detected_name}' but found main floor indicators")
+                    return 1, "Main Floor"
+            
+            return detected_floor, detected_name
             
         except Exception as e:
             logger.debug(f"Error detecting floor info: {e}")

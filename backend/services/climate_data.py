@@ -262,7 +262,7 @@ def get_construction_vintage_values(vintage: str) -> Dict[str, float]:
             'floor_r_value': 19.0,    # R-19 (6" floor insulation)
             'window_u_factor': 0.50,  # Double pane windows
             'window_shgc': 0.60,      # Standard double pane
-            'infiltration_ach': 0.50, # Code construction
+            'infiltration_ach': 0.60, # Average construction (0.5-0.7 ACHnat range)
         },
         '2000-2020': {
             'wall_r_value': 13.0,     # R-13 (2x4 with high-density insulation)
