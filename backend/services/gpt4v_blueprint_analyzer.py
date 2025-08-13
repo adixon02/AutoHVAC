@@ -140,6 +140,10 @@ class GPT4VBlueprintAnalyzer:
             max_retries=3  # Retry failed requests up to 3 times
         )
         
+        # Initialize timeout BEFORE using it in model configs
+        self.gpt_timeout = float(os.getenv("GPT_TIMEOUT", "60"))  # 60 seconds max, single attempt
+        logger.info(f"GPT timeout: {self.gpt_timeout}s (single attempt, no retries)")
+        
         # Model configurations with proper parameter names
         # Different models require different parameter names for token limits
         self.model_configs = {
@@ -185,10 +189,6 @@ class GPT4VBlueprintAnalyzer:
             "gpt-4o-2024-11-20",      # Primary model - only one that properly handles vision
             "gpt-4o",                 # Fallback if specific version not available
         ]
-        
-        # Single reasonable timeout - no retries so can be shorter
-        self.gpt_timeout = float(os.getenv("GPT_TIMEOUT", "60"))  # 60 seconds max, single attempt
-        logger.info(f"GPT timeout: {self.gpt_timeout}s (single attempt, no retries)")
         
     def analyze_blueprint(
         self,

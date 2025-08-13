@@ -2617,7 +2617,7 @@ def _get_calculation_assumptions(envelope_data: Optional[EnvelopeExtraction],
     
     if not envelope_data:
         assumptions.append("Used construction vintage defaults for all envelope properties")
-        assumptions.append(f"Assumed {construction_vintage or '1980-2000'} construction standards")
+        assumptions.append(f"Assumed {construction_vintage or 'current-code'} construction standards")
     else:
         # Check envelope data confidence
         if envelope_data.wall_confidence < 0.6:

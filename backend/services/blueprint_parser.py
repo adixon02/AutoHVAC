@@ -795,12 +795,16 @@ class BlueprintParser:
                 
                 logger.error(f"Blueprint parsing failed for {filename}: {type(e).__name__}: {str(e)}")
                 
-                # Try to return partial results if any stages succeeded
-                if parsing_metadata.geometry_status == ParsingStatus.SUCCESS or parsing_metadata.text_status == ParsingStatus.SUCCESS:
-                    logger.info("Returning partial results due to processing error")
-                    return self._create_partial_blueprint(zip_code, project_id, parsing_metadata, str(e))
-                else:
-                    raise BlueprintParsingError(f"Failed to parse blueprint {filename}: {str(e)}")
+                # Check if this is a NeedsInputError - if so, don't create fake rooms
+                from services.error_types import NeedsInputError
+                if isinstance(e, NeedsInputError):
+                    logger.error(f"NeedsInputError: {e.message} - Not creating fallback rooms")
+                    raise  # Re-raise the NeedsInputError so user gets proper feedback
+                
+                # For other errors, we also don't want to create fake rooms anymore
+                # Just raise the error with context
+                logger.error(f"Blueprint parsing failed - not creating fallback rooms")
+                raise BlueprintParsingError(f"Failed to parse blueprint {filename}: {str(e)}")
         
         finally:
             # Always end the pipeline metrics, even on error
