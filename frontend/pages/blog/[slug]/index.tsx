@@ -5,7 +5,7 @@ import { useRouter } from 'next/router';
 import NavBar from '../../../components/NavBar';
 
 // In production, this would parse your markdown files or fetch from CMS
-import { blogContent } from '../content/manual-j-calculation-software';
+import { blogContent } from '../../../lib/blog-content/manual-j-calculation-software';
 
 
 // CTA Component for Free Report
