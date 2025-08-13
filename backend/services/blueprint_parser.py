@@ -8,6 +8,7 @@ import os
 import time
 import logging
 import asyncio
+import math
 import fitz  # PyMuPDF
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -357,7 +358,8 @@ class BlueprintParser:
                         'lines': [],
                         'rectangles': [],
                         'polylines': [],
-                        'scale_factor': 48
+                        'scale_factor': 48,
+                        'scale_found': False  # No scale detection when skipping traditional extraction
                     }  # Empty but not None
                     raw_text = {
                         'words': [],
@@ -473,7 +475,7 @@ class BlueprintParser:
                             raw_geometry = self._combine_raw_geometry(all_raw_geometry)
                             raw_text = self._combine_raw_text(all_raw_text)
                         else:
-                            raw_geometry = {}
+                            raw_geometry = {'scale_found': False}  # Empty geometry with scale_found flag
                             raw_text = {}
                         
                         parsed_labels = all_parsed_labels
@@ -504,7 +506,8 @@ class BlueprintParser:
                         'lines': [],
                         'rectangles': [],
                         'polylines': [],
-                        'scale_factor': 48
+                        'scale_factor': 48,
+                        'scale_found': False  # No scale detection when skipping traditional extraction
                     }  # Empty but not None
                     raw_text = {
                         'words': [],
@@ -551,18 +554,37 @@ class BlueprintParser:
                                 # Convert geometry rooms to Room objects
                                 from app.parser.schema import Room
                                 floor_rooms = []
-                                for geom_room in page_geometry.get('rooms', []):
+                                for idx, geom_room in enumerate(page_geometry.get('rooms', [])):
+                                    # Extract dimensions from bbox (min_x, min_y, max_x, max_y)
+                                    bbox = geom_room.get('bbox', (0, 0, 20, 15))
+                                    width = bbox[2] - bbox[0] if len(bbox) >= 4 else 20
+                                    height = bbox[3] - bbox[1] if len(bbox) >= 4 else 15
+                                    
+                                    # Use area from geometry or calculate from dimensions
+                                    area = geom_room.get('area', width * height)
+                                    
+                                    # If dimensions seem wrong, calculate from area assuming square-ish room
+                                    if area > 0 and (width <= 0 or height <= 0):
+                                        # Assume roughly square room
+                                        side_length = math.sqrt(area)
+                                        width = side_length * 1.2  # Make slightly rectangular
+                                        height = area / width
+                                    
+                                    # Ensure minimum reasonable dimensions
+                                    width = max(width, 8)  # Minimum 8 feet width
+                                    height = max(height, 8)  # Minimum 8 feet depth
+                                    
                                     room = Room(
-                                        name=geom_room.get('label', f"Room {len(floor_rooms)+1}"),
-                                        dimensions_ft=(geom_room.get('width', 10), geom_room.get('height', 10)),
+                                        name=f"Room {idx+1}",  # No label field in geometry rooms
+                                        dimensions_ft=(width, height),
                                         floor=page_analysis.floor_number if hasattr(page_analysis, 'floor_number') else 1,
                                         windows=0,
                                         orientation="unknown",
-                                        area=geom_room.get('area', 100),
+                                        area=area,
                                         room_type="unknown",
                                         confidence=0.8,
                                         center_position=geom_room.get('center', (0, 0)),
-                                        label_found=bool(geom_room.get('label')),
+                                        label_found=False,  # Geometry doesn't extract labels
                                         dimensions_source="geometry"
                                     )
                                     floor_rooms.append(room)
@@ -647,18 +669,37 @@ class BlueprintParser:
                             # Convert geometry rooms to Room objects
                             from app.parser.schema import Room
                             rooms = []
-                            for geom_room in raw_geometry.get('rooms', []):
+                            for idx, geom_room in enumerate(raw_geometry.get('rooms', [])):
+                                # Extract dimensions from bbox (min_x, min_y, max_x, max_y)
+                                bbox = geom_room.get('bbox', (0, 0, 20, 15))
+                                width = bbox[2] - bbox[0] if len(bbox) >= 4 else 20
+                                height = bbox[3] - bbox[1] if len(bbox) >= 4 else 15
+                                
+                                # Use area from geometry or calculate from dimensions
+                                area = geom_room.get('area', width * height)
+                                
+                                # If dimensions seem wrong, calculate from area assuming square-ish room
+                                if area > 0 and (width <= 0 or height <= 0):
+                                    # Assume roughly square room
+                                    side_length = math.sqrt(area)
+                                    width = side_length * 1.2  # Make slightly rectangular
+                                    height = area / width
+                                
+                                # Ensure minimum reasonable dimensions
+                                width = max(width, 8)  # Minimum 8 feet width
+                                height = max(height, 8)  # Minimum 8 feet depth
+                                
                                 room = Room(
-                                    name=geom_room.get('label', f"Room {len(rooms)+1}"),
-                                    dimensions_ft=(geom_room.get('width', 10), geom_room.get('height', 10)),
+                                    name=f"Room {idx+1}",  # No label field in geometry rooms
+                                    dimensions_ft=(width, height),
                                     floor=1,
                                     windows=0,
                                     orientation="unknown",
-                                    area=geom_room.get('area', 100),
+                                    area=area,
                                     room_type="unknown",
                                     confidence=0.8,
                                     center_position=geom_room.get('center', (0, 0)),
-                                    label_found=bool(geom_room.get('label')),
+                                    label_found=False,  # Geometry doesn't extract labels
                                     dimensions_source="geometry"
                                 )
                                 rooms.append(room)
@@ -1062,7 +1103,10 @@ class BlueprintParser:
             if hasattr(raw_geometry, 'scale_result') and raw_geometry.scale_result:
                 geometry_dict['scale_factor'] = raw_geometry.scale_result.scale_factor
                 geometry_dict['scale_confidence'] = raw_geometry.scale_result.confidence
+                geometry_dict['scale_found'] = True  # Scale was successfully detected
                 logger.info(f"Preserving scale in geometry dict: {geometry_dict['scale_factor']} px/ft")
+            else:
+                geometry_dict['scale_found'] = False  # No scale detected
             if hasattr(raw_geometry, 'north_angle'):
                 geometry_dict['north_angle'] = raw_geometry.north_angle
                 logger.info(f"Preserving north angle in geometry dict: {geometry_dict['north_angle']}°")
@@ -2459,6 +2503,7 @@ class BlueprintParser:
             'rectangles': rectangles,
             'polylines': [],
             'scale_factor': scale_result.scale_px_per_ft,
+            'scale_found': scale_result.confidence > 0.5,  # Scale was detected if confidence is reasonable
             'north_angle': north_result.angle_degrees,
             'building_footprint': building_footprint,
             'rooms': rooms  # Include full room data
@@ -2508,7 +2553,8 @@ class BlueprintParser:
             'lines': [],
             'rectangles': [],
             'polylines': [],
-            'scale_factor': 48
+            'scale_factor': 48,
+            'scale_found': False  # Lean extraction doesn't detect scale
         }
         raw_text = {
             'words': [],
@@ -2596,7 +2642,8 @@ class BlueprintParser:
                 'lines': lines,
                 'rectangles': rectangles,
                 'polylines': [],  # Empty for lean extraction
-                'scale_factor': 48  # Default
+                'scale_factor': 48,  # Default
+                'scale_found': False  # Lean extraction doesn't detect scale
             }
             
             doc.close()
