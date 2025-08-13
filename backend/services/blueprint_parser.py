@@ -1644,14 +1644,14 @@ class BlueprintParser:
         """Compile all parsed data into final BlueprintSchema with scale information"""
         
         # CRITICAL FIX: Run Gate B validation before Manual J
-        from services.validation_gates import get_validation_gates, GateStatus
+        from services.validation_gates import ValidationGates, GateStatus
         from services.error_types import NeedsInputError
         
-        gates = get_validation_gates()
+        gates = ValidationGates()
         if gates and rooms:
             # Check pre-Manual-J validation gate
             avg_room_size = sum(room.area for room in rooms) / len(rooms)
-            gate_b_result = gates.check_gate_b_pre_manualj(
+            gate_b_result = gates.check_gate_b_pre_manual_j(
                 rooms_count=len(rooms),
                 avg_room_size=avg_room_size,
                 total_area=sum(room.area for room in rooms),
@@ -2293,9 +2293,9 @@ class BlueprintParser:
                 
                 # CRITICAL FIX: Check validation gates and actually stop if they fail
                 if hasattr(self, 'validation_gates'):
-                    from services.validation_gates import get_validation_gates, GateStatus
+                    from services.validation_gates import ValidationGates, GateStatus
                     from services.error_types import NeedsInputError
-                    gates = get_validation_gates()
+                    gates = ValidationGates()
                     gate_result = gates.check_gate_a_scale(
                         scale_confidence=scale_result.confidence,
                         scale_px_per_ft=scale_result.scale_px_per_ft,
