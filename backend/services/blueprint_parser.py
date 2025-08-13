@@ -1643,35 +1643,6 @@ class BlueprintParser:
     ) -> BlueprintSchema:
         """Compile all parsed data into final BlueprintSchema with scale information"""
         
-        # CRITICAL FIX: Run Gate B validation before Manual J
-        from services.validation_gates import ValidationGates, GateStatus
-        from services.error_types import NeedsInputError
-        
-        gates = ValidationGates()
-        if gates and rooms:
-            # Check pre-Manual-J validation gate
-            avg_room_size = sum(room.area for room in rooms) / len(rooms)
-            gate_b_result = gates.check_gate_b_pre_manual_j(
-                rooms_count=len(rooms),
-                avg_room_size=avg_room_size,
-                total_area=sum(room.area for room in rooms),
-                has_exterior_rooms=any(
-                    room.source_elements.get('exterior_walls', 0) > 0 
-                    if hasattr(room, 'source_elements') else False 
-                    for room in rooms
-                )
-            )
-            logger.info(f"Pre-Manual-J Gate B: {gate_b_result.status.value} - {gate_b_result.message}")
-            
-            # CRITICAL: Actually stop processing if gate fails
-            if gate_b_result.status == GateStatus.FAILED and not gate_b_result.can_continue:
-                logger.error(f"🚫 QUALITY GATE B FAILED: {gate_b_result.message}")
-                raise NeedsInputError(
-                    input_type='plan_quality',
-                    message=gate_b_result.message,
-                    details=gate_b_result.details or {}
-                )
-        
         # Add detected scale to raw geometry for downstream use
         if isinstance(raw_geometry, dict):
             raw_geometry['detected_scale'] = detected_scale
@@ -2291,27 +2262,6 @@ class BlueprintParser:
                 logger.info(f"RANSAC scale detection: {scale_result.scale_px_per_ft} px/ft "
                            f"(confidence: {scale_result.confidence:.2%}, method: {scale_result.method})")
                 
-                # CRITICAL FIX: Check validation gates and actually stop if they fail
-                if hasattr(self, 'validation_gates'):
-                    from services.validation_gates import ValidationGates, GateStatus
-                    from services.error_types import NeedsInputError
-                    gates = ValidationGates()
-                    gate_result = gates.check_gate_a_scale(
-                        scale_confidence=scale_result.confidence,
-                        scale_px_per_ft=scale_result.scale_px_per_ft,
-                        dimension_count=len(raw_text.get('dimensions', [])) if raw_text else 0
-                    )
-                    logger.info(f"Scale Gate A: {gate_result.status.value} - {gate_result.message}")
-                    
-                    # CRITICAL: Actually stop processing if gate fails
-                    if gate_result.status == GateStatus.FAILED and not gate_result.can_continue:
-                        logger.error(f"🚫 QUALITY GATE A FAILED: {gate_result.message}")
-                        raise NeedsInputError(
-                            input_type='scale',
-                            message=gate_result.message,
-                            details=gate_result.details or {}
-                        )
-                
                 # Validate scale with room sizes if available
                 if rooms and scale_result.confidence < 0.95:
                     room_areas = [room.area for room in rooms]
@@ -2644,14 +2594,24 @@ class BlueprintParser:
                 error_msg = f"Average room size {avg_room_size:.1f} sqft is unrealistically small"
                 logger.error(error_msg)
                 if self.enable_fail_fast:
-                    raise ScaleError(error_msg)
+                    raise ScaleDetectionError(
+                        detected_scale=avg_room_size,
+                        confidence=0.1,
+                        alternatives=[],
+                        validation_issues=[error_msg]
+                    )
                 issues.append(error_msg)
             
             elif avg_room_size > 500:
                 error_msg = f"Average room size {avg_room_size:.1f} sqft is unrealistically large"
                 logger.error(error_msg)
                 if self.enable_fail_fast:
-                    raise ScaleError(error_msg)
+                    raise ScaleDetectionError(
+                        detected_scale=avg_room_size,
+                        confidence=0.1,
+                        alternatives=[],
+                        validation_issues=[error_msg]
+                    )
                 issues.append(error_msg)
         
         # Gate 4: Total area validation

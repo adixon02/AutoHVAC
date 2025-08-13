@@ -40,7 +40,6 @@ class ArtifactManager:
             'geometry_raw': 'json',
             'text_raw': 'json',
             'gpt_response': 'json',
-            'validation_gates': 'json',
             'blueprint_schema': 'json',
             'manualj_results': 'json',
             'error_log': 'json'
