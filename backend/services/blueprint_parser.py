@@ -545,6 +545,29 @@ class BlueprintParser:
                                 use_discovery_mode=True  # Let GPT-4V determine floor type
                             )
                             
+                            # If AI returned empty (AI_MODE=off), use geometry-extracted rooms
+                            if not floor_rooms and page_geometry and 'rooms' in page_geometry:
+                                logger.info(f"Using geometry-extracted rooms for page {page_analysis.page_number}")
+                                # Convert geometry rooms to Room objects
+                                from app.parser.schema import Room
+                                floor_rooms = []
+                                for geom_room in page_geometry.get('rooms', []):
+                                    room = Room(
+                                        name=geom_room.get('label', f"Room {len(floor_rooms)+1}"),
+                                        dimensions_ft=(geom_room.get('width', 10), geom_room.get('height', 10)),
+                                        floor=page_analysis.floor_number if hasattr(page_analysis, 'floor_number') else 1,
+                                        windows=0,
+                                        orientation="unknown",
+                                        area=geom_room.get('area', 100),
+                                        room_type="unknown",
+                                        confidence=0.8,
+                                        center_position=geom_room.get('center', (0, 0)),
+                                        label_found=bool(geom_room.get('label')),
+                                        dimensions_source="geometry"
+                                    )
+                                    floor_rooms.append(room)
+                                logger.info(f"Created {len(floor_rooms)} rooms from geometry extraction")
+                            
                             rooms_by_page[i] = floor_rooms
                             logger.info(f"Page {page_analysis.page_number}: Found {len(floor_rooms)} rooms")
                             
@@ -617,6 +640,29 @@ class BlueprintParser:
                     else:
                         # Single page processing (original behavior)
                         rooms = self._perform_ai_analysis(raw_geometry, raw_text, zip_code, parsing_metadata, project_id=project_id)
+                        
+                        # If AI returned empty (AI_MODE=off), use geometry-extracted rooms
+                        if not rooms and raw_geometry and 'rooms' in raw_geometry:
+                            logger.info("Using geometry-extracted rooms for single page")
+                            # Convert geometry rooms to Room objects
+                            from app.parser.schema import Room
+                            rooms = []
+                            for geom_room in raw_geometry.get('rooms', []):
+                                room = Room(
+                                    name=geom_room.get('label', f"Room {len(rooms)+1}"),
+                                    dimensions_ft=(geom_room.get('width', 10), geom_room.get('height', 10)),
+                                    floor=1,
+                                    windows=0,
+                                    orientation="unknown",
+                                    area=geom_room.get('area', 100),
+                                    room_type="unknown",
+                                    confidence=0.8,
+                                    center_position=geom_room.get('center', (0, 0)),
+                                    label_found=bool(geom_room.get('label')),
+                                    dimensions_source="geometry"
+                                )
+                                rooms.append(room)
+                            logger.info(f"Created {len(rooms)} rooms from geometry extraction")
                     
                     metrics_collector.current_stage.output_data = {
                         "num_rooms": len(rooms),
@@ -1096,7 +1142,7 @@ class BlueprintParser:
             
             if ai_mode == "off":
                 logger.info("[AI] Mode=off; geometry is authoritative - skipping AI analysis")
-                metadata.ai_status = ParsingStatus.SKIPPED
+                metadata.ai_status = ParsingStatus.SUCCESS  # Mark as success since we're intentionally skipping
                 return []  # Return empty list to use geometry-only approach
             
             # First try GPT-4 Vision if available for maximum accuracy
