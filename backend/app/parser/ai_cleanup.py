@@ -171,8 +171,12 @@ def _prepare_context(raw_geo: RawGeometry, raw_text: RawText, zip_code: str) -> 
     text_summary = {
         "room_labels": [
             {
-                "text": label["text"],
-                "position": [label["x0"], label["top"]],
+                "text": label.get("text", ""),
+                # Handle both formats: x0/top (text_parser) and x/y (old format)
+                "position": [
+                    label.get("x0", label.get("x", 0)),  # Try x0 first, fall back to x
+                    label.get("top", label.get("y", 0))  # Try top first, fall back to y
+                ],
                 "room_type": label.get("room_type", "unknown"),
                 "confidence": label.get("confidence", 0.5)
             }

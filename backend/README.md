@@ -29,8 +29,8 @@
    ```bash
    # For production deployments, set these for optimal accuracy:
    PARSING_MODE=traditional_first  # Use geometry/text extraction first, AI for enhancement
-   GEOMETRY_AUTHORITATIVE=true     # Trust geometry extraction for areas over GPT-4V
-   USE_GPT4_VISION=false           # Disable GPT-4V (not accurate for measurements)
+   GEOMETRY_AUTHORITATIVE=false    # Balance geometry and GPT-4V insights
+   USE_GPT4_VISION=true            # Enable GPT-4V for room detection and classification
    MIN_CONFIDENCE_THRESHOLD=0.5    # Lower threshold for validation gates
    SCALE_OVERRIDE=48               # Force 1/4"=1' scale if known (48 px/ft)
    

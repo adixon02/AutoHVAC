@@ -1349,8 +1349,31 @@ class BlueprintParser:
                 'error': f"AI analysis timed out after {self.ai_timeout} seconds",
                 'error_type': 'timeout'
             })
-            # No fallback - GPT-4V is required
-            raise ValueError(f"GPT-4V analysis timed out after {self.ai_timeout} seconds. Please try again.")
+            # Try direct GPT-4V if available
+            if use_gpt4v:
+                logger.info("Attempting direct GPT-4V analysis after timeout...")
+                try:
+                    return self._perform_gpt4v_direct_analysis(None, page_num or 0, zip_code, floor_label)
+                except Exception as gpt_e:
+                    logger.error(f"GPT-4V direct analysis also failed: {gpt_e}")
+            raise ValueError(f"Room analysis timed out after {self.ai_timeout} seconds. Please try again.")
+            
+        except KeyError as e:
+            logger.error(f"AI analysis failed with KeyError (likely data structure issue): {e}")
+            metadata.ai_status = ParsingStatus.FAILED
+            metadata.errors_encountered.append({
+                'stage': 'ai',
+                'error': f"Data structure error: {str(e)}",
+                'error_type': 'KeyError'
+            })
+            # This is likely the x0/top issue - try GPT-4V directly
+            if use_gpt4v:
+                logger.info("Bypassing AI cleanup, using GPT-4V directly due to data structure error...")
+                try:
+                    return self._perform_gpt4v_direct_analysis(None, page_num or 0, zip_code, floor_label)
+                except Exception as gpt_e:
+                    logger.error(f"GPT-4V direct analysis also failed: {gpt_e}")
+            raise ValueError(f"Room analysis failed: {str(e)}. Please check blueprint format.")
             
         except Exception as e:
             logger.error(f"AI analysis failed: {type(e).__name__}: {str(e)}")
@@ -1360,8 +1383,74 @@ class BlueprintParser:
                 'error': str(e),
                 'error_type': type(e).__name__
             })
-            # No fallback - GPT-4V is required
-            raise ValueError(f"GPT-4V analysis failed: {str(e)}. Please ensure OPENAI_API_KEY is set correctly.")
+            # Try direct GPT-4V as last resort
+            if use_gpt4v:
+                logger.info("Attempting GPT-4V direct analysis as final fallback...")
+                try:
+                    return self._perform_gpt4v_direct_analysis(None, page_num or 0, zip_code, floor_label)
+                except Exception as gpt_e:
+                    logger.error(f"GPT-4V direct analysis also failed: {gpt_e}")
+            raise ValueError(f"Room analysis failed: {str(e)}. Please ensure OPENAI_API_KEY is set correctly.")
+    
+    def _perform_gpt4v_direct_analysis(self, pdf_path: Optional[str], page_num: int, zip_code: str, floor_label: Optional[str] = None) -> List[Room]:
+        """
+        Perform direct GPT-4V analysis bypassing AI cleanup
+        This is a fallback when AI cleanup fails due to data structure issues
+        """
+        logger.info(f"Performing direct GPT-4V analysis for page {page_num + 1}")
+        
+        # Use provided pdf_path or fallback to stored one
+        if not pdf_path:
+            pdf_path = getattr(self, 'current_pdf_path', None)
+        
+        if not pdf_path:
+            raise ValueError("No PDF path available for GPT-4V analysis")
+        
+        try:
+            from services.gpt4v_blueprint_analyzer import get_gpt4v_analyzer
+            gpt4v = get_gpt4v_analyzer()
+            
+            # Set project ID if available
+            if hasattr(self, 'current_project_id'):
+                gpt4v.current_project_id = self.current_project_id
+            
+            # Analyze with GPT-4V
+            analysis = gpt4v.analyze_blueprint(
+                pdf_path=pdf_path,
+                page_num=page_num,
+                zip_code=zip_code,
+                floor_label=floor_label,
+                use_discovery_mode=True
+            )
+            
+            if not analysis or not analysis.rooms:
+                logger.error("GPT-4V returned no rooms")
+                return []
+            
+            # Convert GPT-4V rooms to our Room format
+            rooms = []
+            for gpt_room in analysis.rooms:
+                room = Room(
+                    name=gpt_room.name,
+                    dimensions_ft=gpt_room.dimensions_ft,
+                    floor=gpt_room.floor_level,
+                    windows=len(gpt_room.features) if gpt_room.features else 0,
+                    orientation="unknown",
+                    area=gpt_room.area_sqft,
+                    room_type=gpt_room.room_type,
+                    confidence=gpt_room.confidence,
+                    center_position=(0, 0),
+                    label_found=True,
+                    dimensions_source="gpt4v_direct"
+                )
+                rooms.append(room)
+            
+            logger.info(f"GPT-4V direct analysis found {len(rooms)} rooms")
+            return rooms
+            
+        except Exception as e:
+            logger.error(f"GPT-4V direct analysis failed: {e}")
+            raise
     
     def _create_fallback_rooms(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], floor_number: int = 1, floor_label: Optional[str] = None) -> List[Room]:
         """Create fallback rooms when AI analysis fails using intelligent geometry analysis"""
@@ -2379,6 +2468,33 @@ class BlueprintParser:
         
         return best_page
     
+    def _classify_room_type(self, text: str) -> str:
+        """Classify room type from text label"""
+        text_lower = text.lower()
+        
+        if 'bedroom' in text_lower or 'bed' in text_lower or 'br' in text_lower:
+            return 'bedroom'
+        elif 'bathroom' in text_lower or 'bath' in text_lower or 'ba' in text_lower:
+            return 'bathroom'
+        elif 'kitchen' in text_lower or 'kit' in text_lower:
+            return 'kitchen'
+        elif 'living' in text_lower or 'family' in text_lower or 'great' in text_lower:
+            return 'living'
+        elif 'dining' in text_lower:
+            return 'dining'
+        elif 'office' in text_lower or 'study' in text_lower or 'den' in text_lower:
+            return 'office'
+        elif 'closet' in text_lower or 'storage' in text_lower:
+            return 'closet'
+        elif 'garage' in text_lower:
+            return 'garage'
+        elif 'laundry' in text_lower or 'utility' in text_lower:
+            return 'utility'
+        elif 'hall' in text_lower or 'foyer' in text_lower or 'entry' in text_lower:
+            return 'hallway'
+        else:
+            return 'unknown'
+    
     def _perform_geometry_first_extraction(self, pdf_path: str, selected_page: int) -> tuple[Dict, Dict]:
         """
         Perform geometry-first extraction using vector extractor and RANSAC scale detection
@@ -2467,10 +2583,15 @@ class BlueprintParser:
             if any(room_type in text_lower for room_type in 
                    ['bedroom', 'bathroom', 'kitchen', 'living', 'dining', 'family', 
                     'master', 'closet', 'hallway', 'entry', 'laundry', 'garage']):
+                # Fix: Use correct structure matching text_parser.py format
                 room_labels.append({
                     'text': text.text,
-                    'x': text.position[0],
-                    'y': text.position[1]
+                    'x0': text.position[0],  # Changed from 'x' to 'x0'
+                    'top': text.position[1],  # Changed from 'y' to 'top'
+                    'x1': text.position[0] + 50,  # Estimate width
+                    'bottom': text.position[1] + 10,  # Estimate height
+                    'room_type': self._classify_room_type(text.text),
+                    'confidence': 0.8
                 })
         
         # Dimensions are already extracted

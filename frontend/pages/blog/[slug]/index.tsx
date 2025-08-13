@@ -3,9 +3,7 @@ import Link from 'next/link';
 import { ArrowLeft, Calendar, Clock, CheckCircle, Star, ArrowRight } from 'lucide-react';
 import { useRouter } from 'next/router';
 import NavBar from '../../../components/NavBar';
-
-// In production, this would parse your markdown files or fetch from CMS
-import { blogContent } from '../../../lib/blog-content/manual-j-calculation-software';
+import { getBlogPost, getRelatedPosts } from '../../../lib/blog-content';
 
 
 // CTA Component for Free Report
@@ -107,14 +105,18 @@ const TrustBadge = () => (
 export default function BlogPost() {
   const router = useRouter();
   const { slug } = router.query;
-  // For demo, we're only showing the manual-j-calculation-software post
-  if (slug && slug !== 'manual-j-calculation-software') {
+  
+  // Get the blog post content
+  const blogContent = getBlogPost(slug as string);
+  const relatedPosts = getRelatedPosts(slug as string, 3);
+  
+  if (!blogContent) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <h1 className="text-4xl font-bold mb-4">Coming Soon</h1>
-          <p className="text-gray-600 mb-8">This article is being written by our SEO team.</p>
-          <Link href="/blog" className="text-purple-600 hover:underline">
+          <h1 className="text-4xl font-bold mb-4">Article Not Found</h1>
+          <p className="text-gray-600 mb-8">The article you're looking for doesn't exist or has been moved.</p>
+          <Link href="/blog" className="text-brand-600 hover:underline">
             ← Back to Blog
           </Link>
         </div>
@@ -141,7 +143,7 @@ export default function BlogPost() {
       <header className="max-w-4xl mx-auto px-4 py-8">
         <div className="mb-4">
           <span className="bg-brand-100 text-brand-800 text-sm font-medium px-3 py-1 rounded-full">
-            HVAC Software
+            {blogContent.category}
           </span>
         </div>
         
@@ -150,14 +152,14 @@ export default function BlogPost() {
         </h1>
         
         <div className="flex items-center space-x-6 text-gray-600">
-          <span className="font-medium">AutoHVAC Team</span>
+          <span className="font-medium">{blogContent.author}</span>
           <div className="flex items-center">
             <Calendar className="w-4 h-4 mr-2" />
-            <span>January 20, 2025</span>
+            <span>{blogContent.publishDate}</span>
           </div>
           <div className="flex items-center">
             <Clock className="w-4 h-4 mr-2" />
-            <span>12 min read</span>
+            <span>{blogContent.readTime}</span>
           </div>
         </div>
       </header>
@@ -184,36 +186,27 @@ export default function BlogPost() {
       <div className="max-w-4xl mx-auto px-4 py-12 border-t">
         <h3 className="text-2xl font-bold mb-6">Related Articles</h3>
         <div className="grid md:grid-cols-3 gap-6">
-          <Link href="/blog/acca-manual-j-guide" className="group">
-            <div className="bg-gray-50 rounded-lg p-4 hover:shadow-lg transition-shadow">
-              <h4 className="font-semibold text-gray-900 group-hover:text-brand-600 transition-colors">
-                Understanding ACCA Manual J Standards
-              </h4>
-              <p className="text-sm text-gray-600 mt-2">
-                Learn the fundamentals of ACCA-approved load calculations
-              </p>
-            </div>
-          </Link>
-          <Link href="/blog/hvac-sizing-mistakes" className="group">
-            <div className="bg-gray-50 rounded-lg p-4 hover:shadow-lg transition-shadow">
-              <h4 className="font-semibold text-gray-900 group-hover:text-brand-600 transition-colors">
-                HVAC Sizing Mistakes to Avoid
-              </h4>
-              <p className="text-sm text-gray-600 mt-2">
-                Common errors that cost contractors time and money
-              </p>
-            </div>
-          </Link>
-          <Link href="/blog/energy-efficiency-sizing" className="group">
-            <div className="bg-gray-50 rounded-lg p-4 hover:shadow-lg transition-shadow">
-              <h4 className="font-semibold text-gray-900 group-hover:text-brand-600 transition-colors">
-                Energy Efficiency and Proper Sizing
-              </h4>
-              <p className="text-sm text-gray-600 mt-2">
-                How right-sizing saves homeowners thousands
-              </p>
-            </div>
-          </Link>
+          {relatedPosts.map((post) => (
+            <Link key={post.slug} href={`/blog/${post.slug}`} className="group">
+              <div className="bg-gray-50 rounded-lg p-4 hover:shadow-lg transition-shadow">
+                <div className="mb-2">
+                  <span className="text-xs bg-brand-100 text-brand-700 px-2 py-1 rounded">
+                    {post.category}
+                  </span>
+                </div>
+                <h4 className="font-semibold text-gray-900 group-hover:text-brand-600 transition-colors line-clamp-2">
+                  {post.title}
+                </h4>
+                <p className="text-sm text-gray-600 mt-2 line-clamp-2">
+                  {post.meta_description}
+                </p>
+                <div className="flex items-center mt-3 text-xs text-gray-500">
+                  <Clock className="w-3 h-3 mr-1" />
+                  <span>{post.readTime}</span>
+                </div>
+              </div>
+            </Link>
+          ))}
         </div>
       </div>
       </article>

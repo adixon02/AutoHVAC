@@ -15,7 +15,7 @@ interface BlogPostProps {
 
 // CTA Component for Free Report
 const FreeReportCTA = () => (
-  <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl p-8 my-12 text-white">
+  <div className="bg-gradient-to-r from-brand-600 to-brand-700 rounded-xl p-8 my-12 text-white">
     <div className="max-w-4xl mx-auto text-center">
       <h2 className="text-3xl font-bold mb-4">
         🎯 Get Your Free HVAC Load Report Today
@@ -56,7 +56,7 @@ const FreeReportCTA = () => (
       
       <Link 
         href="/start-free"
-        className="inline-flex items-center bg-white text-purple-600 px-8 py-4 rounded-lg font-bold text-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
+        className="inline-flex items-center bg-white text-brand-700 px-8 py-4 rounded-lg font-bold text-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
       >
         Get Your Free Report Now
         <ArrowRight className="ml-2 w-5 h-5" />
@@ -76,12 +76,12 @@ const InlineCTA = ({
   buttonText = "Start Free Calculation",
   buttonLink = "/calculator"
 }) => (
-  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border-l-4 border-purple-600 p-6 my-8 rounded-lg">
+  <div className="bg-gradient-to-r from-blue-50 to-sky-50 border-l-4 border-brand-600 p-6 my-8 rounded-lg">
     <h3 className="text-xl font-bold text-gray-900 mb-2">{title}</h3>
     <p className="text-gray-700 mb-4">{description}</p>
     <Link 
       href={buttonLink}
-      className="inline-flex items-center bg-purple-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-purple-700 transition-colors"
+      className="inline-flex items-center bg-brand-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-brand-700 transition-colors"
     >
       {buttonText}
       <ArrowRight className="ml-2 w-4 h-4" />
@@ -129,7 +129,7 @@ export default function BlogPost({
       <header className="mb-12">
         {category && (
           <div className="mb-4">
-            <span className="bg-purple-100 text-purple-800 text-sm font-medium px-3 py-1 rounded-full">
+            <span className="bg-brand-100 text-brand-800 text-sm font-medium px-3 py-1 rounded-full">
               {category}
             </span>
           </div>
@@ -200,7 +200,7 @@ export default function BlogPost({
         <div className="grid md:grid-cols-3 gap-6">
           <Link href="/blog/acca-manual-j-guide" className="group">
             <div className="bg-gray-50 rounded-lg p-4 hover:shadow-lg transition-shadow">
-              <h4 className="font-semibold text-gray-900 group-hover:text-purple-600 transition-colors">
+              <h4 className="font-semibold text-gray-900 group-hover:text-brand-600 transition-colors">
                 Understanding ACCA Manual J Standards
               </h4>
               <p className="text-sm text-gray-600 mt-2">
@@ -210,7 +210,7 @@ export default function BlogPost({
           </Link>
           <Link href="/blog/hvac-sizing-mistakes" className="group">
             <div className="bg-gray-50 rounded-lg p-4 hover:shadow-lg transition-shadow">
-              <h4 className="font-semibold text-gray-900 group-hover:text-purple-600 transition-colors">
+              <h4 className="font-semibold text-gray-900 group-hover:text-brand-600 transition-colors">
                 HVAC Sizing Mistakes to Avoid
               </h4>
               <p className="text-sm text-gray-600 mt-2">
@@ -220,7 +220,7 @@ export default function BlogPost({
           </Link>
           <Link href="/blog/energy-efficiency-sizing" className="group">
             <div className="bg-gray-50 rounded-lg p-4 hover:shadow-lg transition-shadow">
-              <h4 className="font-semibold text-gray-900 group-hover:text-purple-600 transition-colors">
+              <h4 className="font-semibold text-gray-900 group-hover:text-brand-600 transition-colors">
                 Energy Efficiency and Proper Sizing
               </h4>
               <p className="text-sm text-gray-600 mt-2">

@@ -1,47 +1,15 @@
 import React from 'react';
 import Link from 'next/link';
 import { Calendar, Clock, ArrowRight, BookOpen } from 'lucide-react';
-
-// Mock blog posts data - in production, this would come from your CMS or markdown files
-const blogPosts = [
-  {
-    slug: 'manual-j-calculation-software',
-    title: 'Manual J Calculation Software: AI-Powered HVAC Load Calculator (2025)',
-    description: 'Get ACCA Manual J calculations in 60 seconds with AutoHVAC\'s AI-powered software. Upload blueprints, get permit-ready reports at $99/month.',
-    author: 'AutoHVAC Team',
-    date: '2025-01-20',
-    readTime: 12,
-    category: 'HVAC Software',
-    featured: true,
-    image: '/images/blog/manual-j-software-hero.webp'
-  },
-  {
-    slug: 'hvac-sizing-mistakes',
-    title: 'Top 10 HVAC Sizing Mistakes That Cost You Money',
-    description: 'Learn the most common HVAC sizing errors and how to avoid them. Save thousands on energy bills with proper load calculations.',
-    author: 'AutoHVAC Team',
-    date: '2025-01-18',
-    readTime: 8,
-    category: 'Best Practices',
-    featured: false
-  },
-  {
-    slug: 'acca-manual-j-guide',
-    title: 'Understanding ACCA Manual J Standards: Complete Guide',
-    description: 'Everything you need to know about ACCA Manual J standards for residential load calculations. Industry requirements explained.',
-    author: 'AutoHVAC Team',
-    date: '2025-01-15',
-    readTime: 10,
-    category: 'Education',
-    featured: false
-  }
-];
-
 import NavBar from '../../components/NavBar';
+import { getAllBlogPosts } from '../../lib/blog-content';
 
 export default function BlogIndex() {
-  const featuredPost = blogPosts.find(post => post.featured);
-  const recentPosts = blogPosts.filter(post => !post.featured);
+  const allPosts = getAllBlogPosts();
+  
+  // Mark the AC tonnage calculator as featured (our new dominant article)
+  const featuredPost = allPosts.find(post => post.slug === 'ac-tonnage-calculator') || allPosts[0];
+  const recentPosts = allPosts.filter(post => post.slug !== featuredPost?.slug);
 
   return (
     <>
@@ -78,17 +46,17 @@ export default function BlogIndex() {
                       {featuredPost.title}
                     </h3>
                     <p className="text-gray-600 mb-4 line-clamp-2">
-                      {featuredPost.description}
+                      {featuredPost.meta_description}
                     </p>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-4 text-sm text-gray-500">
                         <div className="flex items-center">
                           <Calendar className="w-4 h-4 mr-1" />
-                          {new Date(featuredPost.date).toLocaleDateString()}
+                          {featuredPost.publishDate}
                         </div>
                         <div className="flex items-center">
                           <Clock className="w-4 h-4 mr-1" />
-                          {featuredPost.readTime} min read
+                          {featuredPost.readTime}
                         </div>
                       </div>
                       <div className="flex items-center text-brand-600 font-semibold group-hover:translate-x-2 transition-transform">
@@ -120,17 +88,17 @@ export default function BlogIndex() {
                       {post.title}
                     </h3>
                     <p className="text-gray-600 mb-4 line-clamp-3">
-                      {post.description}
+                      {post.meta_description}
                     </p>
                     <div className="flex items-center justify-between text-sm text-gray-500">
                       <div className="flex items-center space-x-3">
                         <div className="flex items-center">
                           <Calendar className="w-3 h-3 mr-1" />
-                          {new Date(post.date).toLocaleDateString()}
+                          {post.publishDate}
                         </div>
                         <div className="flex items-center">
                           <Clock className="w-3 h-3 mr-1" />
-                          {post.readTime} min
+                          {post.readTime}
                         </div>
                       </div>
                     </div>
