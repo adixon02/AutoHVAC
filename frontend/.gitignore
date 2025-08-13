@@ -3,3 +3,7 @@ node_modules
 .env
 
 /lib/generated/prisma
+
+# Prevent blog content from being placed in pages directory
+# (Next.js treats everything in pages/ as a page component)
+/pages/blog/content/
