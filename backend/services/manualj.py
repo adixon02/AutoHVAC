@@ -1474,13 +1474,13 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
             # As discrepancy increases, apply more of the correction
             correction_strength = 0.5 + (area_discrepancy_percent - 20) / 30 * 0.3  # 50% to 80%
             area_correction_factor = 1.0 + (raw_correction - 1.0) * correction_strength
-            area_correction_factor = min(area_correction_factor, 1.2)  # Cap at 1.2x for accuracy
-            logger.warning(f"Moderate area discrepancy ({area_discrepancy_percent:.0f}%): Applying {correction_strength:.0%} correction = {area_correction_factor:.2f} (capped at 1.2x)")
+            # NO CAP - trust the declared square footage more than detected rooms
+            logger.warning(f"Moderate area discrepancy ({area_discrepancy_percent:.0f}%): Applying {correction_strength:.0%} correction = {area_correction_factor:.2f}")
             
         else:
-            # Large discrepancy (>50%): Cap correction factor and flag for review
-            area_correction_factor = min(raw_correction, 1.2)  # Cap at 1.2x
-            logger.error(f"Large area discrepancy ({area_discrepancy_percent:.0f}%): Capping correction at {area_correction_factor:.2f}")
+            # Large discrepancy (>50%): Use full correction factor
+            area_correction_factor = raw_correction  # NO CAP - use full correction
+            logger.error(f"Large area discrepancy ({area_discrepancy_percent:.0f}%): Using full correction at {area_correction_factor:.2f}")
             logger.error(f"Parsed: {total_room_area:.0f} sqft, Declared: {schema.sqft_total:.0f} sqft")
             logger.error("Manual review recommended - parsing may have missed significant areas")
             

@@ -1120,10 +1120,13 @@ class BlueprintParser:
                     "OPENAI_API_KEY is required. AutoHVAC needs GPT-4V for accurate room detection."
                 )
             
-            # GPT-4V is always authoritative and required
-            if os.getenv("USE_GPT4_VISION", "true").lower() == "true":
+            # GPT-4V for room classification and validation
+            use_gpt4v = os.getenv("USE_GPT4_VISION", "true").lower() == "true"
+            geometry_authoritative = os.getenv("GEOMETRY_AUTHORITATIVE", "false").lower() == "true"
+            
+            if use_gpt4v:
                 try:
-                    logger.info("Attempting GPT-4o Vision analysis for complete blueprint parsing and HVAC calculation...")
+                    logger.info("Using GPT-4o Vision for room classification and validation...")
                     from services.gpt4v_blueprint_analyzer import get_gpt4v_analyzer
                     from services.pipeline_context import pipeline_context
                     
@@ -1179,24 +1182,42 @@ class BlueprintParser:
                                 }
                                 logger.info(f"Using GPT-4V detected floor type: {detected_floor_info['type']} (confidence: {detected_floor_info['confidence']:.2f})")
                             
-                            for gpt_room in analysis.rooms:
-                                # CRITICAL: In authoritative mode only - preserve GPT-4V areas
-                                logger.info(f"GPT-4V room '{gpt_room.name}': area={gpt_room.area_sqft} sqft, dims={gpt_room.dimensions_ft}")
+                            # If we have geometry-extracted rooms and GEOMETRY_AUTHORITATIVE is true, use those areas
+                            geometry_rooms = raw_geometry.get('rooms', []) if geometry_authoritative and raw_geometry else []
+                            if geometry_rooms:
+                                logger.info(f"GEOMETRY_AUTHORITATIVE mode: Using areas from {len(geometry_rooms)} geometry-extracted rooms")
+                            
+                            for i, gpt_room in enumerate(analysis.rooms):
+                                # Try to match with geometry-extracted room if available
+                                actual_area = gpt_room.area_sqft
+                                area_source = "gpt4v_detected"
                                 
-                                # Check for zero area (but preserve non-zero areas from GPT-4V)
-                                if gpt_room.area_sqft <= 0:
+                                if geometry_rooms and i < len(geometry_rooms):
+                                    # Use geometry area if available
+                                    geom_area = geometry_rooms[i].get('area', 0)
+                                    if geom_area > 10:  # Valid geometry area
+                                        logger.info(f"Using geometry area {geom_area:.0f} sqft instead of GPT-4V area {gpt_room.area_sqft:.0f} sqft for '{gpt_room.name}'")
+                                        actual_area = geom_area
+                                        area_source = "geometry_extracted"
+                                
+                                logger.info(f"Room '{gpt_room.name}': area={actual_area:.0f} sqft (source: {area_source}), dims={gpt_room.dimensions_ft}")
+                                
+                                # Check for zero area
+                                if actual_area <= 0:
                                     logger.error(f"GPT-4V returned ZERO AREA for room '{gpt_room.name}'! Dimensions: {gpt_room.dimensions_ft}")
                                     # Calculate from dimensions if possible
                                     if gpt_room.dimensions_ft[0] > 0 and gpt_room.dimensions_ft[1] > 0:
                                         calculated_area = gpt_room.dimensions_ft[0] * gpt_room.dimensions_ft[1]
                                         logger.warning(f"Calculated area from dimensions: {calculated_area} sqft")
-                                        gpt_room.area_sqft = calculated_area
+                                        actual_area = calculated_area
+                                        area_source = "calculated"
                                     else:
                                         logger.error(f"Cannot calculate area - no valid dimensions for '{gpt_room.name}'")
-                                        gpt_room.area_sqft = 100  # Default fallback
+                                        actual_area = 100  # Default fallback
+                                        area_source = "fallback"
                                 else:
-                                    # Area is valid from GPT-4V - preserve it in authoritative mode
-                                    logger.info(f"✅ GPT-4V area for '{gpt_room.name}': {gpt_room.area_sqft} sqft (authoritative mode)")
+                                    # Area is valid - log the source
+                                    logger.info(f"✅ Using area for '{gpt_room.name}': {actual_area:.0f} sqft (source: {area_source})")
                                 
                                 room = Room(
                                     name=gpt_room.name,
@@ -1204,13 +1225,13 @@ class BlueprintParser:
                                     floor=1,  # Default to first floor (will be updated by semantic validator)
                                     windows=0,  # Extract from features if needed
                                     orientation="unknown",
-                                    area=gpt_room.area_sqft,
+                                    area=actual_area,  # Use the actual area (geometry or GPT-4V)
                                     room_type=gpt_room.room_type,
                                     confidence=gpt_room.confidence,
                                     center_position=(0.0, 0.0),
                                     label_found=True,
                                     dimensions_source="gpt4o_vision",
-                                    area_source="gpt4v_detected"  # Mark area as from GPT-4V
+                                    area_source=area_source  # Mark the actual source
                                 )
                                 # Store detected floor info if available
                                 if detected_floor_info:

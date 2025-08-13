@@ -210,3 +210,12 @@ LOAD_CALCULATION_IMPROVEMENTS.md
 Network Trash Folder
 Temporary Items
 .apdisk
+
+# Marketing (sensitive competitive intel and strategies)
+/marketing/
+*.market-research
+*.competitor-analysis
+
+# SEO Content Drafts
+/content-drafts/
+/seo-briefs/

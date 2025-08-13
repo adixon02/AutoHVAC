@@ -63,14 +63,8 @@ export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarPr
           <div className="hidden md:flex items-center space-x-8">
             {/* Navigation Links */}
             <div className="flex items-center space-x-8">
-              <Link href="/#features" className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
-                Features
-              </Link>
-              <Link href="/#how-it-works" className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
-                How It Works
-              </Link>
-              <Link href="/pricing" className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
-                Pricing
+              <Link href="/blog" className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">
+                Blog
               </Link>
             </div>
 
@@ -145,25 +139,11 @@ export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarPr
             <div className="flex flex-col space-y-1">
               {/* Navigation Links */}
               <Link 
-                href="/#features" 
+                href="/blog" 
                 className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-all"
                 onClick={() => setIsMenuOpen(false)}
               >
-                Features
-              </Link>
-              <Link 
-                href="/#how-it-works" 
-                className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-all"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                How It Works
-              </Link>
-              <Link 
-                href="/#pricing" 
-                className="text-gray-600 hover:text-brand-700 transition-colors"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                Pricing
+                Blog
               </Link>
 
               {/* User Section */}
