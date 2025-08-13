@@ -37,7 +37,7 @@ const blogPosts = [
   }
 ];
 
-import Navbar from '../../components/Navbar';
+import NavBar from '../../components/NavBar';
 
 export default function BlogIndex() {
   const featuredPost = blogPosts.find(post => post.featured);
@@ -45,7 +45,7 @@ export default function BlogIndex() {
 
   return (
     <>
-      <Navbar />
+      <NavBar />
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white pt-16">
       {/* Header */}
       <div className="bg-gradient-to-r from-brand-600 to-brand-700 text-white">

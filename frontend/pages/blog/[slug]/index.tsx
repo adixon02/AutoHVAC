@@ -2,7 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Calendar, Clock, CheckCircle, Star, ArrowRight } from 'lucide-react';
 import { useRouter } from 'next/router';
-import Navbar from '../../../components/Navbar';
+import NavBar from '../../../components/NavBar';
 
 // In production, this would parse your markdown files or fetch from CMS
 import { blogContent } from '../content/manual-j-calculation-software';
@@ -124,7 +124,7 @@ export default function BlogPost() {
 
   return (
     <>
-      <Navbar />
+      <NavBar />
       <article className="min-h-screen bg-white pt-16">
       {/* Navigation */}
       <div className="max-w-4xl mx-auto px-4 py-4">
