@@ -70,26 +70,37 @@ class OCRExtractor:
 
         if enable_paddle and PADDLEOCR_AVAILABLE:
             try:
-                # Initialize PaddleOCR - simpler is better for compatibility
-                # The new version has deprecated use_angle_cls in favor of use_textline_orientation
+                # Initialize PaddleOCR with optimized settings for faster startup
+                # Use minimal config for blueprints - we don't need all features
                 self.ocr = PaddleOCR(
                     lang="en",  # English language
-                    # Use the new parameter name (use_textline_orientation replaces use_angle_cls)
-                    use_textline_orientation=True,  # Enable text angle detection
-                    # Disable advanced features that aren't needed for blueprints
-                    use_doc_orientation_classify=False,
-                    use_doc_unwarping=False
+                    use_angle_cls=False,  # Disable angle classification for speed
+                    show_log=False,  # Disable verbose logging
+                    use_gpu=self.use_gpu,  # Use GPU if available
+                    enable_mkldnn=False,  # Disable MKL-DNN for compatibility
+                    max_text_length=25,  # Limit text length for blueprints
+                    rec_batch_num=6,  # Smaller batch size for faster processing
+                    det_db_thresh=0.3,  # Detection threshold
+                    det_db_box_thresh=0.5,  # Box threshold
+                    drop_score=0.5  # Drop low confidence results
                 )
-                logger.info("PaddleOCR initialized successfully - enhanced blueprint parsing enabled")
-            except Exception as e:
-                logger.warning(f"PaddleOCR initialization failed: {str(e)}")
-                # Try even simpler initialization
+                logger.info("PaddleOCR initialized with optimized settings - enhanced blueprint parsing enabled")
+            except TypeError as e:
+                # Handle different PaddleOCR versions with different parameters
+                logger.debug(f"PaddleOCR parameter error: {str(e)}, trying simpler config")
                 try:
-                    self.ocr = PaddleOCR(lang="en")
+                    # Fallback to minimal configuration that works across versions
+                    self.ocr = PaddleOCR(
+                        lang="en",
+                        show_log=False
+                    )
                     logger.info("PaddleOCR (minimal config) initialized successfully")
                 except Exception as e2:
                     logger.warning(f"PaddleOCR minimal initialization also failed: {str(e2)}")
                     self.ocr = None
+            except Exception as e:
+                logger.warning(f"PaddleOCR initialization failed: {str(e)}")
+                self.ocr = None
         
         # Fall back to Tesseract if PaddleOCR not available
         if not self.ocr and enable_tesseract and TESSERACT_AVAILABLE:
@@ -193,7 +204,7 @@ class OCRExtractor:
                             ))
             else:
                 # Legacy API for older versions
-                result = self.ocr.ocr(image, cls=True)
+                result = self.ocr.ocr(image, cls=False)  # Disable angle classification for speed
                 
                 if not result or not result[0]:
                     logger.warning("No text detected in image")

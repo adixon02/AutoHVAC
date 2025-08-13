@@ -4,6 +4,7 @@ Uses GPT for semantic classification ONLY - no numerical extraction
 All geometry comes from vector/OCR extraction
 """
 
+import os
 import logging
 import json
 import base64

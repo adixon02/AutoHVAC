@@ -53,15 +53,15 @@ async def cleanup(raw_geo: RawGeometry, raw_text: RawText, zip_code: str = "9021
     system_prompt = _generate_system_prompt()
     
     try:
-        # Call OpenAI API - Use GPT-5 for superior text reasoning
+        # Call OpenAI API - Use GPT-4o for text reasoning
         response = await client.chat.completions.create(
-            model="gpt-5-mini",  # GPT-5 for better text reasoning, mini for cost efficiency
+            model="gpt-4o-mini",  # GPT-4o mini for cost-effective text reasoning
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": context}
             ],
             temperature=0.1,  # Low temperature for consistent output
-            max_completion_tokens=2000,  # Use new parameter for GPT-5 models
+            max_completion_tokens=2000,  # Use new parameter for GPT-4o models
             response_format={"type": "json_object"}
         )
         

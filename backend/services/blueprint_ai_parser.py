@@ -710,7 +710,7 @@ class BlueprintAIParser:
             
             try:
                 response = await self.client.chat.completions.create(
-                    model="gpt-4o-mini",  # Use mini model for faster response
+                    model="gpt-4o-2024-11-20",  # Use the specific GPT-4o model that works for vision
                     messages=[
                         {
                             "role": "user",
@@ -726,7 +726,7 @@ class BlueprintAIParser:
                             ]
                         }
                     ],
-                    max_tokens=2000,  # Increased for comprehensive room lists
+                    max_completion_tokens=2000,  # Use correct parameter name for GPT-4o
                     temperature=0.1,  # Lower temperature for consistent JSON
                     timeout=25  # 25 second timeout for faster failure detection
                 )

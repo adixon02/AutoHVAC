@@ -1,0 +1,133 @@
+/* Blog-specific styles for mobile optimization */
+
+/* Base typography for blog content */
+.blog-content {
+  @apply text-gray-700 leading-relaxed;
+}
+
+/* Mobile-first responsive typography */
+.blog-content p {
+  @apply text-base md:text-lg mb-4 md:mb-6;
+}
+
+.blog-content h2 {
+  @apply text-2xl md:text-3xl font-bold text-gray-900 mt-8 md:mt-12 mb-4 md:mb-6;
+}
+
+.blog-content h3 {
+  @apply text-xl md:text-2xl font-semibold text-gray-900 mt-6 md:mt-8 mb-3 md:mb-4;
+}
+
+/* Lists with proper mobile spacing */
+.blog-content ul {
+  @apply my-4 md:my-6 space-y-2 md:space-y-3;
+}
+
+.blog-content li {
+  @apply flex items-start text-base md:text-lg;
+}
+
+/* Tables with horizontal scroll on mobile */
+.blog-content .table-wrapper {
+  @apply overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0;
+}
+
+.blog-content table {
+  @apply w-full min-w-[600px] md:min-w-0;
+}
+
+/* Mobile-optimized CTA boxes */
+.blog-content .cta-box {
+  @apply p-4 md:p-6 lg:p-8 my-6 md:my-8 lg:my-12 rounded-lg md:rounded-xl;
+}
+
+.blog-content .cta-box h2 {
+  @apply text-xl md:text-2xl lg:text-3xl;
+}
+
+.blog-content .cta-box p {
+  @apply text-base md:text-lg;
+}
+
+/* Info boxes with better mobile padding */
+.blog-content .info-box {
+  @apply p-4 md:p-6 mb-6 md:mb-8 rounded-lg;
+}
+
+/* Mobile-friendly buttons */
+.blog-content .btn-primary {
+  @apply px-4 md:px-6 lg:px-8 py-2.5 md:py-3 lg:py-4 text-sm md:text-base lg:text-lg;
+}
+
+/* Ensure images don't overflow on mobile */
+.blog-content img {
+  @apply max-w-full h-auto rounded-lg;
+}
+
+/* Code blocks with horizontal scroll */
+.blog-content pre {
+  @apply overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0;
+}
+
+/* Featured snippet boxes */
+.blog-content .featured-snippet {
+  @apply bg-brand-50 border-l-4 border-brand-600 p-4 md:p-6 mb-6 md:mb-8 rounded-lg;
+}
+
+/* FAQ items */
+.blog-content .faq-item {
+  @apply bg-white rounded-lg shadow-sm border border-gray-200 p-4 md:p-6 mb-4 md:mb-6;
+}
+
+.blog-content .faq-item h3 {
+  @apply text-lg md:text-xl font-bold text-gray-900 mb-2 md:mb-3;
+}
+
+/* Comparison tables */
+.blog-content .comparison-table th {
+  @apply text-sm md:text-base px-2 md:px-4 py-2 md:py-3;
+}
+
+.blog-content .comparison-table td {
+  @apply text-sm md:text-base px-2 md:px-4 py-2 md:py-3;
+}
+
+/* Mobile-first breakpoints for specific content */
+@media (max-width: 640px) {
+  /* Reduce font sizes on very small screens */
+  .blog-content .hero-title {
+    @apply text-2xl;
+  }
+  
+  /* Stack grid items on mobile */
+  .blog-content .grid-cols-2 {
+    @apply grid-cols-1;
+  }
+  
+  /* Full-width CTAs on mobile */
+  .blog-content .cta-button {
+    @apply w-full text-center;
+  }
+  
+  /* Smaller padding on mobile */
+  .blog-content .section-padding {
+    @apply px-4 py-6;
+  }
+}
+
+/* Tablet optimizations */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .blog-content .container {
+    @apply px-6;
+  }
+}
+
+/* Ensure good tap targets on mobile */
+.blog-content a {
+  @apply inline-block min-h-[44px] min-w-[44px] flex items-center justify-center;
+}
+
+/* Mobile-optimized quote blocks */
+.blog-content blockquote {
+  @apply border-l-4 border-brand-600 pl-4 md:pl-6 py-2 my-4 md:my-6 text-base md:text-lg italic;
+}

@@ -2,6 +2,7 @@ import { blogContent as hvacLoadCalculations } from './hvac-load-calculations';
 import { blogContent as manualJCalculationSoftware } from './manual-j-calculation-software';
 import { blogContent as manualJVsRuleOfThumb } from './manual-j-vs-rule-of-thumb';
 import { blogContent as acTonnageCalculator } from './ac-tonnage-calculator';
+import { blogContent as howManyBtus } from './how-many-btus';
 
 export interface BlogPost {
   title: string;
@@ -20,6 +21,7 @@ export const blogPosts: { [slug: string]: BlogPost } = {
   'manual-j-calculation-software': manualJCalculationSoftware,
   'manual-j-vs-rule-of-thumb': manualJVsRuleOfThumb,
   'ac-tonnage-calculator': acTonnageCalculator,
+  'how-many-btus': howManyBtus,
 };
 
 // Get all blog posts as an array
