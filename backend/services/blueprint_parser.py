@@ -1110,19 +1110,18 @@ class BlueprintParser:
     
     def _perform_ai_analysis(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], zip_code: str, metadata: ParsingMetadata, project_id: Optional[str] = None, page_num: Optional[int] = None, floor_label: Optional[str] = None, previous_floors: Optional[List[Dict]] = None, use_discovery_mode: bool = False) -> List[Room]:
         """Perform AI analysis to identify rooms with validation"""
+        # Check GPT-4V setting first (before try block)
+        import os
+        use_gpt4v = os.getenv("USE_GPT4_VISION", "false").lower() == "true"
+        geometry_authoritative = os.getenv("GEOMETRY_AUTHORITATIVE", "false").lower() == "true"
+        
         try:
             # GPT-4V is REQUIRED for accurate room detection
-            import os
-            
             # Always use GPT-4V for room detection - no fallbacks
             if not os.getenv("OPENAI_API_KEY"):
                 raise ValueError(
                     "OPENAI_API_KEY is required. AutoHVAC needs GPT-4V for accurate room detection."
                 )
-            
-            # GPT-4V for room classification and validation (disabled by default - not working well)
-            use_gpt4v = os.getenv("USE_GPT4_VISION", "false").lower() == "true"
-            geometry_authoritative = os.getenv("GEOMETRY_AUTHORITATIVE", "false").lower() == "true"
             
             if use_gpt4v:
                 try:
