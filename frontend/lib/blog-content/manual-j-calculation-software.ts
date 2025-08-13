@@ -1,6 +1,7 @@
 export const blogContent = {
   title: "Manual J Calculation Software: AI-Powered HVAC Load Calculator (2025)",
   slug: "manual-j-calculation-software",
+  meta_description: "Discover AI-powered Manual J calculation software that delivers ACCA-compliant load calculations in 60 seconds. Compare top tools and get your free report.",
   content: `
     <div class="bg-brand-50 border-l-4 border-brand-600 p-4 mb-8 rounded-lg">
       <p class="font-semibold text-brand-900">💡 Quick Summary:</p>
