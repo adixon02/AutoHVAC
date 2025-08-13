@@ -65,12 +65,17 @@ class GeometryExtractor:
         _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
         
         # Find contours (potential room boundaries)
-        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Use RETR_TREE to find ALL contours including interior rooms
+        contours, hierarchy = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         
         rooms = []
         all_points = []
         
-        for contour in contours:
+        # Process contours, but skip ones that have a parent (to avoid duplicates)
+        for i, contour in enumerate(contours):
+            # Skip if this contour has a parent (hierarchy[0][i][3] != -1)
+            if hierarchy is not None and hierarchy[0][i][3] != -1:
+                continue
             # Calculate area in pixels
             area_px = cv2.contourArea(contour)
             

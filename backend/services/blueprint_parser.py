@@ -1120,8 +1120,8 @@ class BlueprintParser:
                     "OPENAI_API_KEY is required. AutoHVAC needs GPT-4V for accurate room detection."
                 )
             
-            # GPT-4V for room classification and validation
-            use_gpt4v = os.getenv("USE_GPT4_VISION", "true").lower() == "true"
+            # GPT-4V for room classification and validation (disabled by default - not working well)
+            use_gpt4v = os.getenv("USE_GPT4_VISION", "false").lower() == "true"
             geometry_authoritative = os.getenv("GEOMETRY_AUTHORITATIVE", "false").lower() == "true"
             
             if use_gpt4v:

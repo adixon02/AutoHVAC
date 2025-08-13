@@ -24,7 +24,7 @@ S3_BUCKET_NAME=<your-bucket>
 # Parsing configuration (NEW - add these)
 PARSING_MODE=traditional_first
 GEOMETRY_AUTHORITATIVE=true
-USE_GPT4_VISION=true
+USE_GPT4_VISION=false  # Disabled - GPT-4V not accurate for measurements
 MULTI_FLOOR_ENABLED=true
 MIN_FLOOR_PLAN_SCORE=100
 
