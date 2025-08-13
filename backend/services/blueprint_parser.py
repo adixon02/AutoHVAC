@@ -1010,7 +1010,18 @@ class BlueprintParser:
             metadata.geometry_confidence = self._calculate_geometry_confidence(raw_geometry)
             
             logger.info(f"Geometry extraction successful: {len(geometry_elements)} elements")
-            return raw_geometry.__dict__, geometry_elements
+            
+            # Ensure scale and north are properly preserved in the dictionary
+            geometry_dict = raw_geometry.__dict__
+            if hasattr(raw_geometry, 'scale_result') and raw_geometry.scale_result:
+                geometry_dict['scale_factor'] = raw_geometry.scale_result.scale_factor
+                geometry_dict['scale_confidence'] = raw_geometry.scale_result.confidence
+                logger.info(f"Preserving scale in geometry dict: {geometry_dict['scale_factor']} px/ft")
+            if hasattr(raw_geometry, 'north_angle'):
+                geometry_dict['north_angle'] = raw_geometry.north_angle
+                logger.info(f"Preserving north angle in geometry dict: {geometry_dict['north_angle']}°")
+            
+            return geometry_dict, geometry_elements
             
         except PDFProcessingTimeoutError as e:
             logger.error(f"Geometry extraction timed out: {str(e)}")
@@ -1079,9 +1090,17 @@ class BlueprintParser:
     def _perform_ai_analysis(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], zip_code: str, metadata: ParsingMetadata, project_id: Optional[str] = None, page_num: Optional[int] = None, floor_label: Optional[str] = None, previous_floors: Optional[List[Dict]] = None, use_discovery_mode: bool = False) -> List[Room]:
         """Perform AI analysis to identify rooms with validation"""
         try:
-            # First try GPT-4 Vision if available for maximum accuracy
+            # Check AI_MODE environment variable
             import os
-            if os.getenv("OPENAI_API_KEY") and os.getenv("USE_GPT4_VISION", "true").lower() == "true":
+            ai_mode = os.getenv("AI_MODE", "assist").lower()
+            
+            if ai_mode == "off":
+                logger.info("[AI] Mode=off; geometry is authoritative - skipping AI analysis")
+                metadata.ai_status = ParsingStatus.SKIPPED
+                return []  # Return empty list to use geometry-only approach
+            
+            # First try GPT-4 Vision if available for maximum accuracy
+            if os.getenv("OPENAI_API_KEY") and os.getenv("USE_GPT4_VISION", "true").lower() == "true" and ai_mode == "authoritative":
                 try:
                     logger.info("Attempting GPT-4o Vision analysis for complete blueprint parsing and HVAC calculation...")
                     from services.gpt4v_blueprint_analyzer import get_gpt4v_analyzer
@@ -1140,7 +1159,7 @@ class BlueprintParser:
                                 logger.info(f"Using GPT-4V detected floor type: {detected_floor_info['type']} (confidence: {detected_floor_info['confidence']:.2f})")
                             
                             for gpt_room in analysis.rooms:
-                                # CRITICAL: Log GPT-4V areas to trace propagation
+                                # CRITICAL: In authoritative mode only - preserve GPT-4V areas
                                 logger.info(f"GPT-4V room '{gpt_room.name}': area={gpt_room.area_sqft} sqft, dims={gpt_room.dimensions_ft}")
                                 
                                 # Check for zero area (but preserve non-zero areas from GPT-4V)
@@ -1155,8 +1174,8 @@ class BlueprintParser:
                                         logger.error(f"Cannot calculate area - no valid dimensions for '{gpt_room.name}'")
                                         gpt_room.area_sqft = 100  # Default fallback
                                 else:
-                                    # Area is valid from GPT-4V - preserve it!
-                                    logger.info(f"✅ Preserving GPT-4V area for '{gpt_room.name}': {gpt_room.area_sqft} sqft")
+                                    # Area is valid from GPT-4V - preserve it in authoritative mode
+                                    logger.info(f"✅ GPT-4V area for '{gpt_room.name}': {gpt_room.area_sqft} sqft (authoritative mode)")
                                 
                                 room = Room(
                                     name=gpt_room.name,
@@ -1620,7 +1639,15 @@ class BlueprintParser:
         # Use building typology for accurate area and story calculations
         if building_typology:
             total_area = building_typology.total_conditioned_area
-            stories = int(building_typology.actual_stories) if building_typology.actual_stories >= 1 else 1
+            # CRITICAL FIX: Never collapse multi-story to 1 story
+            typology_stories = int(building_typology.actual_stories) if building_typology.actual_stories >= 1 else 1
+            # If we have multiple floors processed, use that count even if typology disagrees
+            if floors_processed and len(floors_processed) > 1:
+                stories = max(typology_stories, len(floors_processed))
+                if typology_stories < len(floors_processed):
+                    logger.warning(f"⚠️ Typology says {typology_stories} stories but we processed {len(floors_processed)} floors - using {stories}")
+            else:
+                stories = typology_stories
             logger.info(f"Using typology-validated area: {total_area:.0f} sqft, stories: {stories}")
         else:
             # Fallback to simple calculation
@@ -1754,12 +1781,22 @@ class BlueprintParser:
         
         if isinstance(raw_geometry, dict):
             scale_px_per_ft = raw_geometry.get('scale_factor', raw_geometry.get('detected_scale'))
-            # Default confidence if scale exists but no confidence provided
-            scale_confidence = 0.95 if scale_px_per_ft else None
+            # Use actual confidence if available, otherwise default
+            scale_confidence = raw_geometry.get('scale_confidence', 0.95 if scale_px_per_ft else None)
             north_bearing_deg = raw_geometry.get('north_angle')
             if north_bearing_deg is not None:
                 north_confidence = 0.90  # Default confidence for detected north arrow
                 orientation_source = "vector_north_arrow"
+            
+            # Log what we found for debugging
+            if scale_px_per_ft:
+                logger.info(f"[PROPAGATION] Scale found: {scale_px_per_ft} px/ft (confidence: {scale_confidence})")
+            else:
+                logger.warning("[PROPAGATION] No scale found in raw_geometry")
+            if north_bearing_deg is not None:
+                logger.info(f"[PROPAGATION] North found: {north_bearing_deg}° (confidence: {north_confidence})")
+            else:
+                logger.warning("[PROPAGATION] No north angle found in raw_geometry")
         
         return BlueprintSchema(
             project_id=project_id,

@@ -31,6 +31,10 @@
    PARSING_MODE=traditional_first  # Use geometry/text extraction first, AI for enhancement
    MIN_CONFIDENCE_THRESHOLD=0.5    # Lower threshold for validation gates
    SCALE_OVERRIDE=48               # Force 1/4"=1' scale if known (48 px/ft)
+   
+   # HVAC Calculation Control (Dec 2024 fixes)
+   AI_MODE=off                     # Disable AI geometry override (off/assist/authoritative)
+   ALLOW_GENERATED_SPACES=false    # Disable fake room generation
    ```
 
 3. **Run the server:**

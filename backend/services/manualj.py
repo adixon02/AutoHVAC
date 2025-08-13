@@ -3,6 +3,7 @@ ACCA Manual J Load Calculation Engine
 Implements simplified Manual J algorithms for HVAC sizing
 """
 
+import os
 from typing import Dict, Any, List, Optional
 from app.parser.schema import BlueprintSchema, Room
 from .climate_data import get_climate_data, get_climate_zone_factors, get_construction_vintage_values
@@ -1067,8 +1068,9 @@ def _generate_missing_common_spaces(parsed_area: float, declared_area: float, ex
                 })
                 missing_area -= space_area
     
-    # If still significant missing area, add as "Unaccounted Space"
-    if missing_area > 100:
+    # If still significant missing area, add as "Unaccounted Space" (if enabled)
+    allow_unaccounted = os.getenv("ALLOW_GENERATED_SPACES", "false").lower() == "true"
+    if missing_area > 100 and allow_unaccounted:
         generated_rooms.append({
             "name": "Unaccounted Space (Generated)",
             "area": missing_area,
@@ -1189,9 +1191,10 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     total_cooling = 0.0
     
     # Define unconditioned room types that should be excluded from load calculations
+    # NOTE: Storage removed - storage in bonus areas should be conditioned
     UNCONDITIONED_ROOM_TYPES = {
         'garage', 'porch', 'attic', 'crawlspace', 'mechanical', 
-        'deck', 'patio', 'storage', 'unfinished', 'exterior'
+        'deck', 'patio', 'unfinished', 'exterior'
     }
     
     # Filter out unconditioned spaces BEFORE any calculations
@@ -1204,6 +1207,16 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
         
         # Check if room name contains any unconditioned keywords
         is_unconditioned = any(uncond in room_name_lower for uncond in UNCONDITIONED_ROOM_TYPES)
+        
+        # Special handling for storage rooms - they're conditioned if in bonus area or upper floor
+        if 'storage' in room_name_lower:
+            # Storage in bonus areas or upper floors is conditioned
+            if 'bonus' in room_name_lower or room.floor > 1:
+                is_unconditioned = False
+                logger.info(f"Storage room '{room.name}' on floor {room.floor} marked as CONDITIONED (bonus/upper floor)")
+            else:
+                # Standalone storage on ground floor is unconditioned
+                is_unconditioned = True
         
         if is_unconditioned:
             excluded_rooms.append(room)
@@ -1303,12 +1316,19 @@ def calculate_manualj(schema: BlueprintSchema, duct_config: str = "ducted_attic"
     if orientation_applied:
         logger.info(f"Orientation applied to {len(rooms_to_process)} rooms")
     
-    # If significant area is missing and we have few rooms, generate common spaces
-    if area_discrepancy_percent > 30 and len(schema.rooms) < 10:
+    # If significant area is missing and we have few rooms, generate common spaces (if enabled)
+    allow_generated = os.getenv("ALLOW_GENERATED_SPACES", "false").lower() == "true"
+    
+    if area_discrepancy_percent > 30 and len(schema.rooms) < 10 and allow_generated:
         logger.warning(f"Significant area missing ({area_discrepancy_percent:.0f}%) and only {len(schema.rooms)} rooms found")
         logger.warning("Generating typical missing common spaces for more accurate load calculations")
         
-        generated_spaces = _generate_missing_common_spaces(total_room_area, schema.sqft_total, schema.rooms)
+        # Only generate if gap is reasonable (< 50%)
+        if area_discrepancy_percent < 50:
+            generated_spaces = _generate_missing_common_spaces(total_room_area, schema.sqft_total, schema.rooms)
+        else:
+            logger.error(f"Area gap too large ({area_discrepancy_percent:.0f}%) - not generating fake rooms")
+            generated_spaces = []
         
         # Convert generated spaces to Room objects
         for space_data in generated_spaces:
