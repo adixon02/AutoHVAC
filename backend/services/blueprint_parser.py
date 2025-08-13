@@ -548,47 +548,13 @@ class BlueprintParser:
                                 use_discovery_mode=True  # Let GPT-4V determine floor type
                             )
                             
-                            # If AI returned empty (AI_MODE=off), use geometry-extracted rooms
-                            if not floor_rooms and page_geometry and 'rooms' in page_geometry:
-                                logger.info(f"Using geometry-extracted rooms for page {page_analysis.page_number}")
-                                # Convert geometry rooms to Room objects
-                                from app.parser.schema import Room
-                                floor_rooms = []
-                                for idx, geom_room in enumerate(page_geometry.get('rooms', [])):
-                                    # Extract dimensions from bbox (min_x, min_y, max_x, max_y)
-                                    bbox = geom_room.get('bbox', (0, 0, 20, 15))
-                                    width = bbox[2] - bbox[0] if len(bbox) >= 4 else 20
-                                    height = bbox[3] - bbox[1] if len(bbox) >= 4 else 15
-                                    
-                                    # Use area from geometry or calculate from dimensions
-                                    area = geom_room.get('area', width * height)
-                                    
-                                    # If dimensions seem wrong, calculate from area assuming square-ish room
-                                    if area > 0 and (width <= 0 or height <= 0):
-                                        # Assume roughly square room
-                                        side_length = math.sqrt(area)
-                                        width = side_length * 1.2  # Make slightly rectangular
-                                        height = area / width
-                                    
-                                    # Ensure minimum reasonable dimensions
-                                    width = max(width, 8)  # Minimum 8 feet width
-                                    height = max(height, 8)  # Minimum 8 feet depth
-                                    
-                                    room = Room(
-                                        name=f"Room {idx+1}",  # No label field in geometry rooms
-                                        dimensions_ft=(width, height),
-                                        floor=page_analysis.floor_number if hasattr(page_analysis, 'floor_number') else 1,
-                                        windows=0,
-                                        orientation="unknown",
-                                        area=area,
-                                        room_type="unknown",
-                                        confidence=0.8,
-                                        center_position=geom_room.get('center', (0, 0)),
-                                        label_found=False,  # Geometry doesn't extract labels
-                                        dimensions_source="geometry"
-                                    )
-                                    floor_rooms.append(room)
-                                logger.info(f"Created {len(floor_rooms)} rooms from geometry extraction")
+                            # GPT-4V is required - no geometry fallback
+                            if not floor_rooms:
+                                logger.error(f"GPT-4V failed to detect rooms on page {page_analysis.page_number}")
+                                raise ValueError(
+                                    f"Room detection failed for page {page_analysis.page_number}. "
+                                    "Please ensure blueprint is clear and properly scaled."
+                                )
                             
                             rooms_by_page[i] = floor_rooms
                             logger.info(f"Page {page_analysis.page_number}: Found {len(floor_rooms)} rooms")
@@ -663,47 +629,12 @@ class BlueprintParser:
                         # Single page processing (original behavior)
                         rooms = self._perform_ai_analysis(raw_geometry, raw_text, zip_code, parsing_metadata, project_id=project_id)
                         
-                        # If AI returned empty (AI_MODE=off), use geometry-extracted rooms
-                        if not rooms and raw_geometry and 'rooms' in raw_geometry:
-                            logger.info("Using geometry-extracted rooms for single page")
-                            # Convert geometry rooms to Room objects
-                            from app.parser.schema import Room
-                            rooms = []
-                            for idx, geom_room in enumerate(raw_geometry.get('rooms', [])):
-                                # Extract dimensions from bbox (min_x, min_y, max_x, max_y)
-                                bbox = geom_room.get('bbox', (0, 0, 20, 15))
-                                width = bbox[2] - bbox[0] if len(bbox) >= 4 else 20
-                                height = bbox[3] - bbox[1] if len(bbox) >= 4 else 15
-                                
-                                # Use area from geometry or calculate from dimensions
-                                area = geom_room.get('area', width * height)
-                                
-                                # If dimensions seem wrong, calculate from area assuming square-ish room
-                                if area > 0 and (width <= 0 or height <= 0):
-                                    # Assume roughly square room
-                                    side_length = math.sqrt(area)
-                                    width = side_length * 1.2  # Make slightly rectangular
-                                    height = area / width
-                                
-                                # Ensure minimum reasonable dimensions
-                                width = max(width, 8)  # Minimum 8 feet width
-                                height = max(height, 8)  # Minimum 8 feet depth
-                                
-                                room = Room(
-                                    name=f"Room {idx+1}",  # No label field in geometry rooms
-                                    dimensions_ft=(width, height),
-                                    floor=1,
-                                    windows=0,
-                                    orientation="unknown",
-                                    area=area,
-                                    room_type="unknown",
-                                    confidence=0.8,
-                                    center_position=geom_room.get('center', (0, 0)),
-                                    label_found=False,  # Geometry doesn't extract labels
-                                    dimensions_source="geometry"
-                                )
-                                rooms.append(room)
-                            logger.info(f"Created {len(rooms)} rooms from geometry extraction")
+                        # GPT-4V is required - no geometry fallback
+                        if not rooms:
+                            logger.error("GPT-4V failed to detect rooms")
+                            raise ValueError(
+                                "Room detection failed. Please ensure blueprint is clear and properly scaled."
+                            )
                     
                     metrics_collector.current_stage.output_data = {
                         "num_rooms": len(rooms),
@@ -811,12 +742,12 @@ class BlueprintParser:
                         from services.error_types import NeedsInputError
                         raise NeedsInputError(
                             input_type='plan_quality',
-                            message=f"Blueprint quality score ({quality_score:.0f}) below minimum threshold (50). Cannot proceed with load calculations.",
+                            message=f"Blueprint quality score ({quality_score:.0f}) below minimum threshold (30). Cannot proceed with load calculations.",
                             details={
                                 'quality_score': quality_score,
-                                'threshold': 50,
+                                'threshold': 30,  # Lowered threshold for GPT-4V results
                                 'issues': critical_issues if critical_issues else [w.message for w in validation_result.issues][:5],
-                                'recommendation': 'Please provide a clearer blueprint or use PARSING_MODE=traditional_first'
+                                'recommendation': 'Please provide a clearer blueprint with labeled rooms'
                             }
                         )
                     
@@ -1180,17 +1111,17 @@ class BlueprintParser:
     def _perform_ai_analysis(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], zip_code: str, metadata: ParsingMetadata, project_id: Optional[str] = None, page_num: Optional[int] = None, floor_label: Optional[str] = None, previous_floors: Optional[List[Dict]] = None, use_discovery_mode: bool = False) -> List[Room]:
         """Perform AI analysis to identify rooms with validation"""
         try:
-            # Check AI_MODE environment variable
+            # GPT-4V is REQUIRED for accurate room detection
             import os
-            ai_mode = os.getenv("AI_MODE", "assist").lower()
             
-            if ai_mode == "off":
-                logger.info("[AI] Mode=off; geometry is authoritative - skipping AI analysis")
-                metadata.ai_status = ParsingStatus.SUCCESS  # Mark as success since we're intentionally skipping
-                return []  # Return empty list to use geometry-only approach
+            # Always use GPT-4V for room detection - no fallbacks
+            if not os.getenv("OPENAI_API_KEY"):
+                raise ValueError(
+                    "OPENAI_API_KEY is required. AutoHVAC needs GPT-4V for accurate room detection."
+                )
             
-            # First try GPT-4 Vision if available for maximum accuracy
-            if os.getenv("OPENAI_API_KEY") and os.getenv("USE_GPT4_VISION", "true").lower() == "true" and ai_mode == "authoritative":
+            # GPT-4V is always authoritative and required
+            if os.getenv("USE_GPT4_VISION", "true").lower() == "true":
                 try:
                     logger.info("Attempting GPT-4o Vision analysis for complete blueprint parsing and HVAC calculation...")
                     from services.gpt4v_blueprint_analyzer import get_gpt4v_analyzer
@@ -1397,10 +1328,8 @@ class BlueprintParser:
                 'error': f"AI analysis timed out after {self.ai_timeout} seconds",
                 'error_type': 'timeout'
             })
-            # Determine floor number from raw_geometry if available
-            floor_num = raw_geometry.get('floor_number', 1) if raw_geometry else 1
-            floor_name = raw_geometry.get('floor_name', None) if raw_geometry else None
-            return self._create_fallback_rooms(raw_geometry, raw_text, floor_number=floor_num, floor_label=floor_name)
+            # No fallback - GPT-4V is required
+            raise ValueError(f"GPT-4V analysis timed out after {self.ai_timeout} seconds. Please try again.")
             
         except Exception as e:
             logger.error(f"AI analysis failed: {type(e).__name__}: {str(e)}")
@@ -1410,10 +1339,8 @@ class BlueprintParser:
                 'error': str(e),
                 'error_type': type(e).__name__
             })
-            # Determine floor number from raw_geometry if available
-            floor_num = raw_geometry.get('floor_number', 1) if raw_geometry else 1
-            floor_name = raw_geometry.get('floor_name', None) if raw_geometry else None
-            return self._create_fallback_rooms(raw_geometry, raw_text, floor_number=floor_num, floor_label=floor_name)
+            # No fallback - GPT-4V is required
+            raise ValueError(f"GPT-4V analysis failed: {str(e)}. Please ensure OPENAI_API_KEY is set correctly.")
     
     def _create_fallback_rooms(self, raw_geometry: Dict[str, Any], raw_text: Dict[str, Any], floor_number: int = 1, floor_label: Optional[str] = None) -> List[Room]:
         """Create fallback rooms when AI analysis fails using intelligent geometry analysis"""

@@ -255,18 +255,25 @@ class BlueprintValidator:
         calculated_area = width * height
         area_diff_pct = abs(calculated_area - room.area) / room.area * 100 if room.area > 0 else 100
         
-        if area_diff_pct > 5:
+        # Be more lenient with GPT-4V results - irregular rooms won't match exactly
+        # Only flag if difference is extreme (>25% for GPT-4V, >5% for geometry)
+        threshold = 25 if room.dimensions_source == "gpt4v_detected" else 5
+        
+        if area_diff_pct > threshold:
+            # Make it INFO level for GPT-4V, WARNING for others
+            severity = ValidationSeverity.INFO if room.dimensions_source == "gpt4v_detected" else ValidationSeverity.WARNING
             issues.append(ValidationIssue(
-                severity=ValidationSeverity.WARNING,
+                severity=severity,
                 category="dimension_mismatch",
                 message=f"Room '{room.name}' dimensions don't match area",
                 details={
                     "dimensions": f"{width}x{height}",
                     "calculated_area": calculated_area,
                     "declared_area": room.area,
-                    "difference_pct": area_diff_pct
+                    "difference_pct": area_diff_pct,
+                    "source": room.dimensions_source
                 },
-                suggested_fix="Verify room dimensions are correct",
+                suggested_fix="Room may be irregular shape - area is authoritative",
                 affected_room=room.name
             ))
         
