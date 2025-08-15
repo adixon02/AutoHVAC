@@ -18,7 +18,7 @@ from app.services.s3_storage import storage_service
 from pipeline_v3 import run_pipeline_v3
 from services.report_generator import ValueReportGenerator
 
-# Import Redis job storage
+# Import job storage
 from app.services.job_storage import job_storage
 
 logger = logging.getLogger(__name__)
@@ -90,6 +90,10 @@ async def upload_blueprint(
         # Generate unique job ID
         job_id = str(uuid.uuid4())
         
+        # CRITICAL: Get user info FIRST to determine is_first_report
+        user = user_service.get_or_create_user(email, session)
+        is_first_report = not user.free_report_used and should_process_immediately
+        
         # CRITICAL: Create job record IMMEDIATELY to prevent 404 race condition
         from datetime import datetime
         initial_status = "processing" if should_process_immediately else "pending_upgrade"
@@ -106,10 +110,11 @@ async def upload_blueprint(
             "result": None,
             "error": None,
             "needs_upgrade": needs_upgrade,
-            "saved_file_path": None  # Will store S3 path for pending jobs
+            "saved_file_path": None,  # Will store S3 path for pending jobs
+            "is_first_report": is_first_report
         }
         
-        # Save to Redis (with fallback to in-memory for local dev)
+        # Save to PostgreSQL (with Redis cache)
         job_storage.save_job(job_id, job_data)
         
         # Validate file type
@@ -135,10 +140,7 @@ async def upload_blueprint(
         s3_path = await storage_service.save_upload(job_id, content, file.filename)
         job_storage.update_job(job_id, {"saved_file_path": s3_path})
         
-        # CRITICAL: Mark free report as used if this is a new user's first report
-        # Also ensure user exists with device fingerprint tracking
-        user = user_service.get_or_create_user(email, session)
-        is_first_report = not user.free_report_used and should_process_immediately
+        # User already created above, just use the existing user object
         
         # 🎯 COLLECT ENHANCED USER INPUTS: Maximum accuracy data for pipeline_v3
         form_inputs = {
