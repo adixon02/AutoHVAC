@@ -3,6 +3,13 @@ import { blogContent as manualJCalculationSoftware } from './manual-j-calculatio
 import { blogContent as manualJVsRuleOfThumb } from './manual-j-vs-rule-of-thumb';
 import { blogContent as acTonnageCalculator } from './ac-tonnage-calculator';
 import { blogContent as howManyBtus } from './how-many-btus';
+import { blogContent as heatPumpSizing } from './heat-pump-sizing';
+import { blogContent as furnaceSizing2000SqFt } from './furnace-sizing-2000-sq-ft';
+import { blogContent as hvacSizingChart } from './hvac-sizing-chart';
+import { blogContent as blueprintToHvacCalculation } from './blueprint-to-hvac-calculation';
+import { blogContent as hvacCalculationMistakes } from './hvac-calculation-mistakes';
+import { blogContent as freeManualJCalculatorVsPaid } from './free-manual-j-calculator-vs-paid';
+import { blogContent as emergencyAcReplacement } from './emergency-ac-replacement';
 
 export interface BlogPost {
   title: string;
@@ -22,6 +29,13 @@ export const blogPosts: { [slug: string]: BlogPost } = {
   'manual-j-vs-rule-of-thumb': manualJVsRuleOfThumb,
   'ac-tonnage-calculator': acTonnageCalculator,
   'how-many-btus': howManyBtus,
+  'heat-pump-sizing': heatPumpSizing,
+  'furnace-sizing-2000-sq-ft': furnaceSizing2000SqFt,
+  'hvac-sizing-chart': hvacSizingChart,
+  'blueprint-to-hvac-calculation': blueprintToHvacCalculation,
+  'hvac-calculation-mistakes': hvacCalculationMistakes,
+  'free-manual-j-calculator-vs-paid': freeManualJCalculatorVsPaid,
+  'emergency-ac-replacement': emergencyAcReplacement,
 };
 
 // Get all blog posts as an array

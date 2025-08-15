@@ -22,43 +22,36 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - REDIS_URL=redis://redis:6379/0
-      - DATABASE_URL=postgresql://autohvac:autohvac@postgres:5432/autohvac
+      # Core pipeline_v3 requirements
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - USE_GPT4V_PARSING=${USE_GPT4V_PARSING}
+      - PYTHONUNBUFFERED=1
+      # Stripe for billing functionality
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
       - STRIPE_PRICE_ID=${STRIPE_PRICE_ID}
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-      - MINIO_ENDPOINT=http://minio:9000
-    volumes:
-      - ./backend:/app
-    depends_on:
-      - redis
-      - postgres
-      - minio
-
-  worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
-    command: celery -A tasks.parse_blueprint worker --loglevel=info --concurrency=2
-    environment:
+      # Local development database (optional - pipeline_v3 uses in-memory jobs)
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql://autohvac:autohvac@postgres:5432/autohvac
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - USE_GPT4V_PARSING=${USE_GPT4V_PARSING}
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-      - MINIO_ENDPOINT=http://minio:9000
     volumes:
       - ./backend:/app
     depends_on:
       - redis
       - postgres
-      - minio
+
+  # Note: Pipeline V3 handles jobs asynchronously within the web process
+  # No separate worker needed for local development
+  # Uncomment below if you want to test with separate worker process
+  # worker:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile.dev
+  #   command: ./start_worker.sh
+  #   environment:
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #     - PYTHONUNBUFFERED=1
+  #   volumes:
+  #     - ./backend:/app
 
   redis:
     image: redis:7-alpine
@@ -78,23 +71,8 @@ services:
       - postgres_data:/var/lib/postgresql/data
     command: postgres -c 'max_connections=200'
 
-  minio:
-    image: minio/minio:latest
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-    volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
+  # Note: Production uses S3 via Render
+  # For local development, files are stored temporarily and don't persist
 
 volumes:
   postgres_data:
-  minio_data:

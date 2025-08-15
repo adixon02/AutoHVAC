@@ -162,8 +162,9 @@ blueprint-example-*.pdf
 /blueprint-example-*.pdf
 
 # Test blueprints folder (contains proprietary test data)
-test blueprints/
-/test blueprints/
+test_blueprints/
+/test_blueprints/
+backend/tests/test_blueprints/
 
 # Internal development documentation
 austin-claude-prompts.md
@@ -219,3 +220,6 @@ Temporary Items
 # SEO Content Drafts
 /content-drafts/
 /seo-briefs/
+
+# Archive folder (old code versions)
+/archive/

@@ -4,6 +4,7 @@ import FeatureSteps from '../components/FeatureSteps'
 import Testimonials from '../components/Testimonials'
 import MultiStepUpload from '../components/MultiStepUpload'
 import NavBar from '../components/NavBar'
+import SEOHead from '../components/SEOHead'
 import Cookies from 'js-cookie'
 
 export default function Home() {
@@ -25,8 +26,44 @@ export default function Home() {
     setIsUploadModalOpen(true)
   }
 
+  // SEO data for homepage
+  const seoData = {
+    title: "AutoHVAC - AI-Powered HVAC Load Calculator | Instant Manual J Reports",
+    description: "Get instant, accurate HVAC load calculations with AutoHVAC's AI-powered Manual J calculator. Professional reports in 60 seconds. First report free, no credit card required.",
+    canonicalUrl: "https://autohvac.ai",
+    image: "https://autohvac.ai/og-homepage.png",
+    tags: ["HVAC calculator", "Manual J software", "load calculation", "AC tonnage calculator", "residential HVAC", "AI HVAC tools"],
+    faqs: [
+      {
+        question: "How accurate are AutoHVAC's load calculations?",
+        answer: "AutoHVAC uses ACCA Manual J 8th Edition procedures with AI-powered automation. Our calculations match professional desktop software while delivering results 100x faster in just 60 seconds."
+      },
+      {
+        question: "Do I need to create an account to use AutoHVAC?",
+        answer: "No, your first HVAC load calculation is completely free with no account required. Simply upload your plans and get instant results. Create an account only if you want to save reports or get additional calculations."
+      },
+      {
+        question: "What file types can I upload for HVAC calculations?",
+        answer: "AutoHVAC accepts PDF blueprints, CAD files (DWG, DXF), image files (JPG, PNG), and building plans in most common formats. Our AI can analyze any clear architectural drawing or floor plan."
+      },
+      {
+        question: "How quickly will I receive my HVAC load report?",
+        answer: "Most reports are generated in 60 seconds or less. Our AI analyzes your blueprints instantly and provides comprehensive Manual J calculations with equipment recommendations in under a minute."
+      },
+      {
+        question: "Is AutoHVAC suitable for professional HVAC contractors?",
+        answer: "Yes, AutoHVAC is designed for HVAC professionals, contractors, and engineers who need fast, accurate, ACCA-compliant load calculations. Our reports meet professional standards and include detailed room-by-room analysis."
+      }
+    ]
+  };
+
   return (
-    <div className="min-h-screen">
+    <>
+      <SEOHead
+        data={seoData}
+        ogType="website"
+      />
+      <div className="min-h-screen">
       {/* Navigation */}
       <NavBar onGetStarted={handleGetStarted} />
       
@@ -137,5 +174,6 @@ export default function Home() {
         initialFile={initialFile}
       />
     </div>
+    </>
   )
 }

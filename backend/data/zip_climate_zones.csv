@@ -1,0 +1,627 @@
+zip_prefix,state,climate_zone,location
+330,FL,1A,Miami
+331,FL,1A,Miami
+332,FL,1A,Miami
+333,FL,1A,Miami
+334,FL,1A,Miami
+335,FL,2A,Tampa
+336,FL,2A,Tampa
+337,FL,2A,Tampa
+338,FL,2A,Tampa
+339,FL,2A,Tampa
+320,FL,2A,Orlando
+321,FL,2A,Orlando
+322,FL,2A,Jacksonville
+323,FL,2A,Tallahassee
+324,FL,2A,Tallahassee
+325,FL,2A,Pensacola
+770,TX,2A,Houston
+771,TX,2A,Houston
+772,TX,2A,Houston
+773,TX,2A,Houston
+774,TX,2A,Houston
+775,TX,2A,Houston
+776,TX,2A,Houston
+777,TX,2A,Houston
+778,TX,2A,Houston
+779,TX,2A,Houston
+780,TX,2A,San Antonio
+781,TX,2A,San Antonio
+782,TX,2A,San Antonio
+783,TX,2A,San Antonio
+784,TX,2A,Corpus Christi
+785,TX,2A,McAllen
+786,TX,2A,Austin
+787,TX,2A,Austin
+788,TX,2A,Austin
+789,TX,2A,Austin
+750,TX,3A,Dallas
+751,TX,3A,Dallas
+752,TX,3A,Dallas
+753,TX,3A,Dallas
+754,TX,3A,Dallas
+755,TX,3A,Dallas
+756,TX,3A,Dallas
+757,TX,3A,Dallas
+758,TX,3A,Dallas
+759,TX,3A,Dallas
+760,TX,3A,Fort Worth
+761,TX,3A,Fort Worth
+762,TX,3A,Fort Worth
+763,TX,3A,Wichita Falls
+764,TX,3A,Fort Worth
+765,TX,3A,Waco
+766,TX,3A,Waco
+767,TX,3A,Waco
+768,TX,3A,Fort Worth
+769,TX,3A,Fort Worth
+790,TX,4B,Amarillo
+791,TX,4B,Amarillo
+792,TX,4B,Amarillo
+793,TX,4B,Lubbock
+794,TX,4B,Lubbock
+795,TX,4B,Abilene
+796,TX,4B,Abilene
+797,TX,4B,Midland
+798,TX,4B,El Paso
+799,TX,4B,El Paso
+850,AZ,2B,Phoenix
+851,AZ,2B,Phoenix
+852,AZ,2B,Phoenix
+853,AZ,2B,Phoenix
+854,AZ,2B,Phoenix
+855,AZ,2B,Phoenix
+856,AZ,3B,Tucson
+857,AZ,3B,Tucson
+859,AZ,4B,Show Low
+860,AZ,5B,Flagstaff
+863,AZ,5B,Flagstaff
+864,AZ,5B,Flagstaff
+865,AZ,5B,Flagstaff
+890,NV,3B,Las Vegas
+891,NV,3B,Las Vegas
+893,NV,5B,Ely
+894,NV,5B,Reno
+895,NV,5B,Reno
+897,NV,5B,Carson City
+898,NV,5B,Elko
+900,CA,3B,Los Angeles
+901,CA,3B,Los Angeles
+902,CA,3B,Los Angeles
+903,CA,3B,Los Angeles
+904,CA,3B,Los Angeles
+905,CA,3B,Los Angeles
+906,CA,3B,Los Angeles
+907,CA,3B,Los Angeles
+908,CA,3B,Los Angeles
+910,CA,3B,San Diego
+911,CA,3B,San Diego
+912,CA,3B,San Diego
+913,CA,3B,Los Angeles
+914,CA,3B,Los Angeles
+915,CA,3B,Los Angeles
+916,CA,3B,Los Angeles
+917,CA,3B,Los Angeles
+918,CA,3B,Los Angeles
+919,CA,3B,San Diego
+920,CA,3B,San Diego
+921,CA,3B,San Diego
+922,CA,3B,San Diego
+923,CA,3B,San Diego
+924,CA,3B,San Bernardino
+925,CA,3B,San Bernardino
+926,CA,3B,Santa Ana
+927,CA,3B,Santa Ana
+928,CA,3B,Anaheim
+930,CA,3B,Ventura
+931,CA,3B,Santa Barbara
+932,CA,3B,Bakersfield
+933,CA,3B,Bakersfield
+934,CA,3B,San Luis Obispo
+935,CA,3B,Mojave
+936,CA,4B,Fresno
+937,CA,4B,Fresno
+938,CA,4B,Fresno
+939,CA,3C,Salinas
+940,CA,3C,San Francisco
+941,CA,3C,San Francisco
+942,CA,3C,Sacramento
+943,CA,3C,Palo Alto
+944,CA,3C,San Mateo
+945,CA,3C,Oakland
+946,CA,3C,Oakland
+947,CA,3C,Berkeley
+948,CA,3C,Richmond
+949,CA,3C,San Rafael
+950,CA,3C,San Jose
+951,CA,3C,San Jose
+952,CA,3C,San Jose
+953,CA,3C,Stockton
+954,CA,3C,Santa Rosa
+955,CA,4C,Eureka
+956,CA,3C,Sacramento
+957,CA,3C,Sacramento
+958,CA,3C,Sacramento
+959,CA,4B,Redding
+960,CA,4B,Redding
+961,CA,5B,Truckee
+970,OR,4C,Portland
+971,OR,4C,Portland
+972,OR,4C,Portland
+973,OR,4C,Salem
+974,OR,4C,Eugene
+975,OR,4C,Medford
+976,OR,5B,Klamath Falls
+977,OR,5B,Bend
+978,OR,5B,Pendleton
+979,OR,5B,La Grande
+980,WA,4C,Seattle
+981,WA,4C,Seattle
+982,WA,4C,Everett
+983,WA,4C,Tacoma
+984,WA,4C,Tacoma
+985,WA,4C,Olympia
+986,WA,4C,Vancouver
+987,WA,4C,Vancouver
+988,WA,5B,Wenatchee
+989,WA,5B,Yakima
+990,WA,5B,Spokane
+991,WA,5B,Spokane
+992,WA,5B,Spokane
+993,WA,5B,Spokane
+994,WA,5B,Lewiston
+995,AK,7,Anchorage
+996,AK,7,Anchorage
+997,AK,8,Fairbanks
+998,AK,7,Juneau
+999,AK,7,Ketchikan
+967,HI,1A,Honolulu
+968,HI,1A,Honolulu
+100,NY,4A,New York
+101,NY,4A,New York
+102,NY,4A,New York
+103,NY,4A,New York
+104,NY,4A,New York
+105,NY,5A,White Plains
+106,NY,5A,White Plains
+107,NY,5A,Yonkers
+108,NY,5A,New Rochelle
+109,NY,5A,White Plains
+110,NY,5A,Queens
+111,NY,4A,Long Island
+112,NY,4A,Brooklyn
+113,NY,4A,Queens
+114,NY,4A,Queens
+115,NY,4A,Long Island
+116,NY,4A,Queens
+117,NY,4A,Long Island
+118,NY,4A,Long Island
+119,NY,4A,Long Island
+120,NY,5A,Albany
+121,NY,5A,Albany
+122,NY,5A,Albany
+123,NY,5A,Schenectady
+124,NY,5A,Kingston
+125,NY,5A,Poughkeepsie
+126,NY,5A,Poughkeepsie
+127,NY,5A,Monticello
+128,NY,6A,Glens Falls
+129,NY,6A,Plattsburgh
+130,NY,5A,Syracuse
+131,NY,5A,Syracuse
+132,NY,5A,Syracuse
+133,NY,6A,Utica
+134,NY,6A,Utica
+135,NY,6A,Utica
+136,NY,6A,Watertown
+137,NY,5A,Binghamton
+138,NY,5A,Binghamton
+139,NY,5A,Binghamton
+140,NY,5A,Buffalo
+141,NY,5A,Buffalo
+142,NY,5A,Buffalo
+143,NY,5A,Niagara Falls
+144,NY,5A,Rochester
+145,NY,5A,Rochester
+146,NY,5A,Rochester
+147,NY,5A,Jamestown
+148,NY,5A,Elmira
+149,NY,5A,Elmira
+200,DC,4A,Washington
+201,MD,4A,Washington
+202,DC,4A,Washington
+203,DC,4A,Washington
+204,DC,4A,Washington
+205,MD,4A,Washington
+206,MD,4A,Baltimore
+207,MD,4A,Baltimore
+208,MD,4A,Baltimore
+209,MD,4A,Baltimore
+210,MD,4A,Baltimore
+211,MD,4A,Baltimore
+212,MD,4A,Baltimore
+214,MD,4A,Annapolis
+215,MD,4A,Cumberland
+216,MD,4A,Easton
+217,MD,4A,Frederick
+218,MD,4A,Salisbury
+219,MD,4A,Elkton
+220,VA,4A,Arlington
+221,VA,4A,Arlington
+222,VA,4A,Arlington
+223,VA,4A,Alexandria
+224,VA,4A,Fredericksburg
+225,VA,4A,Fredericksburg
+226,VA,4A,Charlottesville
+227,VA,4A,Culpeper
+228,VA,4A,Harrisonburg
+229,VA,4A,Charlottesville
+230,VA,3A,Norfolk
+231,VA,3A,Norfolk
+232,VA,3A,Norfolk
+233,VA,3A,Norfolk
+234,VA,3A,Norfolk
+235,VA,3A,Norfolk
+236,VA,3A,Norfolk
+237,VA,3A,Portsmouth
+238,VA,3A,Richmond
+239,VA,3A,Farmville
+240,VA,4A,Roanoke
+241,VA,4A,Roanoke
+242,VA,5A,Bristol
+243,VA,5A,Pulaski
+244,VA,5A,Staunton
+245,VA,4A,Lynchburg
+246,VA,5A,Bluefield
+270,NC,3A,Greensboro
+271,NC,3A,Winston-Salem
+272,NC,3A,Greensboro
+273,NC,3A,Greensboro
+274,NC,3A,Greensboro
+275,NC,3A,Raleigh
+276,NC,3A,Raleigh
+277,NC,3A,Durham
+278,NC,3A,Rocky Mount
+279,NC,3A,Elizabeth City
+280,NC,3A,Charlotte
+281,NC,3A,Charlotte
+282,NC,3A,Charlotte
+283,NC,3A,Fayetteville
+284,NC,3A,Wilmington
+285,NC,3A,Kinston
+286,NC,4A,Hickory
+287,NC,4A,Asheville
+288,NC,4A,Asheville
+289,NC,4A,Murphy
+300,GA,3A,Atlanta
+301,GA,3A,Atlanta
+302,GA,3A,Atlanta
+303,GA,3A,Atlanta
+304,GA,3A,Swainsboro
+305,GA,4A,Gainesville
+306,GA,3A,Athens
+307,GA,4A,Dalton
+308,GA,3A,Augusta
+309,GA,3A,Augusta
+310,GA,3A,Macon
+311,GA,3A,Atlanta
+312,GA,3A,Macon
+313,GA,3A,Savannah
+314,GA,3A,Savannah
+315,GA,3A,Waycross
+316,GA,3A,Valdosta
+317,GA,3A,Albany
+318,GA,3A,Columbus
+319,GA,3A,Columbus
+500,IA,5A,Des Moines
+501,IA,5A,Des Moines
+502,IA,5A,Des Moines
+503,IA,5A,Des Moines
+504,IA,5A,Mason City
+505,IA,5A,Fort Dodge
+506,IA,5A,Waterloo
+507,IA,5A,Waterloo
+508,IA,5A,Creston
+509,IA,5A,Des Moines
+510,IA,5A,Sioux City
+511,IA,5A,Sioux City
+512,IA,5A,Sheldon
+513,IA,5A,Spencer
+514,IA,5A,Carroll
+515,IA,5A,Council Bluffs
+516,IA,5A,Shenandoah
+520,IA,5A,Dubuque
+521,IA,5A,Decorah
+522,IA,5A,Cedar Rapids
+523,IA,5A,Cedar Rapids
+524,IA,5A,Cedar Rapids
+525,IA,5A,Ottumwa
+526,IA,5A,Burlington
+527,IA,5A,Davenport
+528,IA,5A,Davenport
+530,WI,6A,Milwaukee
+531,WI,6A,Milwaukee
+532,WI,6A,Milwaukee
+534,WI,6A,Milwaukee
+535,WI,6A,Madison
+536,WI,6A,Madison
+537,WI,6A,Madison
+538,WI,6A,Madison
+539,WI,6A,Portage
+540,WI,6A,Green Bay
+541,WI,6A,Green Bay
+542,WI,6A,Green Bay
+543,WI,6A,Green Bay
+544,WI,6A,Wausau
+545,WI,7,Rhinelander
+546,WI,6A,La Crosse
+547,WI,6A,Eau Claire
+548,WI,7,Superior
+549,WI,6A,Oshkosh
+550,MN,6A,Minneapolis
+551,MN,6A,St Paul
+552,MN,6A,Minneapolis
+553,MN,6A,Minneapolis
+554,MN,6A,Minneapolis
+555,MN,6A,Minneapolis
+556,MN,6A,Duluth
+557,MN,7,Duluth
+558,MN,6A,Duluth
+559,MN,6A,Rochester
+560,MN,6A,Mankato
+561,MN,6A,Mankato
+562,MN,6A,Willmar
+563,MN,6A,St Cloud
+564,MN,6A,Brainerd
+565,MN,6A,Detroit Lakes
+566,MN,7,Bemidji
+567,MN,7,Thief River Falls
+600,IL,5A,Chicago
+601,IL,5A,Chicago
+602,IL,5A,Chicago
+603,IL,5A,Chicago
+604,IL,5A,Chicago
+605,IL,5A,Chicago
+606,IL,5A,Chicago
+607,IL,5A,Chicago
+608,IL,5A,Chicago
+609,IL,5A,Kankakee
+610,IL,5A,Rockford
+611,IL,5A,Rockford
+612,IL,5A,Rock Island
+613,IL,5A,La Salle
+614,IL,5A,Galesburg
+615,IL,5A,Peoria
+616,IL,5A,Peoria
+617,IL,5A,Bloomington
+618,IL,4A,Champaign
+619,IL,4A,Champaign
+620,IL,4A,St Louis
+622,IL,4A,St Louis
+623,IL,4A,Quincy
+624,IL,4A,Effingham
+625,IL,4A,Springfield
+626,IL,4A,Springfield
+627,IL,4A,Springfield
+628,IL,4A,Centralia
+629,IL,4A,Carbondale
+480,MI,5A,Detroit
+481,MI,5A,Detroit
+482,MI,5A,Detroit
+483,MI,5A,Detroit
+484,MI,5A,Flint
+485,MI,5A,Flint
+486,MI,5A,Saginaw
+487,MI,5A,Saginaw
+488,MI,5A,Lansing
+489,MI,5A,Lansing
+490,MI,5A,Kalamazoo
+491,MI,5A,Kalamazoo
+492,MI,5A,Jackson
+493,MI,5A,Grand Rapids
+494,MI,5A,Grand Rapids
+495,MI,5A,Grand Rapids
+496,MI,6A,Traverse City
+497,MI,6A,Gaylord
+498,MI,6A,Iron Mountain
+499,MI,6A,Marquette
+460,IN,5A,Indianapolis
+461,IN,5A,Indianapolis
+462,IN,5A,Indianapolis
+463,IN,5A,Indianapolis
+464,IN,5A,Indianapolis
+465,IN,5A,Indianapolis
+466,IN,4A,Evansville
+467,IN,5A,Fort Wayne
+468,IN,5A,Fort Wayne
+469,IN,5A,Kokomo
+470,IN,4A,Lawrenceburg
+471,IN,4A,New Albany
+472,IN,4A,Columbus
+473,IN,5A,Muncie
+474,IN,4A,Bloomington
+475,IN,4A,Washington
+476,IN,4A,Evansville
+477,IN,4A,Evansville
+478,IN,4A,Terre Haute
+479,IN,5A,Lafayette
+430,OH,5A,Columbus
+431,OH,5A,Columbus
+432,OH,5A,Columbus
+433,OH,5A,Marion
+434,OH,5A,Toledo
+435,OH,5A,Toledo
+436,OH,5A,Toledo
+437,OH,5A,Zanesville
+438,OH,5A,Zanesville
+439,OH,5A,Steubenville
+440,OH,5A,Cleveland
+441,OH,5A,Cleveland
+442,OH,5A,Akron
+443,OH,5A,Akron
+444,OH,5A,Youngstown
+445,OH,5A,Youngstown
+446,OH,5A,Canton
+447,OH,5A,Canton
+448,OH,5A,Mansfield
+449,OH,5A,Mansfield
+450,OH,4A,Cincinnati
+451,OH,4A,Cincinnati
+452,OH,4A,Cincinnati
+453,OH,5A,Dayton
+454,OH,5A,Dayton
+455,OH,5A,Springfield
+456,OH,5A,Chillicothe
+457,OH,5A,Athens
+458,OH,5A,Lima
+150,PA,5A,Pittsburgh
+151,PA,5A,Pittsburgh
+152,PA,5A,Pittsburgh
+153,PA,5A,Washington
+154,PA,5A,Uniontown
+155,PA,5A,Bedford
+156,PA,5A,Greensburg
+157,PA,5A,Indiana
+158,PA,5A,DuBois
+159,PA,5A,Johnstown
+160,PA,5A,Butler
+161,PA,5A,New Castle
+162,PA,5A,Kittanning
+163,PA,5A,Oil City
+164,PA,5A,Erie
+165,PA,5A,Erie
+166,PA,5A,Altoona
+167,PA,5A,Bradford
+168,PA,5A,State College
+169,PA,6A,Wellsboro
+170,PA,5A,Harrisburg
+171,PA,5A,Harrisburg
+172,PA,5A,Lancaster
+173,PA,5A,Chambersburg
+174,PA,5A,York
+175,PA,5A,Lancaster
+176,PA,5A,Lancaster
+177,PA,5A,Williamsport
+178,PA,5A,Sunbury
+179,PA,5A,Pottsville
+180,PA,5A,Reading
+181,PA,5A,Allentown
+182,PA,5A,Hazleton
+183,PA,5A,Stroudsburg
+184,PA,5A,Scranton
+185,PA,5A,Scranton
+186,PA,5A,Scranton
+187,PA,5A,Wilkes-Barre
+188,PA,5A,Montrose
+189,PA,5A,Doylestown
+190,PA,4A,Philadelphia
+191,PA,4A,Philadelphia
+192,PA,4A,Philadelphia
+193,PA,4A,Philadelphia
+194,PA,4A,Philadelphia
+195,PA,4A,Reading
+580,ND,6A,Fargo
+581,ND,6A,Fargo
+582,ND,6A,Grand Forks
+583,ND,7,Devils Lake
+584,ND,7,Jamestown
+585,ND,6A,Bismarck
+586,ND,6A,Dickinson
+587,ND,7,Minot
+588,ND,7,Williston
+570,SD,6A,Sioux Falls
+571,SD,6A,Sioux Falls
+572,SD,6A,Watertown
+573,SD,6A,Mitchell
+574,SD,6A,Aberdeen
+575,SD,6A,Pierre
+576,SD,6A,Mobridge
+577,SD,6A,Rapid City
+590,MT,6B,Billings
+591,MT,6B,Billings
+592,MT,6B,Wolf Point
+593,MT,6B,Miles City
+594,MT,6B,Great Falls
+595,MT,6B,Havre
+596,MT,6B,Helena
+597,MT,6B,Butte
+598,MT,6B,Missoula
+599,MT,6B,Kalispell
+820,WY,6B,Cheyenne
+821,WY,6B,Yellowstone
+822,WY,6B,Wheatland
+823,WY,6B,Rawlins
+824,WY,6B,Worland
+825,WY,6B,Riverton
+826,WY,6B,Casper
+827,WY,6B,Newcastle
+828,WY,6B,Sheridan
+829,WY,6B,Rock Springs
+830,WY,6B,Rock Springs
+831,WY,6B,Rock Springs
+680,NE,5A,Omaha
+681,NE,5A,Omaha
+683,NE,5A,North Platte
+684,NE,5A,Lincoln
+685,NE,5A,Lincoln
+686,NE,5A,Columbus
+687,NE,5A,Norfolk
+688,NE,5A,Grand Island
+689,NE,5A,Hastings
+690,NE,5A,McCook
+691,NE,5A,North Platte
+692,NE,5A,Valentine
+693,NE,5A,Alliance
+660,KS,4A,Kansas City
+661,KS,4A,Kansas City
+662,KS,4A,Kansas City
+664,KS,4A,Topeka
+665,KS,4A,Topeka
+666,KS,4A,Topeka
+667,KS,4A,Fort Scott
+668,KS,4A,Ottawa
+669,KS,4A,Belleville
+670,KS,4A,Wichita
+671,KS,4A,Wichita
+672,KS,4A,Wichita
+673,KS,4A,Independence
+674,KS,4A,Salina
+675,KS,4A,Hutchinson
+676,KS,4A,Hays
+677,KS,4A,Colby
+678,KS,4A,Dodge City
+679,KS,4A,Liberal
+830,ID,5B,Boise
+831,ID,5B,Boise
+832,ID,5B,Pocatello
+833,ID,5B,Twin Falls
+834,ID,6B,Idaho Falls
+835,ID,6B,Lewiston
+836,ID,6B,Boise
+837,ID,5B,Boise
+838,ID,6B,Coeur d'Alene
+840,UT,5B,Salt Lake City
+841,UT,5B,Salt Lake City
+842,UT,5B,Salt Lake City
+843,UT,5B,Salt Lake City
+844,UT,5B,Ogden
+845,UT,3B,Price
+846,UT,5B,Provo
+847,UT,5B,Provo
+800,CO,5B,Denver
+801,CO,5B,Denver
+802,CO,5B,Denver
+803,CO,5B,Boulder
+804,CO,5B,Denver
+805,CO,5B,Longmont
+806,CO,5B,Denver
+807,CO,5B,Denver
+808,CO,5B,Colorado Springs
+809,CO,5B,Colorado Springs
+810,CO,5B,Pueblo
+811,CO,5B,Alamosa
+812,CO,5B,Salida
+813,CO,5B,Durango
+814,CO,5B,Montrose
+815,CO,5B,Grand Junction
+816,CO,6B,Glenwood Springs

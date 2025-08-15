@@ -2,6 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import { Calendar, Clock, ArrowRight, BookOpen } from 'lucide-react';
 import NavBar from '../../components/NavBar';
+import SEOHead from '../../components/SEOHead';
 import { getAllBlogPosts } from '../../lib/blog-content';
 
 export default function BlogIndex() {
@@ -11,8 +12,39 @@ export default function BlogIndex() {
   const featuredPost = allPosts.find(post => post.slug === 'ac-tonnage-calculator') || allPosts[0];
   const recentPosts = allPosts.filter(post => post.slug !== featuredPost?.slug);
 
+  // SEO data for blog index page
+  const seoData = {
+    title: "HVAC Blog - Expert Load Calculation Guides & Manual J Resources",
+    description: "Expert insights on HVAC load calculations, Manual J standards, AC tonnage sizing, and industry best practices. Free guides from AutoHVAC professionals.",
+    canonicalUrl: "https://autohvac.ai/blog",
+    image: "https://autohvac.ai/blog-og-image.png",
+    tags: ["HVAC blog", "Manual J guides", "load calculation", "AC sizing", "HVAC professionals", "air conditioning"],
+    breadcrumbs: [
+      { name: "Home", url: "https://autohvac.ai" },
+      { name: "Blog", url: "https://autohvac.ai/blog" }
+    ],
+    faqs: [
+      {
+        question: "What topics does the AutoHVAC blog cover?",
+        answer: "Our blog covers HVAC load calculations, Manual J procedures, AC tonnage sizing, equipment selection, energy efficiency, and industry best practices for HVAC professionals."
+      },
+      {
+        question: "Are the HVAC guides suitable for contractors?",
+        answer: "Yes, our guides are written for HVAC professionals, contractors, and engineers who need accurate, practical information about load calculations and system sizing."
+      },
+      {
+        question: "How often is new content published?",
+        answer: "We regularly publish new HVAC guides, calculation tutorials, and industry insights to help professionals stay current with best practices and standards."
+      }
+    ]
+  };
+
   return (
     <>
+      <SEOHead
+        data={seoData}
+        ogType="website"
+      />
       <NavBar />
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white pt-16">
       {/* Header */}

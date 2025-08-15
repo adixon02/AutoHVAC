@@ -1,24 +1,16 @@
 #!/bin/bash
-# Worker startup script with correct module path
+# Worker startup script for Pipeline V3
 
-# Fix: Use the actual project path on Render
-cd /opt/render/project/src/backend || {
-    echo "ERROR: Failed to change to backend directory"
-    echo "Current directory: $(pwd)"
-    echo "Looking for backend in: /opt/render/project/src/backend"
-    exit 1
-}
-
-echo "Starting Celery worker with calculate_hvac_loads module..."
+echo "🚀 Starting Pipeline V3 Worker..."
 echo "Working directory: $(pwd)"
 
-celery -A tasks.calculate_hvac_loads worker \
-  --loglevel=info \
-  --concurrency=2 \
-  --max-tasks-per-child=50 \
-  --max-memory-per-child=1536000 \
-  --time-limit=1800 \
-  --soft-time-limit=1740 \
-  --without-gossip \
-  --without-mingle \
-  --without-heartbeat
+# For now, pipeline_v3 runs synchronously in the web process
+# In the future, we can add Celery workers here if needed
+echo "✅ Pipeline V3 uses direct execution - no separate worker needed"
+echo "Web API handles processing asynchronously using asyncio"
+
+# Keep the worker process alive (required by Render)
+while true; do
+    echo "⏰ Worker heartbeat: $(date)"
+    sleep 300  # 5 minutes
+done

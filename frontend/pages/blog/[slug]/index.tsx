@@ -3,7 +3,9 @@ import Link from 'next/link';
 import { ArrowLeft, Calendar, Clock, CheckCircle, Star, ArrowRight } from 'lucide-react';
 import { useRouter } from 'next/router';
 import NavBar from '../../../components/NavBar';
+import SEOHead from '../../../components/SEOHead';
 import { getBlogPost, getRelatedPosts } from '../../../lib/blog-content';
+import { blogPostToSEOData, getPredefinedFAQs } from '../../../lib/blog-seo-utils';
 
 
 // CTA Component for Free Report
@@ -112,20 +114,44 @@ export default function BlogPost() {
   
   if (!blogContent) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-4xl font-bold mb-4">Article Not Found</h1>
-          <p className="text-gray-600 mb-8">The article you're looking for doesn't exist or has been moved.</p>
-          <Link href="/blog" className="text-brand-600 hover:underline">
-            ← Back to Blog
-          </Link>
+      <>
+        <SEOHead
+          data={{
+            title: "Article Not Found - AutoHVAC",
+            description: "The article you're looking for doesn't exist or has been moved. Browse our HVAC guides and Manual J resources.",
+            canonicalUrl: `https://autohvac.ai/blog/${slug}`
+          }}
+          noIndex={true}
+        />
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <h1 className="text-4xl font-bold mb-4">Article Not Found</h1>
+            <p className="text-gray-600 mb-8">The article you're looking for doesn't exist or has been moved.</p>
+            <Link href="/blog" className="text-brand-600 hover:underline">
+              ← Back to Blog
+            </Link>
+          </div>
         </div>
-      </div>
+      </>
     );
+  }
+
+  // Generate SEO data for the blog post
+  const seoData = blogPostToSEOData(blogContent);
+  
+  // Add predefined FAQs if available
+  const predefinedFAQs = getPredefinedFAQs(slug as string);
+  if (predefinedFAQs.length > 0) {
+    seoData.faqs = [...(seoData.faqs || []), ...predefinedFAQs];
   }
 
   return (
     <>
+      <SEOHead
+        data={seoData}
+        ogType="article"
+        twitterCard="summary_large_image"
+      />
       <NavBar />
       <article className="min-h-screen bg-white pt-16">
       {/* Navigation */}
