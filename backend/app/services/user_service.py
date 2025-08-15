@@ -58,17 +58,22 @@ class UserService:
         return True
     
     @staticmethod
-    def get_or_create_user(email: str, session: Session) -> User:
-        """Get existing user or create new one"""
+    def get_or_create_user(email: str, session: Session, device_fingerprint: str = None, ip_address: str = None) -> User:
+        """Get existing user or create new one with device fingerprint"""
         statement = select(User).where(User.email == email)
         result = session.exec(statement)
         user = result.first()
         
         if not user:
-            user = User(email=email)
+            user = User(
+                email=email,
+                device_fingerprint=device_fingerprint,
+                ip_address=ip_address
+            )
             session.add(user)
             session.commit()
             session.refresh(user)
+            logger.info(f"📱 DEVICE TRACKED: Created user {email} with device {device_fingerprint[:12] if device_fingerprint else 'None'}...")
         
         return user
     
@@ -100,12 +105,24 @@ class UserService:
         return not user.free_report_used
     
     @staticmethod
-    def can_upload_new_report(email: str, session: Session) -> bool:
+    def can_upload_new_report(email: str, session: Session, device_fingerprint: str = None, ip_address: str = None) -> bool:
         """
         CRITICAL PAYWALL ENFORCEMENT: Check if user can upload a new report
-        This is the core business logic that prevents revenue leakage
+        Enhanced with anti-fraud device fingerprinting to prevent multiple fake emails
         """
         user = UserService.get_user_by_email(email, session)
+        
+        # ANTI-FRAUD: Check if this device has already used a free report
+        if device_fingerprint:
+            device_usage = session.query(UserModel).filter(
+                UserModel.device_fingerprint == device_fingerprint,
+                UserModel.free_report_used == True
+            ).first()
+            
+            if device_usage:
+                logger.warning(f"🚫 DEVICE FRAUD BLOCKED: Device {device_fingerprint[:12]}... already used free report")
+                return False
+        
         if not user:
             return True  # New users can upload their first report
         

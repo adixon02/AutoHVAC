@@ -6,6 +6,22 @@ import { apiClient } from '../lib/api-client'
 // AccountCreationModal no longer needed - using CompletionAccountGate after analysis
 import Cookies from 'js-cookie'
 
+// 🔒 ANTI-FRAUD: Generate device fingerprint for preventing multiple fake emails
+function generateDeviceFingerprint(): string {
+  const fingerprint = {
+    screen: `${screen.width}x${screen.height}`,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    language: navigator.language,
+    platform: navigator.platform,
+    userAgent: navigator.userAgent.slice(0, 100), // Truncated for privacy
+    colorDepth: screen.colorDepth,
+    pixelRatio: window.devicePixelRatio || 1
+  }
+  
+  // Create a stable hash of the fingerprint
+  return btoa(JSON.stringify(fingerprint)).replace(/[^a-zA-Z0-9]/g, '').slice(0, 64)
+}
+
 interface ProjectData {
   projectName: string
   blueprintFile: File | null
@@ -253,7 +269,7 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
     setError(null)
     
     try {
-      // Create FormData with all collected information
+      // Create FormData with all collected information + device fingerprint for anti-fraud
       const formData = new FormData()
       formData.append('file', projectData.blueprintFile!)
       formData.append('project_label', projectData.projectName)
@@ -262,6 +278,11 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
       formData.append('duct_config', projectData.ductConfig)
       formData.append('heating_fuel', projectData.heatingFuel)
       formData.append('building_orientation', projectData.buildingOrientation || 'unknown')
+      
+      // 🔒 ANTI-FRAUD: Add device fingerprint to prevent multiple fake emails
+      const deviceFingerprint = generateDeviceFingerprint()
+      formData.append('device_fingerprint', deviceFingerprint)
+      console.log('🔒 Device fingerprint generated:', deviceFingerprint.slice(0, 12) + '...')
 
       // Use the existing API helper that has proper endpoint and error handling
       const result = await apiHelpers.uploadBlueprint(formData)

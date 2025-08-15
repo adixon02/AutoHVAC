@@ -4,7 +4,7 @@ import tempfile
 import logging
 import asyncio
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlmodel import Session
@@ -39,9 +39,11 @@ jobs = {}
 
 @router.post("/upload", response_model=UploadResponse)
 async def upload_blueprint(
+    request: Request,
     file: UploadFile = File(...),
     zip_code: str = Form(...),
     email: str = Form(...),  # CRITICAL: Email required for paywall enforcement
+    device_fingerprint: Optional[str] = Form(None),  # ANTI-FRAUD: Device fingerprint
     openai_api_key: Optional[str] = Form(None),
     session: Session = Depends(get_session)
 ):
@@ -52,14 +54,17 @@ async def upload_blueprint(
     Users get exactly 1 free report, then must subscribe for more.
     """
     try:
+        # Extract client IP for tracking
+        client_ip = request.client.host if request.client else "unknown"
+        
         # CRITICAL PAYWALL CHECK: Enforce business model before processing
-        logger.info(f"🔒 PAYWALL CHECK: Checking upload permission for {email}")
+        logger.info(f"🔒 PAYWALL CHECK: Checking upload permission for {email} (Device: {device_fingerprint[:12] if device_fingerprint else 'None'}...)")
         
         if not user_service.validate_email_format(email):
             raise HTTPException(status_code=400, detail="Invalid email format")
         
-        # This is the CORE business logic that prevents revenue leakage
-        can_upload = user_service.can_upload_new_report(email, session)
+        # ENHANCED ANTI-FRAUD: Check both email AND device fingerprint
+        can_upload = user_service.can_upload_new_report(email, session, device_fingerprint, client_ip)
         
         if not can_upload:
             logger.warning(f"🚫 PAYWALL BLOCKED: {email} attempted upload but not allowed")
@@ -115,8 +120,9 @@ async def upload_blueprint(
         await storage_service.save_upload(job_id, content, file.filename)
         
         # CRITICAL: Mark free report as used if this is a new user's first report
-        user = user_service.get_user_by_email(email, session)
-        is_first_report = not user or not user.free_report_used
+        # Also ensure user exists with device fingerprint tracking
+        user = user_service.get_or_create_user(email, session, device_fingerprint, client_ip)
+        is_first_report = not user.free_report_used
         
         # Start processing in background with user tracking
         asyncio.create_task(process_blueprint_async(

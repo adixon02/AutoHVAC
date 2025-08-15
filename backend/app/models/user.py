@@ -34,6 +34,10 @@ class UserModel(SQLModel, table=True):
     free_report_used_at: Optional[datetime] = Field(default=None, description="When was free report used?")
     total_reports_generated: int = Field(default=0, description="Total reports generated (free + paid)")
     
+    # Anti-Fraud: Device Fingerprinting
+    device_fingerprint: Optional[str] = Field(default=None, max_length=255, description="Browser/device fingerprint hash")
+    ip_address: Optional[str] = Field(default=None, max_length=45, description="IP address at signup")  # IPv6 = 45 chars max
+    
     # Subscription Management  
     stripe_customer_id: Optional[str] = Field(default=None, max_length=255, description="Stripe customer ID")
     active_subscription: bool = Field(default=False)  # Keep for backward compatibility
