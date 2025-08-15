@@ -115,15 +115,18 @@ class UserService:
         """
         user = UserService.get_user_by_email(email, session)
         
-        # ANTI-FRAUD: Check if this device has already used a free report
-        if device_fingerprint:
+        # ANTI-FRAUD: Only check device fraud if this is a NEW user trying to bypass with different email
+        # Don't block existing legitimate users on same device
+        if device_fingerprint and not user:
+            # Only block if this device has used free report with different email
             device_usage = session.query(UserModel).filter(
                 UserModel.device_fingerprint == device_fingerprint,
-                UserModel.free_report_used == True
+                UserModel.free_report_used == True,
+                UserModel.email != email  # KEY FIX: Only block different emails
             ).first()
             
             if device_usage:
-                logger.warning(f"🚫 DEVICE FRAUD BLOCKED: Device {device_fingerprint[:12]}... already used free report")
+                logger.warning(f"🚫 DEVICE FRAUD BLOCKED: Device {device_fingerprint[:12]}... already used free report with different email")
                 return False
         
         if not user:
