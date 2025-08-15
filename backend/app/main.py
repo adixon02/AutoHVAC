@@ -62,7 +62,7 @@ app.include_router(blueprint.router, prefix="/api/v1/blueprint")
 app.include_router(job.router, prefix="/api/v1/job")
 app.include_router(leads.router)  # Already has /api/leads prefix
 app.include_router(auth.router)  # Already has /auth prefix
-app.include_router(billing.router, prefix="/api/billing")  # Billing routes
+app.include_router(billing.router, prefix="/api/v1/billing")  # Billing routes
 
 @app.get("/")
 async def root():
