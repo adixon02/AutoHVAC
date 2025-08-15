@@ -140,7 +140,7 @@ export default function ProjectCard({ project, userEmail, onDownload }: ProjectC
               </svg>
             </div>
             <span className="text-gray-900 font-medium">ID:</span>
-            <span className="ml-1 font-mono text-gray-500">{project.id.substring(0, 8)}...</span>
+            <span className="ml-1 font-mono text-gray-500">{project.id?.substring(0, 8) || 'N/A'}...</span>
           </div>
           
           <div className="flex items-center text-sm text-gray-600">

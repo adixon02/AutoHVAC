@@ -61,9 +61,9 @@ export default function Hero({ onGetStarted }: HeroProps) {
             </div>
             
             <h1 className="display-md lg:display-lg text-gray-900 mb-6">
-              Upload your blueprint.
+              Upload any blueprint.
               <span className="block text-brand-700">
-                Get permit-ready HVAC plans in minutes.
+                Get accurate Manual J calculations in <span className="underline">seconds</span>.
               </span>
             </h1>
             
@@ -75,16 +75,16 @@ export default function Hero({ onGetStarted }: HeroProps) {
             {/* Stats */}
             <div className="grid grid-cols-3 gap-6 mb-8">
               <div className="text-center lg:text-left">
-                <div className="text-2xl font-semibold text-gray-900">95%</div>
-                <div className="text-sm text-gray-600">Time Saved</div>
-              </div>
-              <div className="text-center lg:text-left">
-                <div className="text-2xl font-semibold text-gray-900">10min</div>
-                <div className="text-sm text-gray-600">Average Process</div>
+                <div className="text-2xl font-semibold text-gray-900">60s</div>
+                <div className="text-sm text-gray-600">Complete Manual J</div>
               </div>
               <div className="text-center lg:text-left">
                 <div className="text-2xl font-semibold text-gray-900">100%</div>
                 <div className="text-sm text-gray-600">ACCA Compliant</div>
+              </div>
+              <div className="text-center lg:text-left">
+                <div className="text-2xl font-semibold text-gray-900">Pro</div>
+                <div className="text-sm text-gray-600">Quality Reports</div>
               </div>
             </div>
             
@@ -115,7 +115,7 @@ export default function Hero({ onGetStarted }: HeroProps) {
                 <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                 </svg>
-                <span className="text-sm text-gray-600">Secure & Private</span>
+                <span className="text-sm text-gray-600">Works on Mobile</span>
               </div>
             </div>
           </div>
@@ -180,7 +180,7 @@ export default function Hero({ onGetStarted }: HeroProps) {
                     <div className="w-2 h-2 bg-success-500 rounded-full mr-3 animate-pulse"></div>
                     <span className="text-sm font-medium text-success-800">Manual J Complete</span>
                   </div>
-                  <span className="text-success-600 text-xs font-medium">2.1s</span>
+                  <span className="text-success-600 text-xs font-medium">47s</span>
                 </div>
                 
                 <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg border border-blue-100 animate-fade-in" style={{animationDelay: '0.7s'}}>
