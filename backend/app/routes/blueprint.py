@@ -110,7 +110,7 @@ async def upload_blueprint(
             "project_label": project_label or file.filename,  # Use project name if provided
             "zip_code": zip_code,
             "email": email,  # Track which user this belongs to
-            "user_inputs": user_inputs or {},  # Store for analytics
+            "user_inputs": {},  # Store for analytics - will be updated later
             "created_at": datetime.utcnow().isoformat(),
             "completed_at": None,
             "result": None,
@@ -176,6 +176,9 @@ async def upload_blueprint(
         
         # Add to user_inputs for future pipeline integration
         user_inputs.update(pipeline_ready_inputs)
+        
+        # Update job with user inputs
+        jobs[job_id]["user_inputs"] = user_inputs
         
         logger.info(f"🎯 ACTIVE INPUTS: {[k for k in user_inputs.keys() if k in ['total_sqft', 'floor_count']]} (pipeline integrated)")
         logger.info(f"📊 FUTURE INPUTS: {list(pipeline_ready_inputs.keys())} (stored for analytics + future integration)")
