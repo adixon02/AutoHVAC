@@ -6,6 +6,9 @@ import secrets
 from datetime import datetime, timezone, timedelta
 import hashlib
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 class UserService:
     """Production-proven user service with paywall enforcement"""
