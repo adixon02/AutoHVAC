@@ -625,3 +625,157 @@ zip_prefix,state,climate_zone,location
 814,CO,5B,Montrose
 815,CO,5B,Grand Junction
 816,CO,6B,Glenwood Springs
+021,MA,5A,Boston
+022,MA,5A,Boston
+023,MA,5A,Boston
+024,MA,5A,Boston
+025,MA,5A,Boston
+026,MA,5A,Boston
+027,MA,5A,Boston
+028,MA,5A,Boston
+029,MA,5A,Boston
+328,FL,2A,Orlando
+329,FL,2A,Orlando
+300,GA,3A,Atlanta
+301,MD,4A,Washington DC
+302,DE,4A,Wilmington
+303,CO,5B,Denver
+304,WV,4A,Charleston
+305,FL,1A,Miami
+306,FL,1A,Miami Keys
+307,FL,1A,Miami
+308,FL,2A,Fort Myers
+309,FL,2A,Fort Myers
+310,CA,3B,Los Angeles
+311,CA,3B,Los Angeles
+312,IL,5A,Chicago
+313,MI,5A,Detroit
+314,MO,4A,St. Louis
+315,NY,5A,Syracuse
+316,KS,4A,Wichita
+317,IN,5A,Indianapolis
+318,LA,2A,New Orleans
+319,IA,5A,Des Moines
+400,KY,4A,Louisville
+401,RI,5A,Providence
+402,NE,5A,Omaha
+403,ME,6A,Portland
+404,GA,3A,Atlanta
+405,OK,3A,Oklahoma City
+406,MT,6B,Billings
+407,FL,2A,Orlando
+408,CA,3C,San Jose
+409,TX,2A,Beaumont
+410,MD,4A,Baltimore
+411,PA,5A,Pittsburgh
+412,PA,5A,Pittsburgh
+413,MA,5A,Springfield
+414,WI,5A,Milwaukee
+415,CA,3C,San Francisco
+416,CA,3C,San Francisco
+417,MO,4A,Springfield
+418,PA,5A,Erie
+419,OH,5A,Toledo
+420,PA,5A,Reading
+421,PA,5A,Harrisburg
+422,PA,5A,Reading
+423,TN,4A,Knoxville
+424,PA,5A,Washington
+425,WA,4C,Seattle
+430,OH,5A,Columbus
+431,OH,5A,Dayton
+432,TX,2B,Lubbock
+433,TX,3A,Tyler
+434,VA,4A,Lynchburg
+435,UT,5B,Salt Lake City
+436,WV,4A,Huntington
+437,WV,4A,Charleston
+438,NH,6A,Concord
+439,OH,5A,Steubenville
+440,OH,5A,Cleveland
+441,OH,5A,Cleveland
+442,OH,5A,Akron
+443,MD,4A,Baltimore
+444,OH,5A,Youngstown
+445,OH,5A,Youngstown
+446,OH,5A,Canton
+447,OH,5A,Cambridge
+448,OH,5A,Mansfield
+449,OH,5A,Mansfield
+450,OH,5A,Cincinnati
+451,OH,5A,Hamilton
+452,OH,5A,Cincinnati
+453,OH,5A,Dayton
+454,OH,5A,Dayton
+455,OH,5A,Springfield
+456,OH,5A,Chillicothe
+457,OH,5A,Athens
+458,OH,5A,Lima
+459,OH,5A,Upper Sandusky
+460,IN,5A,Indianapolis
+461,IN,5A,Indianapolis
+462,IN,5A,Indianapolis
+463,IN,5A,Indianapolis
+464,IN,5A,Gary
+465,IN,5A,South Bend
+466,IN,5A,South Bend
+467,IN,5A,Fort Wayne
+468,IN,5A,Fort Wayne
+469,IN,5A,Kokomo
+470,GA,3A,Atlanta
+471,GA,3A,Atlanta
+472,GA,3A,Atlanta
+473,GA,3A,Augusta
+474,GA,3A,Columbus
+475,GA,3A,Macon
+476,GA,3A,Savannah
+477,GA,3A,Valdosta
+478,GA,3A,Macon
+479,GA,3A,Macon
+480,AZ,2B,Phoenix
+481,AZ,2B,Phoenix
+482,AZ,2B,Phoenix
+483,AZ,2B,Phoenix
+484,AZ,2B,Phoenix
+485,AZ,2B,Phoenix
+486,AZ,4B,Tucson
+487,AZ,4B,Tucson
+488,AZ,5B,Flagstaff
+489,AZ,5B,Flagstaff
+490,CA,3B,Los Angeles
+491,CA,3B,Los Angeles
+492,CA,3B,Los Angeles
+493,CA,3B,Los Angeles
+494,CA,3B,Los Angeles
+495,CA,3B,Los Angeles
+496,CA,3B,Los Angeles
+497,CA,3B,Los Angeles
+500,IA,5A,Des Moines
+501,AR,3A,Little Rock
+502,KY,4A,Louisville
+503,OR,4C,Portland
+504,LA,2A,New Orleans
+505,NM,4B,Albuquerque
+506,NE,5A,Omaha
+507,MN,6A,Rochester
+508,MA,5A,Worcester
+509,WA,6B,Spokane
+510,CA,3C,Oakland
+511,CA,3C,Oakland
+512,TX,3A,Austin
+513,OH,5A,Cincinnati
+514,CA,3C,Oakland
+515,IA,5A,Des Moines
+516,NY,4A,Long Island
+517,MI,5A,Lansing
+518,NY,5A,Albany
+519,NY,5A,Plattsburgh
+520,AZ,2B,Phoenix
+521,AZ,2B,Phoenix
+522,VT,6A,Burlington
+523,VT,6A,Burlington
+524,VT,6A,White River Junction
+525,MA,5A,Worcester
+526,MA,5A,Springfield
+527,MA,5A,Hyannis
+701,LA,2A,New Orleans

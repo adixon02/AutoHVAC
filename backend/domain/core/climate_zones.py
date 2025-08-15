@@ -19,6 +19,7 @@ import csv
 import os
 from typing import Dict, Any, Optional
 from functools import lru_cache
+from .zip_climate_zones import get_climate_zone_fast
 
 
 # Building Era-Based Insulation Defaults
@@ -500,8 +501,7 @@ def get_construction_factors(zone_config: dict, construction_quality: str, build
 
 
 # Data file paths
-DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
-ZIP_CLIMATE_FILE = os.path.join(DATA_DIR, 'zip_climate_zones.csv')
+DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'data')
 ASHRAE_TEMPS_FILE = os.path.join(DATA_DIR, 'ashrae_design_temps.csv')
 
 
@@ -526,20 +526,24 @@ def get_climate_data_for_zip(zip_code: str) -> Dict[str, Any]:
         'summer_wb': 75,       # Default fallback
     }
     
-    # First, get climate zone from ZIP prefix
-    prefix = zip_code[:3]
-    
+    # Get climate zone using fast dictionary lookup
     try:
-        if os.path.exists(ZIP_CLIMATE_FILE):
-            with open(ZIP_CLIMATE_FILE, 'r') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    if row['zip_prefix'] == prefix:
-                        result['climate_zone'] = row['climate_zone']
-                        result['location'] = row['location']
-                        result['state'] = row['state']
-                        result['found'] = True
-                        break
+        climate_zone = get_climate_zone_fast(zip_code)
+        if climate_zone != '4A':  # Found in database (not fallback)
+            result['climate_zone'] = climate_zone
+            result['found'] = True
+            # Set generic location info since we don't store it in the dict
+            result['location'] = 'US'
+            result['state'] = 'US'
+        else:
+            # Check if it's actually zone 4A or just fallback
+            prefix = zip_code[:3] if zip_code else ''
+            from .zip_climate_zones import ZIP_CLIMATE_ZONES
+            if prefix in ZIP_CLIMATE_ZONES:
+                result['climate_zone'] = ZIP_CLIMATE_ZONES[prefix]
+                result['found'] = True
+                result['location'] = 'US'
+                result['state'] = 'US'
         
         # Then get ASHRAE design temps - try to match location first, then climate zone
         if result['found'] and os.path.exists(ASHRAE_TEMPS_FILE):

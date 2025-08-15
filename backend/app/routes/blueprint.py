@@ -16,6 +16,7 @@ from app.services.s3_storage import storage_service
 
 # Import our working pipeline
 from pipeline_v3 import run_pipeline_v3
+from services.report_generator import ValueReportGenerator
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -45,6 +46,14 @@ async def upload_blueprint(
     email: str = Form(...),  # CRITICAL: Email required for paywall enforcement
     device_fingerprint: Optional[str] = Form(None),  # ANTI-FRAUD: Device fingerprint
     openai_api_key: Optional[str] = Form(None),
+    # 🎯 ENHANCED USER INPUTS: Strategic fields for maximum load calculation accuracy
+    project_label: Optional[str] = Form(None),  # Project name
+    square_footage: Optional[str] = Form(None),  # Most critical for accurate calculations
+    number_of_stories: Optional[str] = Form(None),  # User confirmation vs AI detection
+    heating_fuel: Optional[str] = Form(None),  # Equipment sizing accuracy
+    duct_config: Optional[str] = Form(None),  # Duct loss calculations
+    window_performance: Optional[str] = Form(None),  # Thermal envelope accuracy
+    building_orientation: Optional[str] = Form(None),  # Solar gain calculations
     session: Session = Depends(get_session)
 ):
     """
@@ -96,14 +105,16 @@ async def upload_blueprint(
         if not api_key:
             raise HTTPException(status_code=400, detail="OpenAI API key required")
         
-        # Initialize job status with user tracking and timestamps
+        # Initialize job status with enhanced tracking
         from datetime import datetime
         jobs[job_id] = {
             "status": "processing",
             "progress": 0,
             "filename": file.filename,
+            "project_label": project_label or file.filename,  # Use project name if provided
             "zip_code": zip_code,
             "email": email,  # Track which user this belongs to
+            "user_inputs": user_inputs or {},  # Store for analytics
             "created_at": datetime.utcnow().isoformat(),
             "completed_at": None,
             "result": None,
@@ -124,9 +135,55 @@ async def upload_blueprint(
         user = user_service.get_or_create_user(email, session, device_fingerprint, client_ip)
         is_first_report = not user.free_report_used
         
-        # Start processing in background with user tracking
+        # 🎯 COLLECT ENHANCED USER INPUTS: Maximum accuracy data for pipeline_v3
+        form_inputs = {
+            "square_footage": square_footage,
+            "number_of_stories": number_of_stories, 
+            "heating_fuel": heating_fuel,
+            "duct_config": duct_config,
+            "window_performance": window_performance,
+            "building_orientation": building_orientation
+        }
+        
+        # Filter out None/empty values - only pass real user inputs
+        form_inputs = {k: v for k, v in form_inputs.items() if v and v != "not_sure"}
+        
+        # 🔄 MAP TO PIPELINE_V3 FORMAT: Convert form fields to pipeline expected names
+        user_inputs = {}
+        
+        # Core fields that pipeline_v3 directly supports
+        if "square_footage" in form_inputs:
+            try:
+                user_inputs["total_sqft"] = float(form_inputs["square_footage"])
+                logger.info(f"📏 SQUARE FOOTAGE: User provided {user_inputs['total_sqft']:.0f} sqft (critical for accuracy)")
+            except (ValueError, TypeError):
+                logger.warning(f"⚠️ Invalid square footage: {form_inputs['square_footage']}")
+        
+        if "number_of_stories" in form_inputs:
+            story_mapping = {"1": 1, "2": 2, "3+": 3}
+            user_inputs["floor_count"] = story_mapping.get(form_inputs["number_of_stories"], 2)
+            logger.info(f"🏠 STORIES: User confirmed {user_inputs['floor_count']} floors vs AI detection")
+        
+        # Future pipeline integration fields (stored for analytics and future use)
+        pipeline_ready_inputs = {}
+        if "heating_fuel" in form_inputs:
+            pipeline_ready_inputs["heating_fuel"] = form_inputs["heating_fuel"]
+        if "duct_config" in form_inputs:
+            pipeline_ready_inputs["duct_config"] = form_inputs["duct_config"]
+        if "window_performance" in form_inputs:
+            pipeline_ready_inputs["window_performance"] = form_inputs["window_performance"]
+        if "building_orientation" in form_inputs:
+            pipeline_ready_inputs["building_orientation"] = form_inputs["building_orientation"]
+        
+        # Add to user_inputs for future pipeline integration
+        user_inputs.update(pipeline_ready_inputs)
+        
+        logger.info(f"🎯 ACTIVE INPUTS: {[k for k in user_inputs.keys() if k in ['total_sqft', 'floor_count']]} (pipeline integrated)")
+        logger.info(f"📊 FUTURE INPUTS: {list(pipeline_ready_inputs.keys())} (stored for analytics + future integration)")
+        
+        # Start processing in background with enhanced user inputs
         asyncio.create_task(process_blueprint_async(
-            job_id, temp_file_path, zip_code, api_key, email, session, is_first_report
+            job_id, temp_file_path, zip_code, api_key, email, session, is_first_report, user_inputs, project_label
         ))
         
         logger.info(f"Started job {job_id} for file {file.filename}, zip {zip_code}")
@@ -150,7 +207,9 @@ async def process_blueprint_async(
     api_key: str, 
     email: str, 
     session: Session, 
-    is_first_report: bool
+    is_first_report: bool,
+    user_inputs: dict = None,
+    project_label: str = None
 ):
     """
     Process blueprint asynchronously using pipeline_v3
@@ -162,19 +221,40 @@ async def process_blueprint_async(
         
         logger.info(f"Job {job_id}: Starting pipeline_v3 processing")
         
-        # Run pipeline_v3 (this is your working pipeline!)
-        # Note: run_pipeline_v3 returns a dictionary, not an object
+        # 🎯 ENHANCED PIPELINE: Feed user inputs for maximum accuracy
+        logger.info(f"🚀 PIPELINE V3: Starting with user inputs: {list(user_inputs.keys()) if user_inputs else 'None'}")
+        
         result = await asyncio.get_event_loop().run_in_executor(
             None, 
             run_pipeline_v3,
             pdf_path, 
             zip_code, 
-            None,  # user_inputs (optional)
+            user_inputs,  # 🎯 Enhanced user inputs for maximum accuracy
             api_key
         )
         
         # Pipeline_v3 returns a dictionary - check if it has heating load data
         if result and "heating_load_btu_hr" in result:
+            # Generate high-value professional report
+            report_generator = ValueReportGenerator()
+            
+            # Determine user subscription status
+            user = user_service.get_or_create_user(email, session)
+            subscription_status = "paid" if user_service.has_active_subscription(email, session) else "free"
+            
+            # Generate professional report
+            class ResultObj:
+                def __init__(self, data):
+                    for key, value in data.items():
+                        setattr(self, key, value)
+            
+            professional_report = report_generator.generate_complete_report(
+                pipeline_result=ResultObj(result),
+                zip_code=zip_code,
+                user_subscription_status=subscription_status,
+                report_context="user"
+            )
+            
             # Result is already a dictionary, just add some calculated fields
             result_data = {
                 **result,  # Include all pipeline results
@@ -187,7 +267,8 @@ async def process_blueprint_async(
                 "confidence_score": result.get("confidence", 0.0),
                 "warnings": result.get("warnings", []),
                 "zone_loads": result.get("zone_loads", {}),
-                "processing_time_seconds": result.get("processing_time", 0)
+                "processing_time_seconds": result.get("processing_time", 0),
+                "professional_report": professional_report  # 🎯 HIGH-VALUE REPORT
             }
             
             # Add completion timestamp
@@ -292,6 +373,49 @@ async def get_job_result(job_id: str):
         "filename": job["filename"],
         "zip_code": job["zip_code"],
         "result": job["result"]
+    }
+
+@router.get("/shared-report/{report_id}")
+async def get_shared_report(report_id: str):
+    """
+    🚀 VIRAL SHARING: Public shared report for viral growth
+    
+    This endpoint enables contractors to share reports with clients/colleagues,
+    driving organic traffic and new user acquisition.
+    """
+    # For MVP, we'll return a sample shared report
+    # In production, you'd store report data and retrieve by report_id
+    
+    report_generator = ValueReportGenerator()
+    
+    # Mock shared report data (in production, retrieve from database)
+    class SharedResultData:
+        def __init__(self):
+            self.heating_load_btu_hr = 61393
+            self.cooling_load_btu_hr = 23314
+            self.heating_tons = 5.1
+            self.cooling_tons = 1.9
+            self.heating_per_sqft = 33.1
+            self.cooling_per_sqft = 12.6
+            self.total_conditioned_area_sqft = 1853
+            self.zones_created = 2
+            self.spaces_detected = 8
+            self.confidence_score = 0.92
+            self.bonus_over_garage = True
+            self.garage_detected = True
+    
+    shared_report = report_generator.generate_complete_report(
+        pipeline_result=SharedResultData(),
+        zip_code="99006",
+        user_subscription_status="free",  # Always treat shared as free version
+        report_context="shared"  # 🎯 VIRAL CONTEXT
+    )
+    
+    return {
+        "report_id": report_id,
+        "status": "public",
+        "report": shared_report,
+        "viral_message": "Professional HVAC load calculations made simple"
     }
 
 @router.get("/users/{email}/can-upload")
