@@ -18,6 +18,9 @@ from app.services.s3_storage import storage_service
 from pipeline_v3 import run_pipeline_v3
 from services.report_generator import ValueReportGenerator
 
+# Import Redis job storage
+from app.services.job_storage import job_storage
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -90,7 +93,7 @@ async def upload_blueprint(
         # CRITICAL: Create job record IMMEDIATELY to prevent 404 race condition
         from datetime import datetime
         initial_status = "processing" if should_process_immediately else "pending_upgrade"
-        jobs[job_id] = {
+        job_data = {
             "status": initial_status,
             "progress": 0,
             "filename": file.filename,
@@ -105,6 +108,9 @@ async def upload_blueprint(
             "needs_upgrade": needs_upgrade,
             "saved_file_path": None  # Will store S3 path for pending jobs
         }
+        
+        # Save to Redis (with fallback to in-memory for local dev)
+        job_storage.save_job(job_id, job_data)
         
         # Validate file type
         if not file.filename.lower().endswith('.pdf'):
@@ -127,7 +133,7 @@ async def upload_blueprint(
         
         # 📊 DATA COLLECTION: Save original blueprint to S3
         s3_path = await storage_service.save_upload(job_id, content, file.filename)
-        jobs[job_id]["saved_file_path"] = s3_path
+        job_storage.update_job(job_id, {"saved_file_path": s3_path})
         
         # CRITICAL: Mark free report as used if this is a new user's first report
         # Also ensure user exists with device fingerprint tracking
@@ -178,7 +184,7 @@ async def upload_blueprint(
         user_inputs.update(pipeline_ready_inputs)
         
         # Update job with user inputs
-        jobs[job_id]["user_inputs"] = user_inputs
+        job_storage.update_job(job_id, {"user_inputs": user_inputs})
         
         logger.info(f"🎯 ACTIVE INPUTS: {[k for k in user_inputs.keys() if k in ['total_sqft', 'floor_count']]} (pipeline integrated)")
         logger.info(f"📊 FUTURE INPUTS: {list(pipeline_ready_inputs.keys())} (stored for analytics + future integration)")
@@ -234,8 +240,7 @@ async def process_blueprint_async(
     """
     try:
         # Update progress
-        jobs[job_id]["status"] = "processing"
-        jobs[job_id]["progress"] = 10
+        job_storage.update_job(job_id, {"status": "processing", "progress": 10})
         
         logger.info(f"Job {job_id}: Starting pipeline_v3 processing")
         
@@ -361,14 +366,14 @@ async def get_job_status(job_id: str):
     """
     # DEBUG: Log job lookup attempts
     logger.info(f"🔍 JOB LOOKUP: Searching for job {job_id}")
-    logger.info(f"🔍 JOBS IN MEMORY: {len(jobs)} total jobs")
-    logger.info(f"🔍 RECENT JOBS: {list(jobs.keys())[-5:] if jobs else 'None'}")
+    logger.info(f"🔍 TOTAL JOBS: {job_storage.get_job_count()} total jobs")
+    logger.info(f"🔍 RECENT JOBS: {job_storage.get_recent_jobs()}")
     
-    if job_id not in jobs:
-        logger.error(f"❌ JOB NOT FOUND: {job_id} not in jobs dictionary")
+    job = job_storage.get_job(job_id)
+    if not job:
+        logger.error(f"❌ JOB NOT FOUND: {job_id} not in storage")
         raise HTTPException(status_code=404, detail="Job not found")
     
-    job = jobs[job_id]
     logger.info(f"✅ JOB FOUND: {job_id} with status {job['status']}")
     
     return JobResponse(
