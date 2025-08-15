@@ -101,6 +101,9 @@ class PipelineV3Result:
     # Timing
     processing_time_seconds: float = 0.0
     
+    # Location
+    zip_code: str = ""
+    
     # Raw data for debugging
     raw_extractions: Optional[Dict[str, Any]] = None
     
@@ -202,7 +205,7 @@ class PipelineV3:
             logger.info("PHASE 3: ZONE-BASED MANUAL J CALCULATIONS")
             logger.info("="*40)
             
-            results = self._calculate_zone_loads(building_model, extraction_data)
+            results = self._calculate_zone_loads(building_model, extraction_data, zip_code)
             
             # Add metadata and validation
             processing_time = (datetime.now() - start_time).total_seconds()
@@ -474,24 +477,16 @@ class PipelineV3:
             len(warnings)
         )
         
-        # 14. Apply Industry-Grade Safety Factors for Equipment Sizing
+        # 14. Use Manual J compliant calculations (no additional safety factors)
+        # Climate zone data is already properly used in base calculations for design temperatures
         climate_zone = extraction_data.get('climate_data', {}).get('zone', '5B')
-        logger.info(f"🔍 APPLYING SAFETY FACTORS: base_heating={total_heating:.0f}, zone={climate_zone}")
+        logger.info(f"✅ MANUAL J COMPLIANT: Climate zone {climate_zone} used for proper design temperatures")
+        logger.info(f"✅ NO ADDITIONAL MULTIPLIERS: Using accurate base calculations")
+        logger.info(f"   Final heating: {total_heating:,.0f} BTU/hr")
+        logger.info(f"   Final cooling: {total_cooling:,.0f} BTU/hr")
+        final_heating, final_cooling = total_heating, total_cooling
         
-        try:
-            final_heating, final_cooling = self._apply_industry_safety_factors(
-                total_heating, 
-                total_cooling, 
-                climate_zone, 
-                confidence,
-                building_model
-            )
-            logger.info(f"🔍 SAFETY FACTORS SUCCESS: final_heating={final_heating:.0f}")
-        except Exception as e:
-            logger.error(f"❌ SAFETY FACTORS ERROR: {e}")
-            final_heating, final_cooling = total_heating, total_cooling
-        
-        # 15. Prepare result with industry-ready sizing
+        # 15. Prepare result with Manual J compliant sizing
         processing_time = (datetime.now() - start_time).total_seconds()
         
         result = PipelineV3Result(
@@ -1931,7 +1926,7 @@ class PipelineV3:
         
         return final_heating, final_cooling
     
-    def _calculate_zone_loads(self, building_model: BuildingThermalModel, extraction_data: Dict) -> 'PipelineV3Result':
+    def _calculate_zone_loads(self, building_model: BuildingThermalModel, extraction_data: Dict, zip_code: str) -> 'PipelineV3Result':
         """
         Phase 3: Calculate zone-based Manual J loads
         This implements V3's zone-based approach for proper load calculations
@@ -1979,98 +1974,13 @@ class PipelineV3:
             total_heating += zone_heating
             total_cooling += zone_cooling
         
-        # 🏠 DUCT LOSS CALCULATIONS: Apply distribution losses based on duct configuration
-        # Get duct location - prioritize user input, then AI detection
-        user_duct_location = None
-        if extraction_data.get('user_inputs', {}).get('duct_config'):
-            duct_config = extraction_data['user_inputs']['duct_config']
-            duct_location_mapping = {
-                'ducted_attic': 'vented_attic',
-                'ducted_crawl': 'crawlspace', 
-                'ductless': 'none'
-            }
-            user_duct_location = duct_location_mapping.get(duct_config)
-        
-        if user_duct_location:
-            duct_location = user_duct_location
-            logger.info(f"🏠 Using user duct config: {extraction_data['user_inputs']['duct_config']} → {duct_location}")
-        else:
-            # Default AI detection logic
-            foundation_type = extraction_data.get('building_data', {}).get('foundation_type', 'crawlspace')
-            if foundation_type == 'basement':
-                duct_location = 'basement'
-            else:
-                duct_location = 'crawlspace'  # Conservative default
-        
-        # Calculate duct loss multipliers based on ACCA Manual J guidelines
-        if duct_location == 'vented_attic':
-            # Attic ducts: Highest losses due to extreme temperatures
-            duct_loss_heating = 1.20  # +20% for heating
-            duct_loss_cooling = 1.15  # +15% for cooling
-            duct_loss_reason = "Attic ducts (+20% heating, +15% cooling)"
-        elif duct_location == 'crawlspace':
-            # Crawlspace ducts: Moderate losses
-            duct_loss_heating = 1.10  # +10% for heating
-            duct_loss_cooling = 1.10  # +10% for cooling  
-            duct_loss_reason = "Crawlspace ducts (+10% heating, +10% cooling)"
-        elif duct_location == 'basement':
-            # Basement ducts: Lowest losses (conditioned or semi-conditioned)
-            duct_loss_heating = 1.05  # +5% for heating
-            duct_loss_cooling = 1.05  # +5% for cooling
-            duct_loss_reason = "Basement ducts (+5% heating, +5% cooling)"
-        elif duct_location == 'none':
-            # Ductless systems: No duct losses
-            duct_loss_heating = 1.0   # No losses
-            duct_loss_cooling = 1.0   # No losses
-            duct_loss_reason = "Ductless system (no duct losses)"
-        else:
-            # Default to moderate losses for unknown configurations
-            duct_loss_heating = 1.10
-            duct_loss_cooling = 1.10
-            duct_loss_reason = f"Unknown duct location: {duct_location} (using default +10%)"
-        
-        # Apply duct losses to total loads
-        loads_before_duct = {'heating': total_heating, 'cooling': total_cooling}
-        total_heating *= duct_loss_heating
-        total_cooling *= duct_loss_cooling
-        
-        logger.info(f"\n🏠 DUCT LOSS CALCULATIONS:")
-        logger.info(f"   Configuration: {duct_location}")
-        logger.info(f"   Before duct losses: {loads_before_duct['heating']:,.0f} heating, {loads_before_duct['cooling']:,.0f} cooling BTU/hr")
-        logger.info(f"   Duct loss factors: {duct_loss_heating:.2f} heating, {duct_loss_cooling:.2f} cooling")
-        logger.info(f"   After duct losses: {total_heating:,.0f} heating, {total_cooling:,.0f} cooling BTU/hr")
-        logger.info(f"   Reason: {duct_loss_reason}")
-        
-        # 🔥 HEATING FUEL INTEGRATION: Apply fuel-specific sizing adjustments
-        heating_fuel = extraction_data.get('user_inputs', {}).get('heating_fuel', 'gas')
-        fuel_sizing_factor = 1.0
-        fuel_reason = "Standard sizing"
-        
-        if heating_fuel == 'heat_pump':
-            # Heat pumps need conservative sizing for cold weather performance
-            fuel_sizing_factor = 1.05  # +5% for heat pump backup heat consideration
-            fuel_reason = "Heat pump conservative sizing (+5% for cold weather backup)"
-        elif heating_fuel == 'electric':
-            # Electric resistance heating is 100% efficient but expensive to run
-            fuel_sizing_factor = 1.0   # No adjustment needed
-            fuel_reason = "Electric resistance heating (no sizing adjustment)"
-        elif heating_fuel == 'gas':
-            # Gas furnaces are the baseline - most efficient and responsive
-            fuel_sizing_factor = 1.0   # No adjustment needed  
-            fuel_reason = "Gas furnace baseline (no sizing adjustment)"
-        else:
-            fuel_reason = f"Unknown heating fuel: {heating_fuel} (no adjustment)"
-        
-        # Apply heating fuel sizing factor
-        loads_before_fuel = {'heating': total_heating}
-        total_heating *= fuel_sizing_factor
-        
-        logger.info(f"\n🔥 HEATING FUEL CONSIDERATIONS:")
-        logger.info(f"   Fuel type: {heating_fuel}")
-        logger.info(f"   Before fuel adjustment: {loads_before_fuel['heating']:,.0f} heating BTU/hr")
-        logger.info(f"   Fuel sizing factor: {fuel_sizing_factor:.2f}")
-        logger.info(f"   After fuel adjustment: {total_heating:,.0f} heating BTU/hr")
-        logger.info(f"   Reason: {fuel_reason}")
+        # ✅ MANUAL J COMPLIANT: Using base calculations without non-standard multipliers
+        # Duct losses and equipment considerations are already properly accounted for in base Manual J calculations
+        # No additional safety factors, duct loss multipliers, or fuel adjustments applied
+        logger.info(f"\n✅ MANUAL J COMPLIANT LOADS:")
+        logger.info(f"   Base heating load: {total_heating:,.0f} BTU/hr")
+        logger.info(f"   Base cooling load: {total_cooling:,.0f} BTU/hr")
+        logger.info(f"   No additional multipliers applied (per ACCA Manual J standards)")
         
         # Apply diversity factors for whole-house sizing
         logger.info("\n3.2 Applying diversity factors...")
@@ -2223,28 +2133,13 @@ class PipelineV3:
         
         logger.info(f"✅ Reliability-enhanced loads: {design_heating:,.0f} heating, {design_cooling:,.0f} cooling BTU/hr")
         
-        # 🏗️ APPLY INDUSTRY-GRADE SAFETY FACTORS (Moved to correct execution path)
-        climate_zone = extraction_data.get('climate_data', {}).get('zone', '5B')
-        logger.info(f"🔍 APPLYING SAFETY FACTORS: base_heating={design_heating:.0f}, zone={climate_zone}")
+        # ✅ MANUAL J COMPLIANT: Using reliability-enhanced calculations without additional safety factors
+        logger.info(f"✅ FINAL MANUAL J COMPLIANT LOADS:")
+        logger.info(f"   Final heating: {design_heating:,.0f} BTU/hr") 
+        logger.info(f"   Final cooling: {design_cooling:,.0f} BTU/hr")
+        logger.info(f"   No additional safety factors applied (per ACCA Manual J standards)")
         
-        try:
-            final_heating_with_safety, final_cooling_with_safety = self._apply_industry_safety_factors(
-                design_heating, 
-                design_cooling, 
-                climate_zone, 
-                final_confidence,
-                building_model
-            )
-            logger.info(f"🔍 SAFETY FACTORS SUCCESS: final_heating={final_heating_with_safety:.0f}")
-        except Exception as e:
-            logger.error(f"❌ SAFETY FACTORS ERROR: {e}")
-            final_heating_with_safety, final_cooling_with_safety = design_heating, design_cooling
-        
-        # Update final values with safety factors applied
-        design_heating = final_heating_with_safety
-        design_cooling = final_cooling_with_safety
-        
-        # Recalculate derived values with safety factors
+        # Calculate derived values from Manual J compliant loads
         heating_per_sqft = design_heating / total_area if total_area > 0 else 0
         cooling_per_sqft = design_cooling / total_area if total_area > 0 else 0
         heating_tons = design_heating / 12000
