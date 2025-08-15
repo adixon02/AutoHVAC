@@ -359,10 +359,17 @@ async def get_job_status(job_id: str):
     """
     Get status of a processing job
     """
+    # DEBUG: Log job lookup attempts
+    logger.info(f"🔍 JOB LOOKUP: Searching for job {job_id}")
+    logger.info(f"🔍 JOBS IN MEMORY: {len(jobs)} total jobs")
+    logger.info(f"🔍 RECENT JOBS: {list(jobs.keys())[-5:] if jobs else 'None'}")
+    
     if job_id not in jobs:
+        logger.error(f"❌ JOB NOT FOUND: {job_id} not in jobs dictionary")
         raise HTTPException(status_code=404, detail="Job not found")
     
     job = jobs[job_id]
+    logger.info(f"✅ JOB FOUND: {job_id} with status {job['status']}")
     
     return JobResponse(
         job_id=job_id,
