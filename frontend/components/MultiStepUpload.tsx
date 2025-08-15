@@ -107,7 +107,7 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
       ductConfig: 'ducted_attic',
       heatingFuel: 'gas',
       zipCode: '',
-      buildingOrientation: '',
+      buildingOrientation: 'not_sure',
       email: ''
     })
     setError(null)
