@@ -25,11 +25,17 @@ function generateDeviceFingerprint(): string {
 interface ProjectData {
   projectName: string
   blueprintFile: File | null
-  ductConfig: 'ducted_attic' | 'ducted_crawl' | 'ductless' | ''
-  heatingFuel: 'gas' | 'heat_pump' | 'electric' | ''
+  // Core Required Fields
+  squareFootage: string  // User input - most critical for accuracy
   zipCode: string
-  buildingOrientation: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW' | ''
   email: string
+  
+  // Optional Fields with Smart Defaults
+  numberOfStories: '1' | '2' | '3+' | 'not_sure'
+  heatingFuel: 'gas' | 'heat_pump' | 'electric' | 'not_sure'
+  ductConfig: 'ducted_attic' | 'ducted_crawl' | 'ductless' | 'not_sure'
+  windowPerformance: 'standard' | 'high_performance' | 'premium' | 'not_sure'
+  buildingOrientation: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW' | 'not_sure'
 }
 
 interface MultiStepUploadProps {
@@ -53,14 +59,20 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
   const [projectData, setProjectData] = useState<ProjectData>({
     projectName: '',
     blueprintFile: null,
-    ductConfig: 'ducted_attic', // Pre-selected default
-    heatingFuel: 'gas', // Pre-selected default
+    // Core required fields
+    squareFootage: '',
     zipCode: '',
-    buildingOrientation: '', // Will be selected in step 5
-    email: savedEmail // Pre-fill email if we have it
+    email: savedEmail, // Pre-fill email if we have it
+    
+    // Optional fields with smart defaults (most common for new construction)
+    numberOfStories: '2', // Most common new construction
+    heatingFuel: 'heat_pump', // Most common in new construction 2020+
+    ductConfig: 'not_sure', // Let AI detect unless user knows
+    windowPerformance: 'not_sure', // Let AI detect unless user knows  
+    buildingOrientation: 'not_sure' // Let AI detect unless user knows
   })
 
-  const totalSteps = 7 // 7 steps including building orientation
+  const totalSteps = 8 // Enhanced with square footage and additional accuracy fields
 
   // Handle initial file when modal opens
   useEffect(() => {
@@ -118,21 +130,23 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
           <div>
             <h2 className="text-xl font-semibold text-gray-900">
               {currentStep === 1 && 'Start Your HVAC Analysis'}
-              {currentStep === 2 && 'What type of ductwork?'}
-              {currentStep === 3 && 'What heating system will you use?'}
-              {currentStep === 4 && 'What\'s the project location?'}
-              {currentStep === 5 && 'Building Orientation'}
-              {currentStep === 6 && 'Almost done!'}
-              {currentStep === 7 && 'Where should we send your analysis?'}
+              {currentStep === 2 && 'Tell us about your building'}
+              {currentStep === 3 && 'What type of ductwork?'}
+              {currentStep === 4 && 'What heating system will you use?'}
+              {currentStep === 5 && 'What\'s the project location?'}
+              {currentStep === 6 && 'Building Orientation'}
+              {currentStep === 7 && 'Almost done!'}
+              {currentStep === 8 && 'Where should we send your analysis?'}
             </h2>
             <p className="text-sm text-gray-500 mt-1">
               {currentStep === 1 && 'Upload your blueprint and give your project a name'}
-              {currentStep === 2 && 'This affects your system efficiency calculations'}
-              {currentStep === 3 && 'This determines equipment recommendations'}
-              {currentStep === 4 && 'We need the ZIP code for accurate climate data'}
-              {currentStep === 5 && 'Which direction does the front of your building face?'}
-              {currentStep === 6 && 'Review your selections'}
-              {currentStep === 7 && 'Enter your email to receive your HVAC analysis report'}
+              {currentStep === 2 && 'Help us calculate your specific building loads accurately'}
+              {currentStep === 3 && 'This affects your system efficiency calculations'}
+              {currentStep === 4 && 'This determines equipment recommendations'}
+              {currentStep === 5 && 'We need the ZIP code for accurate climate data'}
+              {currentStep === 6 && 'Which direction does the front of your building face?'}
+              {currentStep === 7 && 'Review your selections'}
+              {currentStep === 8 && 'Enter your email to receive your HVAC analysis report'}
             </p>
           </div>
           <button
@@ -196,8 +210,18 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
             />
           )}
 
-          {/* Step 2: Duct Configuration */}
+          {/* Step 2: Building Basics */}
           {currentStep === 2 && (
+            <Step2BuildingBasics
+              projectData={projectData}
+              updateProjectData={updateProjectData}
+              onNext={nextStep}
+              onPrev={prevStep}
+            />
+          )}
+
+          {/* Step 3: Duct Configuration */}
+          {currentStep === 3 && (
             <Step2DuctConfig
               projectData={projectData}
               updateProjectData={updateProjectData}
@@ -206,8 +230,8 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
             />
           )}
 
-          {/* Step 3: Heating System */}
-          {currentStep === 3 && (
+          {/* Step 4: Heating System */}
+          {currentStep === 4 && (
             <Step3HeatingSystem
               projectData={projectData}
               updateProjectData={updateProjectData}
@@ -216,8 +240,8 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
             />
           )}
 
-          {/* Step 4: ZIP Code Collection */}
-          {currentStep === 4 && (
+          {/* Step 5: ZIP Code Collection */}
+          {currentStep === 5 && (
             <Step4ZipCode
               projectData={projectData}
               updateProjectData={updateProjectData}
@@ -228,8 +252,8 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
             />
           )}
 
-          {/* Step 5: Building Orientation */}
-          {currentStep === 5 && (
+          {/* Step 6: Building Orientation */}
+          {currentStep === 6 && (
             <Step5Orientation
               projectData={projectData}
               updateProjectData={updateProjectData}
@@ -238,8 +262,8 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
             />
           )}
 
-          {/* Step 6: Review */}
-          {currentStep === 6 && (
+          {/* Step 7: Review */}
+          {currentStep === 7 && (
             <Step6Review
               projectData={projectData}
               onNext={nextStep}
@@ -247,8 +271,8 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
             />
           )}
 
-          {/* Step 7: Email Collection (moved to end for micro-engagement) */}
-          {currentStep === 7 && (
+          {/* Step 8: Email Collection (moved to end for micro-engagement) */}
+          {currentStep === 8 && (
             <Step7EmailCollection
               projectData={projectData}
               updateProjectData={updateProjectData}
@@ -269,15 +293,20 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
     setError(null)
     
     try {
-      // Create FormData with all collected information + device fingerprint for anti-fraud
+      // Create FormData with enhanced user inputs for maximum load calculation accuracy
       const formData = new FormData()
       formData.append('file', projectData.blueprintFile!)
       formData.append('project_label', projectData.projectName)
       formData.append('email', projectData.email)
       formData.append('zip_code', projectData.zipCode)
-      formData.append('duct_config', projectData.ductConfig)
+      
+      // 🎯 ENHANCED USER INPUTS: Critical data for accurate load calculations
+      formData.append('square_footage', projectData.squareFootage)
+      formData.append('number_of_stories', projectData.numberOfStories)
       formData.append('heating_fuel', projectData.heatingFuel)
-      formData.append('building_orientation', projectData.buildingOrientation || 'unknown')
+      formData.append('duct_config', projectData.ductConfig)
+      formData.append('window_performance', projectData.windowPerformance)
+      formData.append('building_orientation', projectData.buildingOrientation)
       
       // 🔒 ANTI-FRAUD: Add device fingerprint to prevent multiple fake emails
       const deviceFingerprint = generateDeviceFingerprint()
@@ -581,6 +610,122 @@ function Step7EmailCollection({ projectData, updateProjectData, onPrev, onSubmit
       </div>
       
       {/* Account creation now happens after analysis completion */}
+    </div>
+  )
+}
+
+function Step2BuildingBasics({ projectData, updateProjectData, onNext, onPrev }: any) {
+  const [error, setError] = useState('')
+
+  const validateAndNext = () => {
+    // Validate square footage is provided
+    if (!projectData.squareFootage || projectData.squareFootage.trim() === '') {
+      setError('Please enter the square footage of your building')
+      return
+    }
+    
+    // Validate square footage is a reasonable number
+    const sqft = parseFloat(projectData.squareFootage)
+    if (isNaN(sqft) || sqft < 200 || sqft > 50000) {
+      setError('Please enter a valid square footage between 200 and 50,000 sq ft')
+      return
+    }
+    
+    setError('')
+    onNext()
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Square Footage Input - Most Critical Field */}
+      <div>
+        <label className="block text-sm font-medium text-brand-700 mb-2">
+          Square Footage <span className="text-red-500">*</span>
+        </label>
+        <div className="relative">
+          <input
+            type="number"
+            value={projectData.squareFootage}
+            onChange={(e) => updateProjectData({ squareFootage: e.target.value })}
+            placeholder="1,853"
+            className="w-full px-4 py-3 border border-gray-300 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors pr-16"
+          />
+          <span className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm">
+            sq ft
+          </span>
+        </div>
+        <p className="mt-2 text-sm text-gray-500">
+          💡 This is the most critical measurement for accurate load calculations. Most homes are 1,200-3,000 sq ft.
+        </p>
+      </div>
+
+      {/* Number of Stories - Simple Selection */}
+      <div>
+        <label className="block text-sm font-medium text-brand-700 mb-3">
+          Number of Stories
+        </label>
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { value: '1', label: '1 Story', icon: '🏠' },
+            { value: '2', label: '2 Stories', icon: '🏘️' },
+            { value: '3+', label: '3+ Stories', icon: '🏢' }
+          ].map((option) => (
+            <label
+              key={option.value}
+              className={`relative flex flex-col items-center p-4 border-2 rounded-xl cursor-pointer transition-all ${
+                projectData.numberOfStories === option.value
+                  ? 'border-brand-500 bg-brand-50 text-brand-700'
+                  : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              <input
+                type="radio"
+                name="numberOfStories"
+                value={option.value}
+                checked={projectData.numberOfStories === option.value}
+                onChange={(e) => updateProjectData({ numberOfStories: e.target.value })}
+                className="sr-only"
+              />
+              <span className="text-2xl mb-2">{option.icon}</span>
+              <span className="text-sm font-medium text-center">{option.label}</span>
+            </label>
+          ))}
+        </div>
+        <p className="mt-2 text-sm text-gray-500">
+          🎯 This helps us calculate room-by-room loads and multi-story air distribution accurately.
+        </p>
+      </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+          <div className="flex items-start">
+            <svg className="w-5 h-5 text-red-500 mt-0.5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div className="flex-1">
+              <h4 className="text-sm font-medium text-red-800 mb-1">Required Information</h4>
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Navigation Buttons */}
+      <div className="flex space-x-4">
+        <button
+          onClick={onPrev}
+          className="flex-1 px-6 py-3 border border-gray-300 rounded-xl font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          Back
+        </button>
+        <button
+          onClick={validateAndNext}
+          className="flex-1 btn-primary text-lg py-3"
+        >
+          Continue →
+        </button>
+      </div>
     </div>
   )
 }
@@ -904,6 +1049,21 @@ function Step6Review({ projectData, onNext, onPrev }: any) {
           <div className="flex justify-between items-center py-2 border-b border-gray-200">
             <span className="text-sm text-gray-600">Blueprint File</span>
             <span className="text-sm font-medium text-gray-900">{projectData.blueprintFile?.name}</span>
+          </div>
+          
+          <div className="flex justify-between items-center py-2 border-b border-gray-200">
+            <span className="text-sm text-gray-600">Square Footage</span>
+            <span className="text-sm font-medium text-gray-900">{projectData.squareFootage ? `${projectData.squareFootage} sq ft` : 'Not specified'}</span>
+          </div>
+          
+          <div className="flex justify-between items-center py-2 border-b border-gray-200">
+            <span className="text-sm text-gray-600">Number of Stories</span>
+            <span className="text-sm font-medium text-gray-900">
+              {projectData.numberOfStories === '1' && '1 Story'}
+              {projectData.numberOfStories === '2' && '2 Stories'}
+              {projectData.numberOfStories === '3+' && '3+ Stories'}
+              {!projectData.numberOfStories && 'Not specified'}
+            </span>
           </div>
           
           <div className="flex justify-between items-center py-2 border-b border-gray-200">
