@@ -47,7 +47,7 @@ async def upload_blueprint(
     file: UploadFile = File(...),
     zip_code: str = Form(...),
     email: str = Form(...),  # CRITICAL: Email required for paywall enforcement
-    device_fingerprint: Optional[str] = Form(None),  # ANTI-FRAUD: Device fingerprint
+    # Removed device_fingerprint parameter
     openai_api_key: Optional[str] = Form(None),
     # 🎯 ENHANCED USER INPUTS: Strategic fields for maximum load calculation accuracy
     project_label: Optional[str] = Form(None),  # Project name
@@ -70,13 +70,13 @@ async def upload_blueprint(
         client_ip = request.client.host if request.client else "unknown"
         
         # CRITICAL PAYWALL CHECK: Enforce business model before processing
-        logger.info(f"🔒 PAYWALL CHECK: Checking upload permission for {email} (Device: {device_fingerprint[:12] if device_fingerprint else 'None'}...)")
+        logger.info(f"🔒 PAYWALL CHECK: Checking upload permission for {email}")
         
         if not user_service.validate_email_format(email):
             raise HTTPException(status_code=400, detail="Invalid email format")
         
         # ENHANCED ANTI-FRAUD: Check both email AND device fingerprint
-        can_upload = user_service.can_upload_new_report(email, session, device_fingerprint, client_ip)
+        can_upload = user_service.can_upload_new_report(email, session)
         
         # Check if user can process immediately or needs to upgrade
         should_process_immediately = can_upload
@@ -137,7 +137,7 @@ async def upload_blueprint(
         
         # CRITICAL: Mark free report as used if this is a new user's first report
         # Also ensure user exists with device fingerprint tracking
-        user = user_service.get_or_create_user(email, session, device_fingerprint, client_ip)
+        user = user_service.get_or_create_user(email, session)
         is_first_report = not user.free_report_used and should_process_immediately
         
         # 🎯 COLLECT ENHANCED USER INPUTS: Maximum accuracy data for pipeline_v3

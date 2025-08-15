@@ -61,22 +61,18 @@ class UserService:
         return True
     
     @staticmethod
-    def get_or_create_user(email: str, session: Session, device_fingerprint: str = None, ip_address: str = None) -> User:
+    def get_or_create_user(email: str, session: Session) -> User:
         """Get existing user or create new one with device fingerprint"""
         statement = select(User).where(User.email == email)
         result = session.exec(statement)
         user = result.first()
         
         if not user:
-            user = User(
-                email=email,
-                device_fingerprint=device_fingerprint,
-                ip_address=ip_address
-            )
+            user = User(email=email)
             session.add(user)
             session.commit()
             session.refresh(user)
-            logger.info(f"📱 DEVICE TRACKED: Created user {email} with device {device_fingerprint[:12] if device_fingerprint else 'None'}...")
+            logger.info(f"✅ Created user {email}")
         
         return user
     
@@ -108,26 +104,13 @@ class UserService:
         return not user.free_report_used
     
     @staticmethod
-    def can_upload_new_report(email: str, session: Session, device_fingerprint: str = None, ip_address: str = None) -> bool:
+    def can_upload_new_report(email: str, session: Session) -> bool:
         """
         CRITICAL PAYWALL ENFORCEMENT: Check if user can upload a new report
-        Enhanced with anti-fraud device fingerprinting to prevent multiple fake emails
         """
         user = UserService.get_user_by_email(email, session)
         
-        # ANTI-FRAUD: Only check device fraud if this is a NEW user trying to bypass with different email
-        # Don't block existing legitimate users on same device
-        if device_fingerprint and not user:
-            # Only block if this device has used free report with different email
-            device_usage = session.query(UserModel).filter(
-                UserModel.device_fingerprint == device_fingerprint,
-                UserModel.free_report_used == True,
-                UserModel.email != email  # KEY FIX: Only block different emails
-            ).first()
-            
-            if device_usage:
-                logger.warning(f"🚫 DEVICE FRAUD BLOCKED: Device {device_fingerprint[:12]}... already used free report with different email")
-                return False
+        # REMOVED: Device fingerprinting anti-fraud (was causing too many false positives)
         
         if not user:
             return True  # New users can upload their first report
