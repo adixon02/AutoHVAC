@@ -298,10 +298,12 @@ async def process_blueprint_async(
             from datetime import datetime
             completion_time = datetime.utcnow().isoformat()
             
-            jobs[job_id]["status"] = "completed"
-            jobs[job_id]["progress"] = 100
-            jobs[job_id]["result"] = result_data
-            jobs[job_id]["completed_at"] = completion_time
+            job_storage.update_job(job_id, {
+                "status": "completed",
+                "progress": 100,
+                "result": result_data,
+                "completed_at": completion_time
+            })
             
             # CRITICAL: Mark free report as used on successful completion
             if is_first_report:
@@ -313,7 +315,9 @@ async def process_blueprint_async(
             
             # 📊 DATA COLLECTION: Save comprehensive job data to S3
             try:
-                await storage_service.save_complete_job_data(job_id, jobs[job_id])
+                job_data = job_storage.get_job(job_id)
+                if job_data:
+                    await storage_service.save_complete_job_data(job_id, job_data)
                 logger.info(f"📊 DATA: Saved complete dataset for job {job_id}")
             except Exception as e:
                 logger.error(f"📊 DATA ERROR: Failed to save complete data for {job_id}: {e}")
@@ -323,13 +327,17 @@ async def process_blueprint_async(
             
         else:
             from datetime import datetime
-            jobs[job_id]["status"] = "failed"
-            jobs[job_id]["error"] = f"Pipeline processing failed: No valid result returned"
-            jobs[job_id]["completed_at"] = datetime.utcnow().isoformat()
+            job_storage.update_job(job_id, {
+                "status": "failed",
+                "error": f"Pipeline processing failed: No valid result returned",
+                "completed_at": datetime.utcnow().isoformat()
+            })
             
             # 📊 DATA COLLECTION: Save failure data for analysis
             try:
-                await storage_service.save_complete_job_data(job_id, jobs[job_id])
+                job_data = job_storage.get_job(job_id)
+                if job_data:
+                    await storage_service.save_complete_job_data(job_id, job_data)
                 logger.info(f"📊 DATA: Saved failure data for job {job_id}")
             except Exception as data_error:
                 logger.error(f"📊 DATA ERROR: Failed to save failure data for {job_id}: {data_error}")
@@ -339,13 +347,17 @@ async def process_blueprint_async(
     except Exception as e:
         from datetime import datetime
         
-        jobs[job_id]["status"] = "failed"
-        jobs[job_id]["error"] = str(e)
-        jobs[job_id]["completed_at"] = datetime.utcnow().isoformat()
+        job_storage.update_job(job_id, {
+            "status": "failed", 
+            "error": str(e),
+            "completed_at": datetime.utcnow().isoformat()
+        })
         
         # 📊 DATA COLLECTION: Save error data for analysis
         try:
-            await storage_service.save_complete_job_data(job_id, jobs[job_id])
+            job_data = job_storage.get_job(job_id)
+            if job_data:
+                await storage_service.save_complete_job_data(job_id, job_data)
             logger.info(f"📊 DATA: Saved error data for job {job_id}")
         except Exception as data_error:
             logger.error(f"📊 DATA ERROR: Failed to save error data for {job_id}: {data_error}")
@@ -389,10 +401,9 @@ async def get_job_result(job_id: str):
     """
     Get detailed result of completed job
     """
-    if job_id not in jobs:
+    job = job_storage.get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    job = jobs[job_id]
     
     if job["status"] != "completed":
         raise HTTPException(status_code=400, detail=f"Job not completed. Status: {job['status']}")
