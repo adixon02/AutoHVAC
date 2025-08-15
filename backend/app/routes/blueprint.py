@@ -75,19 +75,14 @@ async def upload_blueprint(
         # ENHANCED ANTI-FRAUD: Check both email AND device fingerprint
         can_upload = user_service.can_upload_new_report(email, session, device_fingerprint, client_ip)
         
-        if not can_upload:
-            logger.warning(f"🚫 PAYWALL BLOCKED: {email} attempted upload but not allowed")
-            raise HTTPException(
-                status_code=402,  # Payment Required
-                detail={
-                    "error": "subscription_required",
-                    "message": "You've used your free report. Please upgrade to continue.",
-                    "upgrade_required": True,
-                    "email": email
-                }
-            )
+        # Check if user can process immediately or needs to upgrade
+        should_process_immediately = can_upload
+        needs_upgrade = not can_upload
         
-        logger.info(f"✅ PAYWALL PASSED: {email} can upload")
+        if should_process_immediately:
+            logger.info(f"✅ PROCESSING IMMEDIATELY: {email} can upload and process")
+        else:
+            logger.info(f"📋 UPLOAD TO PENDING: {email} can upload but needs upgrade to process")
         
         # Generate unique job ID
         job_id = str(uuid.uuid4())
@@ -107,8 +102,9 @@ async def upload_blueprint(
         
         # Initialize job status with enhanced tracking
         from datetime import datetime
+        initial_status = "processing" if should_process_immediately else "pending_upgrade"
         jobs[job_id] = {
-            "status": "processing",
+            "status": initial_status,
             "progress": 0,
             "filename": file.filename,
             "project_label": project_label or file.filename,  # Use project name if provided
@@ -118,7 +114,9 @@ async def upload_blueprint(
             "created_at": datetime.utcnow().isoformat(),
             "completed_at": None,
             "result": None,
-            "error": None
+            "error": None,
+            "needs_upgrade": needs_upgrade,
+            "saved_file_path": None  # Will store S3 path for pending jobs
         }
         
         # Save uploaded file temporarily AND to S3 for data collection
@@ -128,12 +126,13 @@ async def upload_blueprint(
             temp_file_path = temp_file.name
         
         # 📊 DATA COLLECTION: Save original blueprint to S3
-        await storage_service.save_upload(job_id, content, file.filename)
+        s3_path = await storage_service.save_upload(job_id, content, file.filename)
+        jobs[job_id]["saved_file_path"] = s3_path
         
         # CRITICAL: Mark free report as used if this is a new user's first report
         # Also ensure user exists with device fingerprint tracking
         user = user_service.get_or_create_user(email, session, device_fingerprint, client_ip)
-        is_first_report = not user.free_report_used
+        is_first_report = not user.free_report_used and should_process_immediately
         
         # 🎯 COLLECT ENHANCED USER INPUTS: Maximum accuracy data for pipeline_v3
         form_inputs = {
@@ -181,18 +180,34 @@ async def upload_blueprint(
         logger.info(f"🎯 ACTIVE INPUTS: {[k for k in user_inputs.keys() if k in ['total_sqft', 'floor_count']]} (pipeline integrated)")
         logger.info(f"📊 FUTURE INPUTS: {list(pipeline_ready_inputs.keys())} (stored for analytics + future integration)")
         
-        # Start processing in background with enhanced user inputs
-        asyncio.create_task(process_blueprint_async(
-            job_id, temp_file_path, zip_code, api_key, email, session, is_first_report, user_inputs, project_label
-        ))
-        
-        logger.info(f"Started job {job_id} for file {file.filename}, zip {zip_code}")
-        
-        return UploadResponse(
-            job_id=job_id,
-            status="processing",
-            message="Blueprint upload successful. Processing started."
-        )
+        if should_process_immediately:
+            # Start processing in background with enhanced user inputs
+            asyncio.create_task(process_blueprint_async(
+                job_id, temp_file_path, zip_code, api_key, email, session, is_first_report, user_inputs, project_label
+            ))
+            
+            logger.info(f"Started job {job_id} for file {file.filename}, zip {zip_code}")
+            
+            return UploadResponse(
+                job_id=job_id,
+                status="processing",
+                message="Blueprint upload successful. Processing started."
+            )
+        else:
+            # Save job as pending upgrade
+            logger.info(f"Saved job {job_id} for file {file.filename} - pending upgrade")
+            
+            # Clean up temp file since we're not processing immediately
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
+            
+            return UploadResponse(
+                job_id=job_id,
+                status="pending_upgrade",
+                message="Blueprint uploaded successfully. Upgrade to Pro to process your report."
+            )
         
     except HTTPException:
         raise

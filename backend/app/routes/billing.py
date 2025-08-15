@@ -424,12 +424,12 @@ async def _process_pending_blueprints_for_user(email: str):
         import os
         import asyncio
         
-        # Find jobs for this user that were blocked by paywall
+        # Find jobs for this user that are pending upgrade
         user_jobs = []
         for job_id, job in jobs.items():
             if (job.get("email") == email and 
-                job.get("status") in ["failed", "blocked"] and
-                "subscription_required" in str(job.get("error", ""))):
+                job.get("status") == "pending_upgrade" and
+                job.get("needs_upgrade") == True):
                 user_jobs.append((job_id, job))
         
         if user_jobs:
@@ -451,20 +451,44 @@ async def _process_pending_blueprints_for_user(email: str):
                     
                     logger.info(f"🔄 Auto-processing job {job_id} for upgraded user {email}")
                     
-                    # Get a fresh database session
-                    with Session(get_session().__next__()) as fresh_session:
-                        # Start processing (this will create a new background task)
-                        asyncio.create_task(process_blueprint_async(
-                            job_id=job_id,
-                            pdf_path=None,  # We'll need to handle this differently
-                            zip_code=job.get("zip_code", "99006"),
-                            api_key=api_key,
-                            email=email,
-                            session=fresh_session,
-                            is_first_report=False,  # They're now a paying customer
-                            user_inputs=job.get("user_inputs", {}),
-                            project_label=job.get("project_label", "Upgraded User Project")
-                        ))
+                    # Download file from S3 and create temp file for processing
+                    s3_path = job.get("saved_file_path")
+                    if s3_path:
+                        try:
+                            # Get the file content from S3
+                            from app.services.s3_storage import storage_service
+                            import tempfile
+                            
+                            file_content = await storage_service.download_file(s3_path)
+                            
+                            # Create temporary file for processing
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                                temp_file.write(file_content)
+                                temp_file_path = temp_file.name
+                            
+                            # Get a fresh database session
+                            with Session(get_session().__next__()) as fresh_session:
+                                # Start processing (this will create a new background task)
+                                asyncio.create_task(process_blueprint_async(
+                                    job_id=job_id,
+                                    pdf_path=temp_file_path,
+                                    zip_code=job.get("zip_code", "99006"),
+                                    api_key=api_key,
+                                    email=email,
+                                    session=fresh_session,
+                                    is_first_report=False,  # They're now a paying customer
+                                    user_inputs=job.get("user_inputs", {}),
+                                    project_label=job.get("project_label", "Upgraded User Project")
+                                ))
+                                
+                        except Exception as download_error:
+                            logger.error(f"Failed to download file for job {job_id}: {download_error}")
+                            jobs[job_id]["status"] = "failed"
+                            jobs[job_id]["error"] = f"Failed to retrieve saved file: {download_error}"
+                    else:
+                        logger.error(f"No saved file path for job {job_id}")
+                        jobs[job_id]["status"] = "failed"
+                        jobs[job_id]["error"] = "No saved file found for processing"
                         
                 except Exception as e:
                     logger.error(f"Failed to auto-process job {job_id}: {e}")
