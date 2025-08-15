@@ -87,20 +87,7 @@ async def upload_blueprint(
         # Generate unique job ID
         job_id = str(uuid.uuid4())
         
-        # Validate file type
-        if not file.filename.lower().endswith('.pdf'):
-            raise HTTPException(status_code=400, detail="Only PDF files are supported")
-        
-        # Validate zip code
-        if not zip_code or not zip_code.isdigit() or len(zip_code) != 5:
-            raise HTTPException(status_code=400, detail="Valid 5-digit zip code required")
-        
-        # Use environment API key if not provided
-        api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise HTTPException(status_code=400, detail="OpenAI API key required")
-        
-        # Initialize job status with enhanced tracking
+        # CRITICAL: Create job record IMMEDIATELY to prevent 404 race condition
         from datetime import datetime
         initial_status = "processing" if should_process_immediately else "pending_upgrade"
         jobs[job_id] = {
@@ -118,6 +105,19 @@ async def upload_blueprint(
             "needs_upgrade": needs_upgrade,
             "saved_file_path": None  # Will store S3 path for pending jobs
         }
+        
+        # Validate file type
+        if not file.filename.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="Only PDF files are supported")
+        
+        # Validate zip code
+        if not zip_code or not zip_code.isdigit() or len(zip_code) != 5:
+            raise HTTPException(status_code=400, detail="Valid 5-digit zip code required")
+        
+        # Use environment API key if not provided
+        api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise HTTPException(status_code=400, detail="OpenAI API key required")
         
         # Save uploaded file temporarily AND to S3 for data collection
         content = await file.read()
