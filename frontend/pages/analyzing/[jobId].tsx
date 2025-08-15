@@ -12,7 +12,7 @@ import CompletionAccountGate from '../../components/CompletionAccountGate'
 
 interface JobStatus {
   job_id: string
-  status: 'pending' | 'processing' | 'completed' | 'failed'
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'pending_upgrade'
   result?: any
   error?: string
 }
@@ -512,6 +512,7 @@ export default function AnalyzingPage() {
               <h1 className="display-md text-brand-700 mb-4">
                 {jobStatus.status === 'completed' ? 'Analysis Complete!' :
                  jobStatus.status === 'failed' ? 'Analysis Failed' :
+                 jobStatus.status === 'pending_upgrade' ? 'Blueprint Ready to Process' :
                  'Analyzing Your Blueprint'}
               </h1>
               
@@ -681,6 +682,80 @@ export default function AnalyzingPage() {
                       </div>
                     </>
                   )}
+                </div>
+              ) : jobStatus.status === 'pending_upgrade' ? (
+                <div className="space-y-6">
+                  {/* Upgrade Required Message */}
+                  <div className="alert alert-info">
+                    <div className="flex items-start space-x-4">
+                      <div className="flex-shrink-0">
+                        <svg className="w-6 h-6 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="display-xs text-blue-900 mb-2">
+                          Blueprint Ready to Process
+                        </h3>
+                        <p className="text-blue-800 mb-4">
+                          Your blueprint has been successfully uploaded and is ready for analysis. 
+                          You've already used your free report, so upgrading to Pro will instantly process this blueprint and give you unlimited access to professional HVAC load calculations.
+                        </p>
+                        
+                        <div className="bg-white bg-opacity-50 rounded-xl p-4 space-y-3">
+                          <p className="text-sm font-medium text-blue-900">What you'll get with Pro:</p>
+                          <ul className="text-sm text-blue-700 space-y-1 ml-4">
+                            <li className="flex items-start">
+                              <span className="text-blue-500 mr-2">✓</span>
+                              <span>Instant processing of this blueprint</span>
+                            </li>
+                            <li className="flex items-start">
+                              <span className="text-blue-500 mr-2">✓</span>
+                              <span>Unlimited future reports</span>
+                            </li>
+                            <li className="flex items-start">
+                              <span className="text-blue-500 mr-2">✓</span>
+                              <span>Professional ACCA Manual J calculations</span>
+                            </li>
+                            <li className="flex items-start">
+                              <span className="text-blue-500 mr-2">✓</span>
+                              <span>Equipment sizing recommendations</span>
+                            </li>
+                            <li className="flex items-start">
+                              <span className="text-blue-500 mr-2">✓</span>
+                              <span>Detailed room-by-room load analysis</span>
+                            </li>
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Button */}
+                  <div className="flex justify-center">
+                    <button 
+                      onClick={() => router.push('/api/v1/billing/subscribe')}
+                      className="btn-primary flex items-center justify-center px-8 py-4 text-lg"
+                    >
+                      <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      Upgrade to Pro & Process Now
+                    </button>
+                  </div>
+
+                  {/* Additional Information */}
+                  <div className="alert alert-success">
+                    <div className="flex items-start space-x-3">
+                      <svg className="w-5 h-5 text-green-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <div className="text-sm text-green-800">
+                        <p className="font-medium mb-1">Your blueprint is safely stored</p>
+                        <p>Once you upgrade, this blueprint will be automatically processed within minutes. No need to re-upload!</p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-8">
