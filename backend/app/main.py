@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from datetime import datetime
 
 # Import routes
-from app.routes import blueprint, job, leads, auth, billing
+from app.routes import blueprint, job, leads, auth, billing, admin
 
 # Import database initialization
 from app.database import create_db_and_tables
@@ -63,6 +63,7 @@ app.include_router(job.router, prefix="/api/v1/job")
 app.include_router(leads.router)  # Already has /api/leads prefix
 app.include_router(auth.router)  # Already has /auth prefix
 app.include_router(billing.router, prefix="/api/v1/billing")  # Billing routes
+app.include_router(admin.router, prefix="/admin")  # Admin dashboard
 
 @app.get("/")
 async def root():
