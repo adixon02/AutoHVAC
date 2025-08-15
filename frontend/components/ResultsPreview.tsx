@@ -11,8 +11,8 @@ interface Zone {
 
 interface ResultsPreviewProps {
   result: {
-    heating_total: number
-    cooling_total: number
+    heating_load_btu_hr: number
+    cooling_load_btu_hr: number
     zones: Zone[]
     climate_zone?: string
     equipment_recommendations?: {
@@ -29,8 +29,8 @@ export default function ResultsPreview({ result, userEmail, onCreateAccount }: R
   const router = useRouter()
   
   // Calculate tons from BTU
-  const heatingTons = (result.heating_total / 12000).toFixed(1)
-  const coolingTons = (result.cooling_total / 12000).toFixed(1)
+  const heatingTons = (result.heating_load_btu_hr / 12000).toFixed(1)
+  const coolingTons = (result.cooling_load_btu_hr / 12000).toFixed(1)
   
   return (
     <div className="space-y-6">
@@ -52,7 +52,7 @@ export default function ResultsPreview({ result, userEmail, onCreateAccount }: R
             <div>
               <p className="text-sm font-medium text-blue-700">Total Heating Load</p>
               <p className="text-3xl font-bold text-blue-900 mt-1">
-                {result.heating_total.toLocaleString()} 
+                {result.heating_load_btu_hr.toLocaleString()} 
                 <span className="text-lg font-normal text-blue-700"> BTU/hr</span>
               </p>
               <p className="text-sm text-blue-600 mt-1">≈ {heatingTons} tons</p>
@@ -70,7 +70,7 @@ export default function ResultsPreview({ result, userEmail, onCreateAccount }: R
             <div>
               <p className="text-sm font-medium text-cyan-700">Total Cooling Load</p>
               <p className="text-3xl font-bold text-cyan-900 mt-1">
-                {result.cooling_total.toLocaleString()}
+                {result.cooling_load_btu_hr.toLocaleString()}
                 <span className="text-lg font-normal text-cyan-700"> BTU/hr</span>
               </p>
               <p className="text-sm text-cyan-600 mt-1">≈ {coolingTons} tons</p>

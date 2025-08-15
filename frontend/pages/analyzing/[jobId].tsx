@@ -8,6 +8,7 @@ import { useSession } from 'next-auth/react'
 import Cookies from 'js-cookie'
 import ResultsPreview from '../../components/ResultsPreview'
 import CreatePasswordPrompt from '../../components/CreatePasswordPrompt'
+import CompletionAccountGate from '../../components/CompletionAccountGate'
 
 interface JobStatus {
   job_id: string
@@ -234,6 +235,7 @@ export default function AnalyzingPage() {
   const [currentStatusMessage, setCurrentStatusMessage] = useState(0)
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false)
   const [passwordPromptDismissed, setPasswordPromptDismissed] = useState(false)
+  const [showCompletionGate, setShowCompletionGate] = useState(false)
   
   useEffect(() => {
     // Get email from cookie if not logged in
@@ -306,10 +308,15 @@ export default function AnalyzingPage() {
     } else if (jobStatus?.status === 'completed') {
       // Smooth transition to 100%
       setDisplayProgress(100)
+      
+      // Show completion gate if user isn't logged in but has email
+      if (!session && userEmail) {
+        setShowCompletionGate(true)
+      }
     } else if (jobStatus?.status === 'failed') {
       // Keep at current progress
     }
-  }, [jobStatus?.status])
+  }, [jobStatus?.status, session, userEmail])
 
   // Rotate technical status messages
   useEffect(() => {
@@ -621,46 +628,59 @@ export default function AnalyzingPage() {
                 </div>
               ) : jobStatus.status === 'completed' ? (
                 <div>
-                  {/* Show results immediately */}
-                  <ResultsPreview 
-                    result={jobStatus.result}
-                    userEmail={userEmail}
-                  />
-                  
-                  {/* Action buttons */}
-                  <div className="flex flex-col sm:flex-row gap-3 justify-center mt-8">
-                    {session ? (
-                      <>
-                        <button 
-                          onClick={() => router.push('/dashboard')}
-                          className="btn-primary"
-                        >
-                          View Full Dashboard
-                        </button>
-                        <button 
-                          onClick={() => setShowShareModal(true)}
-                          className="btn-secondary"
-                        >
-                          Share Results
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button 
-                          onClick={() => setShowShareModal(true)}
-                          className="btn-primary"
-                        >
-                          Share Results
-                        </button>
-                        <button 
-                          onClick={() => router.push('/')}
-                          className="btn-secondary"
-                        >
-                          Analyze Another Blueprint
-                        </button>
-                      </>
-                    )}
-                  </div>
+                  {showCompletionGate && userEmail ? (
+                    <CompletionAccountGate
+                      email={userEmail}
+                      jobResult={jobStatus.result}
+                      onSuccess={() => {
+                        setShowCompletionGate(false)
+                        // Results will show after account creation and login
+                      }}
+                    />
+                  ) : (
+                    <>
+                      {/* Show results immediately for logged in users */}
+                      <ResultsPreview 
+                        result={jobStatus.result}
+                        userEmail={userEmail}
+                      />
+                      
+                      {/* Action buttons */}
+                      <div className="flex flex-col sm:flex-row gap-3 justify-center mt-8">
+                        {session ? (
+                          <>
+                            <button 
+                              onClick={() => router.push('/dashboard')}
+                              className="btn-primary"
+                            >
+                              View Full Dashboard
+                            </button>
+                            <button 
+                              onClick={() => setShowShareModal(true)}
+                              className="btn-secondary"
+                            >
+                              Share Results
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button 
+                              onClick={() => setShowShareModal(true)}
+                              className="btn-primary"
+                            >
+                              Share Results
+                            </button>
+                            <button 
+                              onClick={() => router.push('/')}
+                              className="btn-secondary"
+                            >
+                              Analyze Another Blueprint
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-8">

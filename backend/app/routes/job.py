@@ -18,11 +18,47 @@ class JobStatusResponse(BaseModel):
 
 class JobListResponse(BaseModel):
     """Job list response model"""
-    jobs: List[JobStatusResponse]
-    total: int
+    projects: List[JobStatusResponse]  # Changed from "jobs" to "projects" for frontend compatibility
+    total_count: int  # Changed from "total" to "total_count" for frontend compatibility
 
 # Import jobs from blueprint route
 from app.routes.blueprint import jobs
+
+@router.get("/list", response_model=JobListResponse)
+async def list_user_jobs(email: str, limit: int = 50, offset: int = 0):
+    """
+    List jobs for a specific user by email
+    """
+    job_list = []
+    
+    # Filter jobs by user email (for now, return all completed jobs)
+    # In production, you'd filter by user_email field in job data
+    for job_id, job_data in jobs.items():
+        # For now, include all completed jobs as this user's jobs
+        # In production, you'd check: if job_data.get("user_email") == email
+        if job_data["status"] == "completed":
+            job_list.append(JobStatusResponse(
+                job_id=job_id,
+                status=job_data["status"],
+                progress=job_data["progress"],
+                result=job_data["result"],
+                error=job_data["error"],
+                created_at=None,  # TODO: Add timestamps to job storage
+                completed_at=None
+            ))
+    
+    # Sort by job_id (newest first, roughly)
+    job_list = sorted(job_list, key=lambda x: x.job_id, reverse=True)
+    
+    # Apply pagination
+    paginated_jobs = job_list[offset:offset + limit]
+    
+    logger.info(f"Listed {len(paginated_jobs)} jobs for user {email}")
+    
+    return JobListResponse(
+        projects=paginated_jobs,
+        total_count=len(job_list)
+    )
 
 @router.get("/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str):
@@ -102,6 +138,7 @@ async def list_jobs(limit: int = 10, offset: int = 0):
         ))
     
     return JobListResponse(
-        jobs=job_list,
-        total=len(jobs)
+        projects=job_list,
+        total_count=len(jobs)
     )
+

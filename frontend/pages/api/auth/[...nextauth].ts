@@ -1,7 +1,7 @@
 import NextAuth, { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 
 export const authOptions: NextAuthOptions = {
   // Remove Prisma adapter - we're using the backend as source of truth

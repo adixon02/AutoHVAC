@@ -3,7 +3,7 @@ import { useRouter } from 'next/router'
 import { signIn, useSession } from 'next-auth/react'
 import { apiHelpers } from '../lib/fetcher'
 import { apiClient } from '../lib/api-client'
-import AccountCreationModal from './AccountCreationModal'
+// AccountCreationModal no longer needed - using CompletionAccountGate after analysis
 import Cookies from 'js-cookie'
 
 interface ProjectData {
@@ -266,16 +266,16 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
       // Use the existing API helper that has proper endpoint and error handling
       const result = await apiHelpers.uploadBlueprint(formData)
       
-      // Runtime guard: Ensure jobId is present
-      if (!result.jobId) {
-        throw new Error('Upload route returned no jobId - API contract violation')
+      // Runtime guard: Ensure job_id is present (backend uses snake_case)
+      if (!result.job_id) {
+        throw new Error('Upload route returned no job_id - API contract violation')
       }
       
       // Set user email cookie so dashboard recognizes the user
       Cookies.set('user_email', projectData.email, { expires: 30 }) // 30 days
       
       // Redirect to analyzing page
-      router.push(`/analyzing/${result.jobId}`)
+      router.push(`/analyzing/${result.job_id}`)
       handleClose()
       
     } catch (error: any) {
@@ -446,7 +446,7 @@ function Step7EmailCollection({ projectData, updateProjectData, onPrev, onSubmit
   const router = useRouter()
   const savedEmail = session?.user?.email || (typeof window !== 'undefined' ? Cookies.get('user_email') || '' : '')
   const isReturningUser = savedEmail && savedEmail === projectData.email
-  const [showAccountModal, setShowAccountModal] = React.useState(false)
+  // Account modal no longer needed - using completion gate instead
   
   const handleSubmit = async () => {
     if (!projectData.email.trim()) {
@@ -460,48 +460,20 @@ function Step7EmailCollection({ projectData, updateProjectData, onPrev, onSubmit
     setError(null)
     
     try {
-      // Check email status using new lead system
-      const emailCheck = await apiClient.checkEmailStatus(projectData.email)
+      // Simplified flow: Just capture the lead and continue
+      await apiClient.captureLead({
+        email: projectData.email,
+        marketing_consent: true,
+        project_id: undefined // Will be set after upload
+      })
       
-      switch (emailCheck.status) {
-        case 'new':
-          // New user - capture as lead and let them get their free report
-          await apiClient.captureLead({
-            email: projectData.email,
-            marketing_consent: true,
-            project_id: undefined // Will be set after upload
-          })
-          Cookies.set('user_email', projectData.email, { expires: 365 })
-          onSubmit() // Continue to upload and analysis
-          break
-          
-        case 'lead':
-          // Returning lead who used free report - needs to create account
-          setShowAccountModal(true)
-          break
-          
-        case 'user':
-          // Existing user - check if they have a password
-          if (!emailCheck.has_password) {
-            // User without password (likely created via old system) - needs to set password
-            setShowAccountModal(true)
-          } else if (emailCheck.has_subscription) {
-            // Has password and subscription - continue
-            Cookies.set('user_email', projectData.email, { expires: 365 })
-            onSubmit()
-          } else if (!emailCheck.free_report_used) {
-            // Has password but hasn't used free report yet
-            Cookies.set('user_email', projectData.email, { expires: 365 })
-            onSubmit()
-          } else {
-            // Has password, used free report, needs subscription
-            Cookies.set('user_email', projectData.email, { expires: 30 })
-            router.push('/upgrade')
-          }
-          break
-      }
+      // Save email to cookie for later use
+      Cookies.set('user_email', projectData.email, { expires: 365 })
+      
+      // Continue to upload and analysis
+      onSubmit()
     } catch (err: any) {
-      console.error('Email check error:', err)
+      console.error('Lead capture error:', err)
       setError('Failed to process email. Please try again.')
     }
   }
@@ -587,16 +559,7 @@ function Step7EmailCollection({ projectData, updateProjectData, onPrev, onSubmit
         </button>
       </div>
       
-      {/* Account Creation Modal */}
-      <AccountCreationModal
-        isOpen={showAccountModal}
-        email={projectData.email}
-        onClose={() => setShowAccountModal(false)}
-        onSuccess={() => {
-          setShowAccountModal(false)
-          // Don't continue with upload, redirect to upgrade
-        }}
-      />
+      {/* Account creation now happens after analysis completion */}
     </div>
   )
 }

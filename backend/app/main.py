@@ -6,7 +6,10 @@ from fastapi.responses import JSONResponse
 from datetime import datetime
 
 # Import routes
-from app.routes import blueprint, job
+from app.routes import blueprint, job, leads, auth, billing
+
+# Import database initialization
+from app.database import create_db_and_tables
 
 # Set OpenAI API key from environment
 if not os.getenv("OPENAI_API_KEY"):
@@ -25,6 +28,7 @@ app = FastAPI(
 # CORS configuration
 allowed_origins = [
     "http://localhost:3000",
+    "http://localhost:3001",
     "https://autohvac-frontend.onrender.com", 
     "https://autohvac.ai",
 ]
@@ -45,9 +49,20 @@ async def log_requests(request: Request, call_next):
     logger.info(f"🌐 RESPONSE: {response.status_code}")
     return response
 
+# Initialize database tables on startup
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database tables and perform startup tasks"""
+    logger.info("🗄️  Initializing database tables...")
+    create_db_and_tables()
+    logger.info("✅ Database tables initialized")
+
 # Include API routes
 app.include_router(blueprint.router, prefix="/api/v1/blueprint")
 app.include_router(job.router, prefix="/api/v1/job")
+app.include_router(leads.router)  # Already has /api/leads prefix
+app.include_router(auth.router)  # Already has /auth prefix
+app.include_router(billing.router, prefix="/api/billing")  # Billing routes
 
 @app.get("/")
 async def root():

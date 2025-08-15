@@ -118,7 +118,7 @@ export const apiHelpers = {
   getUserProjects: (email: string, limit?: number) => {
     const params = new URLSearchParams({ email })
     if (limit) params.append('limit', limit.toString())
-    return fetcher(`/api/v1/jobs/list?${params.toString()}`)
+    return fetcher(`/api/v1/job/list?${params.toString()}`)
   },
   
   // Job status (uses Next.js API route)

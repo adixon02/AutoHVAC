@@ -2479,20 +2479,30 @@ def run_pipeline_v3(
     pipeline = PipelineV3(openai_api_key=openai_api_key)
     result = pipeline.process_blueprint(pdf_path, zip_code, user_inputs)
     
-    # Convert to dictionary for JSON serialization
+    # Convert to dictionary for JSON serialization with enhanced data collection
     return {
         'heating_load_btu_hr': result.heating_load_btu_hr,
         'cooling_load_btu_hr': result.cooling_load_btu_hr,
-        'zones': len(result.building_model.zones),
+        'heating_tons': result.heating_tons,
+        'cooling_tons': result.cooling_tons,
+        'heating_per_sqft': result.heating_per_sqft,
+        'cooling_per_sqft': result.cooling_per_sqft,
+        'total_conditioned_area_sqft': result.total_conditioned_area_sqft,
+        'zones': len(result.building_model.zones) if result.building_model else 0,
+        'zones_created': len(result.building_model.zones) if result.building_model else 0,
         'spaces': result.spaces_detected,
+        'spaces_detected': result.spaces_detected,
         'zone_loads': result.zone_loads,
         'heating_components': result.heating_components,
         'cooling_components': result.cooling_components,
         'garage_detected': result.garage_detected,
         'bonus_over_garage': result.bonus_over_garage,
         'confidence': result.confidence_score,
+        'confidence_score': result.confidence_score,
         'warnings': result.warnings,
-        'processing_time': result.processing_time_seconds
+        'processing_time': result.processing_time_seconds,
+        'processing_time_seconds': result.processing_time_seconds,
+        'raw_extractions': result.raw_extractions or {}  # Include raw pipeline data for enhanced collection
     }
 
 
