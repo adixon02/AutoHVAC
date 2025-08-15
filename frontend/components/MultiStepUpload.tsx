@@ -6,21 +6,7 @@ import { apiClient } from '../lib/api-client'
 // AccountCreationModal no longer needed - using CompletionAccountGate after analysis
 import Cookies from 'js-cookie'
 
-// 🔒 ANTI-FRAUD: Generate device fingerprint for preventing multiple fake emails
-function generateDeviceFingerprint(): string {
-  const fingerprint = {
-    screen: `${screen.width}x${screen.height}`,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    language: navigator.language,
-    platform: navigator.platform,
-    userAgent: navigator.userAgent.slice(0, 100), // Truncated for privacy
-    colorDepth: screen.colorDepth,
-    pixelRatio: window.devicePixelRatio || 1
-  }
-  
-  // Create a stable hash of the fingerprint
-  return btoa(JSON.stringify(fingerprint)).replace(/[^a-zA-Z0-9]/g, '').slice(0, 64)
-}
+// Device fingerprinting removed (was causing false positives)
 
 interface ProjectData {
   projectName: string
@@ -311,10 +297,7 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
       formData.append('window_performance', projectData.windowPerformance)
       formData.append('building_orientation', projectData.buildingOrientation)
       
-      // 🔒 ANTI-FRAUD: Add device fingerprint to prevent multiple fake emails
-      const deviceFingerprint = generateDeviceFingerprint()
-      formData.append('device_fingerprint', deviceFingerprint)
-      console.log('🔒 Device fingerprint generated:', deviceFingerprint.slice(0, 12) + '...')
+      // Device fingerprinting removed to prevent false positives
 
       // Use the existing API helper that has proper endpoint and error handling
       const result = await apiHelpers.uploadBlueprint(formData)
