@@ -1,8 +1,8 @@
-export const emergencyACReplacementContent = {
+export const blogContent = {
   title: "Emergency AC Replacement: Get Your Home Cool Again Fast (Without Sizing Mistakes)",
   slug: "emergency-ac-replacement",
   excerpt: "Your AC just died in summer heat? Don't panic. Get emergency replacement with proper sizing to avoid costly mistakes. Same-day solutions that work.",
-  metaDescription: "Emergency AC replacement guide: Get same-day cooling with proper sizing. Avoid contractor scams, understand costs, and make smart decisions under pressure.",
+  meta_description: "Emergency AC replacement guide: Get same-day cooling with proper sizing. Avoid contractor scams, understand costs, and make smart decisions under pressure.",
   keywords: [
     "emergency ac replacement",
     "ac died need replacement fast",
@@ -765,3 +765,6 @@ Your AC emergency doesn't have to become a long-term financial disaster. The key
 Don't let an emergency become a decade of regret. Get the right size, the first time, even when time is critical.
   `
 };
+
+// Keep the original export for backward compatibility
+export const emergencyACReplacementContent = blogContent;

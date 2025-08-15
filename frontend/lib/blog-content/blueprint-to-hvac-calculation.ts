@@ -1,7 +1,7 @@
-export const blueprintToHvacCalculationArticle = {
+export const blogContent = {
   slug: 'blueprint-to-hvac-calculation',
   title: 'Blueprint to HVAC Calculation: How AI Transforms 60-Minute Manual Tasks into 60-Second Automated Processes',
-  metaDescription: 'Discover how AI revolutionizes blueprint to HVAC calculation, reducing manual takeoff time from 60 minutes to 60 seconds with 95%+ accuracy.',
+  meta_description: 'Discover how AI revolutionizes blueprint to HVAC calculation, reducing manual takeoff time from 60 minutes to 60 seconds with 95%+ accuracy.',
   publishedAt: '2025-01-15',
   author: 'AutoHVAC Team',
   category: 'Technology',
@@ -591,3 +591,6 @@ The future of HVAC estimation is available today. The only question is: will you
 AutoHVAC is the leading AI-powered platform for HVAC load calculations and system design. Our computer vision technology transforms blueprint analysis from hours to seconds, helping contractors bid more projects, improve accuracy, and scale their operations efficiently.
 `
 };
+
+// Keep the original export for backward compatibility
+export const blueprintToHvacCalculationArticle = blogContent;
