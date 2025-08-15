@@ -104,11 +104,14 @@ export default function MultiStepUpload({ isOpen, onClose, initialFile }: MultiS
     setProjectData({
       projectName: '',
       blueprintFile: null,
-      ductConfig: 'ducted_attic',
-      heatingFuel: 'gas',
+      squareFootage: '',
       zipCode: '',
-      buildingOrientation: 'not_sure',
-      email: ''
+      email: '',
+      numberOfStories: 'not_sure',
+      heatingFuel: 'gas',
+      ductConfig: 'ducted_attic',
+      windowPerformance: 'not_sure',
+      buildingOrientation: 'not_sure'
     })
     setError(null)
     onClose()
