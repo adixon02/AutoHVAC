@@ -177,36 +177,19 @@ export default function ROICalculator({ onGetStarted }: ROICalculatorProps) {
                 </div>
               </div>
 
-              {/* ROI Timeline */}
-              <div className="bg-white p-6 rounded-lg border border-brand-200">
-                <div className="flex items-center mb-4">
-                  <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mr-4">
-                    <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="text-3xl font-bold text-purple-700">{results.timeToROI.toFixed(1)} days</div>
-                    <div className="text-sm text-gray-600">to break even</div>
-                  </div>
-                </div>
-                <p className="text-sm text-gray-600">
-                  AutoHVAC pays for itself in less than {Math.ceil(results.timeToROI)} days, then it's pure profit
-                </p>
-              </div>
             </div>
 
             {/* CTA */}
-            <div className="mt-8 p-6 bg-white/10 backdrop-blur-sm rounded-lg border border-white/20 text-white text-center">
-              <h4 className="text-xl font-semibold mb-2">
+            <div className="mt-8 p-6 bg-white rounded-lg border-2 border-brand-200 text-center">
+              <h4 className="text-xl font-bold mb-2 text-gray-900">
                 Why wait? Get your first report FREE
               </h4>
-              <p className="text-brand-100 mb-4 text-sm">
+              <p className="text-gray-600 mb-4 text-sm font-medium">
                 Zero risk. See the time savings yourself. No credit card required.
               </p>
               <button 
                 onClick={onGetStarted}
-                className="btn-primary bg-white text-brand-700 hover:bg-brand-50 w-full"
+                className="btn-primary w-full"
               >
                 Get My Free Manual J Report
               </button>
@@ -214,23 +197,6 @@ export default function ROICalculator({ onGetStarted }: ROICalculatorProps) {
           </div>
         </div>
 
-        {/* Bottom CTA */}
-        <div className="text-center mt-16">
-          <div className="max-w-2xl mx-auto">
-            <h3 className="text-2xl font-semibold text-white mb-4">
-              The math is clear: AutoHVAC saves you money from day one
-            </h3>
-            <p className="text-brand-100 mb-6">
-              Your first report is completely free. See the difference yourself, with zero commitment.
-            </p>
-            <button 
-              onClick={onGetStarted}
-              className="btn-primary btn-lg bg-white text-brand-700 hover:bg-brand-50"
-            >
-              Calculate My First Report Free
-            </button>
-          </div>
-        </div>
       </div>
       
       <style jsx>{`
