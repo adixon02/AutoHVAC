@@ -122,7 +122,7 @@ export const apiHelpers = {
   },
   
   // Job status (uses Next.js API route)
-  getJobStatus: (jobId: string) => nextApiFetcher(`/api/job/${jobId}`),
+  getJobStatus: (jobId: string) => nextApiFetcher(`/api/v1/blueprint/jobs/${jobId}`),
   
   // Project details
   getProjectDetails: (projectId: string, email: string) => {
