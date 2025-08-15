@@ -81,6 +81,14 @@ async def create_subscription(
         logger.info(f"Successfully created Stripe checkout session for {request.email}: {checkout_session.id}")
         logger.info(f"Checkout URL: {checkout_session.url}")
         
+        # In test mode, immediately activate subscription for better UX
+        if os.getenv("STRIPE_MODE", "test") == "test":
+            logger.info(f"Test mode detected - immediately activating subscription for {request.email}")
+            user_service.activate_subscription(request.email, checkout_session.customer or "test_customer", session)
+            
+            # Auto-process any pending blueprints for this user after upgrade
+            await _process_pending_blueprints_for_user(request.email)
+        
         return SubscribeResponse(checkout_url=checkout_session.url)
         
     except stripe.error.AuthenticationError as e:
@@ -404,3 +412,66 @@ async def _get_user_by_stripe_customer_id(customer_id: str, session: Session):
     statement = select(User).where(User.stripe_customer_id == customer_id)
     result = session.exec(statement)
     return result.first()
+
+async def _process_pending_blueprints_for_user(email: str):
+    """Process any pending/failed blueprints for a newly upgraded user"""
+    try:
+        logger.info(f"🔄 Checking for pending blueprints for upgraded user: {email}")
+        
+        # Import here to avoid circular imports
+        from app.routes.blueprint import jobs, process_blueprint_async
+        from app.database import get_session
+        import os
+        import asyncio
+        
+        # Find jobs for this user that were blocked by paywall
+        user_jobs = []
+        for job_id, job in jobs.items():
+            if (job.get("email") == email and 
+                job.get("status") in ["failed", "blocked"] and
+                "subscription_required" in str(job.get("error", ""))):
+                user_jobs.append((job_id, job))
+        
+        if user_jobs:
+            logger.info(f"🚀 Found {len(user_jobs)} blocked jobs for {email} - processing now!")
+            
+            # Process each blocked job
+            for job_id, job in user_jobs:
+                try:
+                    # Get API key from environment
+                    api_key = os.getenv("OPENAI_API_KEY")
+                    if not api_key:
+                        logger.error(f"Cannot process job {job_id} - no OpenAI API key")
+                        continue
+                    
+                    # Reset job status
+                    jobs[job_id]["status"] = "processing"
+                    jobs[job_id]["progress"] = 0
+                    jobs[job_id]["error"] = None
+                    
+                    logger.info(f"🔄 Auto-processing job {job_id} for upgraded user {email}")
+                    
+                    # Get a fresh database session
+                    with Session(get_session().__next__()) as fresh_session:
+                        # Start processing (this will create a new background task)
+                        asyncio.create_task(process_blueprint_async(
+                            job_id=job_id,
+                            pdf_path=None,  # We'll need to handle this differently
+                            zip_code=job.get("zip_code", "99006"),
+                            api_key=api_key,
+                            email=email,
+                            session=fresh_session,
+                            is_first_report=False,  # They're now a paying customer
+                            user_inputs=job.get("user_inputs", {}),
+                            project_label=job.get("project_label", "Upgraded User Project")
+                        ))
+                        
+                except Exception as e:
+                    logger.error(f"Failed to auto-process job {job_id}: {e}")
+                    
+        else:
+            logger.info(f"No blocked jobs found for {email}")
+            
+    except Exception as e:
+        logger.error(f"Error checking pending blueprints for {email}: {e}")
+        # Don't fail the upgrade process if this fails
