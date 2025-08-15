@@ -10,7 +10,7 @@ export const USE_SMOKE_TEST = process.env.NEXT_PUBLIC_USE_SMOKE_TEST === 'true';
 // API endpoints
 export const API_ENDPOINTS = {
   upload: `${API_BASE}/blueprint/upload`,
-  jobStatus: (jobId: string) => `${API_BASE}/job/${jobId}`,
+  jobStatus: (jobId: string) => `${API_BASE}/blueprint/jobs/${jobId}`,
   health: '/healthz',
 } as const;
 
