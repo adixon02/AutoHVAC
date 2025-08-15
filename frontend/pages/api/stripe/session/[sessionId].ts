@@ -1,7 +1,13 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import Stripe from 'stripe'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+// Use same logic as backend - STRIPE_MODE determines which key to use
+const stripeMode = process.env.STRIPE_MODE || 'test'
+const stripeKey = stripeMode === 'live' 
+  ? process.env.STRIPE_SECRET_KEY 
+  : process.env.STRIPE_SECRET_KEY_TEST
+
+const stripe = new Stripe(stripeKey!, {
   apiVersion: '2025-07-30.basil',
 })
 
