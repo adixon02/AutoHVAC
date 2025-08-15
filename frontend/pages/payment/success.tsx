@@ -5,26 +5,46 @@ import Head from 'next/head'
 
 export default function PaymentSuccess() {
   const router = useRouter()
-  const { data: session } = useSession()
+  const { data: session, status } = useSession()
   const { session_id } = router.query
   const [countdown, setCountdown] = useState(5)
+  const [userEmail, setUserEmail] = useState<string>('')
+  const [needsAccount, setNeedsAccount] = useState(false)
+
+  // Get email from Stripe session
+  useEffect(() => {
+    if (session_id && status !== 'loading') {
+      // Fetch the Stripe session to get customer email
+      fetch(`/api/stripe/session/${session_id}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.customer_email) {
+            setUserEmail(data.customer_email)
+            // If no NextAuth session but we have payment, user needs account
+            setNeedsAccount(!session)
+          }
+        })
+        .catch(err => console.error('Failed to fetch session:', err))
+    }
+  }, [session_id, session, status])
 
   useEffect(() => {
-    // Countdown timer
-    const interval = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval)
-          router.push('/dashboard')
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
-    
-    // Cleanup on unmount
-    return () => clearInterval(interval)
-  }, [router])
+    // Only start countdown if we don't need account creation
+    if (!needsAccount && userEmail) {
+      const interval = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(interval)
+            router.push('/dashboard')
+            return 0
+          }
+          return prev - 1
+        })
+      }, 1000)
+      
+      return () => clearInterval(interval)
+    }
+  }, [router, needsAccount, userEmail])
 
   return (
     <>
@@ -44,10 +64,13 @@ export default function PaymentSuccess() {
             
             {/* Success Message */}
             <h1 className="display-md text-gray-900 mb-2">
-              Welcome to AutoHVAC Pro!
+              {needsAccount ? 'Payment Successful!' : 'Welcome to AutoHVAC Pro!'}
             </h1>
             <p className="text-gray-600 mb-8">
-              Your subscription is now active. You have unlimited access to all Pro features.
+              {needsAccount 
+                ? 'Your subscription is active! Create an account to access your Pro features.'
+                : 'Your subscription is now active. You have unlimited access to all Pro features.'
+              }
             </p>
             
             {/* What's Included */}
@@ -71,25 +94,57 @@ export default function PaymentSuccess() {
               </ul>
             </div>
             
-            {/* Countdown */}
-            <div className="mb-6">
-              <p className="text-sm text-gray-600 mb-2">
-                Redirecting to your dashboard in
-              </p>
-              <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-100 rounded-full">
-                <span className="text-2xl font-bold text-brand-600">
-                  {countdown}
-                </span>
+            {/* Conditional Content Based on Account Status */}
+            {needsAccount ? (
+              // User needs to create account
+              <div className="space-y-6">
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
+                  <h3 className="font-semibold text-blue-900 mb-2">Complete Your Setup</h3>
+                  <p className="text-sm text-blue-800 mb-4">
+                    Your payment was successful and your Pro subscription is active for <strong>{userEmail}</strong>. 
+                    Create an account to access your dashboard and start uploading blueprints.
+                  </p>
+                  <button
+                    onClick={() => router.push(`/auth/signup?email=${encodeURIComponent(userEmail)}&plan=pro`)}
+                    className="w-full btn-primary"
+                  >
+                    Create Account & Access Dashboard
+                  </button>
+                </div>
+                <div className="text-center">
+                  <p className="text-sm text-gray-600 mb-2">
+                    Already have an account with this email?
+                  </p>
+                  <button
+                    onClick={() => router.push(`/auth/signin?callbackUrl=/dashboard&email=${encodeURIComponent(userEmail)}`)}
+                    className="text-brand-600 hover:text-brand-700 font-medium text-sm"
+                  >
+                    Sign in instead
+                  </button>
+                </div>
               </div>
-            </div>
-            
-            {/* CTA Button */}
-            <button
-              onClick={() => router.push('/dashboard')}
-              className="w-full btn-primary btn-lg"
-            >
-              Go to Dashboard Now
-            </button>
+            ) : (
+              // User has account, show countdown
+              <div className="space-y-6">
+                <div className="mb-6">
+                  <p className="text-sm text-gray-600 mb-2">
+                    Redirecting to your dashboard in
+                  </p>
+                  <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-100 rounded-full">
+                    <span className="text-2xl font-bold text-brand-600">
+                      {countdown}
+                    </span>
+                  </div>
+                </div>
+                
+                <button
+                  onClick={() => router.push('/dashboard')}
+                  className="w-full btn-primary btn-lg"
+                >
+                  Go to Dashboard Now
+                </button>
+              </div>
+            )}
             
             {/* Quick Actions */}
             <div className="mt-6 pt-6 border-t">

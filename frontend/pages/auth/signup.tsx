@@ -23,10 +23,15 @@ export default function SignUp() {
     hasLength: false,
   })
   
-  // Redirect if already signed in
+  // Pre-fill email from query params and handle redirect
   useEffect(() => {
     if (status === 'authenticated') {
       router.push('/dashboard')
+    }
+    
+    // Pre-fill email if coming from payment success
+    if (router.query.email && typeof router.query.email === 'string') {
+      setEmail(router.query.email)
     }
   }, [status, router])
   
