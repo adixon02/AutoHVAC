@@ -734,7 +734,21 @@ export default function AnalyzingPage() {
                   {/* Action Button */}
                   <div className="flex justify-center">
                     <button 
-                      onClick={() => router.push('/api/v1/billing/subscribe')}
+                      onClick={async () => {
+                        try {
+                          const email = session?.user?.email || userEmail
+                          if (!email) {
+                            console.error('No email available for checkout')
+                            return
+                          }
+                          const response = await apiHelpers.createCheckoutSession(email)
+                          if (response.checkout_url) {
+                            window.location.href = response.checkout_url
+                          }
+                        } catch (error) {
+                          console.error('Failed to start checkout:', error)
+                        }
+                      }}
                       className="btn-primary flex items-center justify-center px-8 py-4 text-lg"
                     >
                       <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
