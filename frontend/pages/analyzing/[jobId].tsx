@@ -757,7 +757,8 @@ export default function AnalyzingPage() {
                           }
                         } catch (error) {
                           console.error('Failed to start checkout:', error)
-                          alert(`Failed to start checkout: ${error.message || error}. Please try again or contact support.`)
+                          const errorMessage = error instanceof Error ? error.message : String(error)
+                          alert(`Failed to start checkout: ${errorMessage}. Please try again or contact support.`)
                         }
                       }}
                       className="btn-primary flex items-center justify-center px-8 py-4 text-lg"
