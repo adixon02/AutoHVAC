@@ -6,6 +6,7 @@ Handles complex configurations like bonus-over-garage
 
 import logging
 import json
+import os
 import time
 import re
 import math
@@ -1156,7 +1157,10 @@ class PipelineV3:
         
         # INDUSTRY-LEADING GPT VISION AREA CALCULATION
         # If text extraction failed or returned fallback defaults, use GPT Vision
-        if total_sqft <= 0 or total_sqft in [2000.0, 2599]:  # Common fallback values
+        # Can be disabled via DISABLE_GPT_VISION environment variable
+        use_gpt_vision = os.getenv('DISABLE_GPT_VISION', 'false').lower() != 'true'
+        
+        if use_gpt_vision and (total_sqft <= 0 or total_sqft in [2000.0, 2599]):  # Common fallback values
             logger.info("🎯 Text extraction failed - using GPT Vision for SMART area calculation")
             vision_sqft = self._calculate_area_with_gpt_vision(pdf_path, page_classifications)
             if vision_sqft > 0:
@@ -1165,6 +1169,9 @@ class PipelineV3:
             else:
                 logger.warning("⚠️ GPT Vision failed - using intelligent fallback")
                 total_sqft = 1850  # Optimized for typical residential blueprints
+        elif not use_gpt_vision and (total_sqft <= 0 or total_sqft in [2000.0, 2599]):
+            logger.info("🚫 GPT Vision disabled - using intelligent fallback for area calculation")
+            total_sqft = 1850  # Optimized for typical residential blueprints
         
         # SMART MULTI-STORY DETECTION: Check for bonus rooms before setting floor count
         bonus_sqft = self._detect_bonus_areas(extraction_data['text_blocks'])
