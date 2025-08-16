@@ -126,6 +126,39 @@ class DecisionEngine:
             quality_assessment=quality_assessment
         )
     
+    def process_calculation(
+        self, 
+        ai_result: Dict[str, Any], 
+        envelope: Dict[str, Any], 
+        processing_metadata: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Legacy adapter method for backward compatibility.
+        Converts 3-parameter call to full 7-parameter process() call.
+        """
+        # Extract required data from ai_result and envelope
+        extraction_data = ai_result.get('extraction_data', {})
+        geometry_data = envelope.get('geometry_data', {})
+        climate_data = extraction_data.get('climate_data', {})
+        energy_specs = extraction_data.get('energy_specs', None)
+        
+        # Call the full process method
+        result = self.process(
+            ai_result, envelope, extraction_data, 
+            geometry_data, climate_data, energy_specs, processing_metadata
+        )
+        
+        # Convert DecisionEngineResult back to dictionary for compatibility
+        return {
+            'heating_load_btu_hr': result.heating_load_btu_hr,
+            'cooling_load_btu_hr': result.cooling_load_btu_hr,
+            'confidence': result.confidence,
+            'routing_decision': result.routing_decision,
+            'method_breakdown': result.method_breakdown,
+            'applied_policies': result.applied_policies,
+            'quality_assessment': result.quality_assessment
+        }
+    
     def _convert_ai_result_to_candidate(self, ai_result: Dict[str, Any]) -> Candidate:
         """Convert AI calculation result to candidate format"""
         

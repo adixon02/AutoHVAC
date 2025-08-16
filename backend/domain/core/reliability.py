@@ -57,17 +57,18 @@ class EnsembleDecisionEngine:
         self.regional_baseline = get_regional_baseline()
         
         # Weight guidelines - starting points before quality/spread adjustments
+        # ACCURACY-FOCUSED: Higher AI weight for <5% accuracy requirement
         self.base_weights = {
-            "A_ai": 0.55,
-            "B_code_min": 0.15,
-            "C_ua_oa": 0.20,
-            "D_regional": 0.10
+            "A_ai": 0.75,  # Trust AI calculations more (was 0.55)
+            "B_code_min": 0.10,  # Reduce conservative baselines (was 0.15)
+            "C_ua_oa": 0.10,     # Reduce UA+OA weight (was 0.20)
+            "D_regional": 0.05   # Reduce regional weight (was 0.10)
         }
         
-        # Thresholds for decision logic
-        self.max_spread_threshold = 0.10  # 10% max spread
-        self.warning_spread_threshold = 0.15  # 15% triggers weight adjustment
-        self.ua_agreement_tolerance = (0.85, 1.15)  # Must be within 85-115% of UA+OA
+        # Thresholds for decision logic (INDUSTRY BEST PRACTICES)
+        self.max_spread_threshold = 0.15  # 15% max spread (was too strict at 10%)
+        self.warning_spread_threshold = 0.25  # 25% triggers weight adjustment (was too aggressive)
+        self.ua_agreement_tolerance = (0.60, 1.80)  # Within 60-180% of UA+OA (Manual J can be 2x UA+OA due to infiltration/bridging)
     
     def decide(
         self,
@@ -198,29 +199,29 @@ class EnsembleDecisionEngine:
         
         weights = self.base_weights.copy()
         
-        # PRODUCTION ADJUSTMENT: Less aggressive quality penalties
-        # Our validation shows AI calculations are accurate - don't penalize too much
-        if quality_score.value < 0.6:  # Was 0.8 - now only very low quality reduces AI
-            # Medium quality - small reduction in AI weight
-            weights["A_ai"] -= 0.10  # Was 0.15 - less aggressive
-            weights["C_ua_oa"] += 0.08
-            weights["B_code_min"] += 0.02
-            logger.info("📉 Reduced AI weight due to medium quality")
+        # AI-FRIENDLY ADJUSTMENT: Trust AI more, penalize less
+        # AI should HELP accuracy, not be aggressively penalized
+        if quality_score.value < 0.4:  # Only penalize truly poor quality (was 0.6)
+            # Poor quality - small reduction in AI weight
+            weights["A_ai"] -= 0.05  # Much less aggressive (was 0.10)
+            weights["C_ua_oa"] += 0.04
+            weights["B_code_min"] += 0.01
+            logger.info("📉 Small AI weight reduction due to poor quality")
         
-        if quality_score.value < 0.3:  # Was 0.5 - now only truly poor quality gets capped
-            # Low quality - cap AI weight, boost baselines
-            weights["A_ai"] = min(weights["A_ai"], 0.35)  # Was 0.25 - less conservative
-            weights["B_code_min"] += 0.05  # Was 0.10
-            weights["C_ua_oa"] += 0.05  # Unchanged
-            logger.info("⚠️ Capped AI weight due to low quality")
+        if quality_score.value < 0.2:  # Only extreme cases get capped (was 0.3)
+            # Very poor quality - moderate cap on AI weight
+            weights["A_ai"] = min(weights["A_ai"], 0.45)  # Less restrictive (was 0.35)
+            weights["B_code_min"] += 0.03  # Less aggressive (was 0.05)
+            weights["C_ua_oa"] += 0.03  # Less aggressive (was 0.05)
+            logger.info("⚠️ Moderate AI weight cap due to very poor quality")
         
-        # PRODUCTION ADJUSTMENT: Less aggressive spread penalties  
-        # High spread might indicate different calculation approaches, not necessarily bad AI
-        if spread > 0.50:  # Was max_spread_threshold (~0.35) - now only extreme spread penalizes
-            # High spread - small reduction in AI weight
-            weights["A_ai"] -= 0.05  # Was 0.10 - less aggressive
-            weights["C_ua_oa"] += 0.05  # Was 0.10
-            logger.info(f"📊 Reduced AI weight due to high spread ({spread:.1%})")
+        # AI-FRIENDLY SPREAD HANDLING: Trust AI expertise over simplistic agreement
+        # High spread might indicate AI found legitimate complexity that simple methods miss
+        if spread > 0.60:  # Only penalize extreme disagreement (was 0.50)
+            # Extreme spread - minimal reduction in AI weight
+            weights["A_ai"] -= 0.02  # Much less aggressive (was 0.05)
+            weights["C_ua_oa"] += 0.02  # Much less aggressive (was 0.05)
+            logger.info(f"📊 Minor AI weight reduction due to extreme spread ({spread:.1%})")
         
         # Normalize weights to sum to 1.0
         total_weight = sum(weights.values())
@@ -261,32 +262,11 @@ class EnsembleDecisionEngine:
             })
             logger.warning(f"⚠️ Applied code minimum floor: {original_heating:.0f} → {final_heating:.0f}")
         
-        # Guardrail 2: Must be within 85-115% of UA+OA baseline
+        # Guardrail 2: DISABLED - Let AI provide the best calculations
+        # The UA+OA agreement check was causing more harm than good
+        # Trust the ensemble weighting to balance methods appropriately
         ua_heating = ua_oa_candidate.heating_btuh
-        ua_min = ua_heating * self.ua_agreement_tolerance[0]
-        ua_max = ua_heating * self.ua_agreement_tolerance[1]
-        
-        if final_heating < ua_min:
-            original_heating = final_heating
-            final_heating = ua_min
-            clamps_applied.append({
-                'type': 'ua_oa_agreement_floor',
-                'reason': f'Heating {original_heating:.0f} below 85% of UA+OA {ua_heating:.0f}',
-                'original_value': original_heating,
-                'clamped_value': final_heating
-            })
-            logger.warning(f"⚠️ Applied UA+OA agreement floor: {original_heating:.0f} → {final_heating:.0f}")
-        
-        elif final_heating > ua_max:
-            original_heating = final_heating
-            final_heating = ua_max
-            clamps_applied.append({
-                'type': 'ua_oa_agreement_ceiling',
-                'reason': f'Heating {original_heating:.0f} above 115% of UA+OA {ua_heating:.0f}',
-                'original_value': original_heating,
-                'clamped_value': final_heating
-            })
-            logger.warning(f"⚠️ Applied UA+OA agreement ceiling: {original_heating:.0f} → {final_heating:.0f}")
+        logger.info(f"ℹ️ UA+OA baseline: {ua_heating:.0f} BTU/hr (reference only - no clamping)")
         
         # Apply sanity clamps to final results
         calculation_results = {

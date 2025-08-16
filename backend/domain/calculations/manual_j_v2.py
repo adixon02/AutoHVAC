@@ -125,8 +125,8 @@ class ManualJCalculatorV2:
     INTERNAL_GAINS = {
         'people_sensible': 230,  # BTU/hr per person
         'people_latent': 200,    # BTU/hr per person
-        'equipment': 3.4,         # BTU/hr per sqft
-        'lighting': 1.0,          # W/sqft (× 3.41 for BTU/hr)
+        'equipment': 2.56,        # BTU/hr per sqft (0.75 W/sqft × 3.41 = residential standard)
+        'lighting': 0.75,         # W/sqft (residential standard, not commercial)
     }
     
     # Cooling Load Temperature Differences (CLTD)

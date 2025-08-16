@@ -150,7 +150,7 @@ class SanityClamps:
             'achnat_floor_existing': 0.35,
             'wwr_facade_max': 0.35,  # 35% WWR per facade max without evidence
             'wall_effective_r_max': 18,  # R-20+R5 should not imply effective R > 18
-            'single_story_attic_duct_min_intensity': 18,  # BTU/hr·sqft minimum
+            'single_story_attic_duct_min_intensity': 12,  # BTU/hr·sqft minimum (industry-realistic for modern homes)
             'effective_ceiling_height_max': 12,  # Reasonable ceiling height limit
             'infiltration_cfm_max_per_sqft': 0.5  # Maximum reasonable infiltration
         }

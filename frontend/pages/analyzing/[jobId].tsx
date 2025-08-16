@@ -644,6 +644,7 @@ export default function AnalyzingPage() {
                       <ResultsPreview 
                         result={jobStatus.result}
                         userEmail={userEmail}
+                        isLoggedIn={!!session}
                       />
                       
                       {/* Action buttons */}

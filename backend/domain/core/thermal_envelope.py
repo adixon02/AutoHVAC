@@ -357,8 +357,8 @@ class ThermalEnvelopeBuilder:
                     window_shgc=envelope.window_shgc,
                     design_temp=70,  # Default
                     occupancy=2 if 'bedroom' in room.room_type.lower() else 1,
-                    equipment_load_w=room.area_sqft * 3.4,  # W/sqft
-                    lighting_load_w=room.area_sqft * 1.0  # W/sqft
+                    equipment_load_w=room.area_sqft * 0.75,  # W/sqft (residential standard)
+                    lighting_load_w=room.area_sqft * 0.75  # W/sqft (residential standard)
                 )
                 zones.append(zone)
         else:
@@ -384,8 +384,8 @@ class ThermalEnvelopeBuilder:
                     window_shgc=envelope.window_shgc,
                     design_temp=70,
                     occupancy=3,  # Assume 3 people per floor
-                    equipment_load_w=floor_area * 3.4,
-                    lighting_load_w=floor_area * 1.0
+                    equipment_load_w=floor_area * 0.75,  # W/sqft (residential standard)
+                    lighting_load_w=floor_area * 0.75  # W/sqft (residential standard)
                 )
                 zones.append(zone)
         
