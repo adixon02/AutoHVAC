@@ -5,7 +5,6 @@ import { apiHelpers } from '../../lib/fetcher'
 import Head from 'next/head'
 import ShareModal from '../../components/ShareModal'
 import { useSession } from 'next-auth/react'
-import Cookies from 'js-cookie'
 import ResultsPreview from '../../components/ResultsPreview'
 import CreatePasswordPrompt from '../../components/CreatePasswordPrompt'
 import CompletionAccountGate from '../../components/CompletionAccountGate'
@@ -238,14 +237,11 @@ export default function AnalyzingPage() {
   const [showCompletionGate, setShowCompletionGate] = useState(false)
   
   useEffect(() => {
-    // Get email from cookie if not logged in
-    if (!session?.user?.email) {
-      const email = Cookies.get('user_email')
-      if (email) {
-        setUserEmail(email)
-      }
-    } else {
+    // Use session email only - no more cookies
+    if (session?.user?.email) {
       setUserEmail(session.user.email)
+    } else {
+      setUserEmail(null)
     }
   }, [session])
   
@@ -737,10 +733,10 @@ export default function AnalyzingPage() {
                     <button 
                       onClick={async () => {
                         try {
-                          const email = session?.user?.email || userEmail
+                          const email = session?.user?.email
                           if (!email) {
-                            alert('No email found. Please refresh the page and try again.')
-                            console.error('No email available for checkout')
+                            alert('Please sign in to upgrade your account.')
+                            console.error('No authenticated user for checkout')
                             return
                           }
                           

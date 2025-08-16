@@ -2,7 +2,6 @@ import React, { memo } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/router'
 import { apiClient } from '../../lib/api-client'
-import Cookies from 'js-cookie'
 import { type ProjectData } from './index'
 
 interface Step8Props {
@@ -26,7 +25,7 @@ function Step8EmailCollection({
 }: Step8Props) {
   const { data: session } = useSession()
   const router = useRouter()
-  const savedEmail = session?.user?.email || (typeof window !== 'undefined' ? Cookies.get('user_email') || '' : '')
+  const savedEmail = session?.user?.email || ''
   const isReturningUser = savedEmail && savedEmail === projectData.email
   
   const handleSubmit = async () => {
@@ -47,7 +46,6 @@ function Step8EmailCollection({
         project_id: undefined
       })
       
-      Cookies.set('user_email', projectData.email, { expires: 365 })
       onSubmit()
     } catch (err: any) {
       console.error('Lead capture error:', err)

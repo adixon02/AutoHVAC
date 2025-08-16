@@ -2,26 +2,23 @@ import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import Head from 'next/head'
 import { apiHelpers } from '../lib/fetcher'
-import Cookies from 'js-cookie'
+import { useSession } from 'next-auth/react'
 
 export default function Upgrade() {
   const router = useRouter()
+  const { data: session } = useSession()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [userEmail, setUserEmail] = useState<string | null>(null)
   const [stripeUnavailable, setStripeUnavailable] = useState(false)
   const [justCreatedAccount, setJustCreatedAccount] = useState(false)
+  
+  // Use session email only - no more cookies
+  const userEmail = session?.user?.email || null
 
   useEffect(() => {
     // Check if user just created account
     if (router.query.account_created === 'true') {
       setJustCreatedAccount(true)
-    }
-    
-    // Get email from cookie
-    const email = Cookies.get('user_email')
-    if (email) {
-      setUserEmail(email)
     }
   }, [router.query])
 

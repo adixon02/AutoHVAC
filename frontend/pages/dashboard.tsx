@@ -5,7 +5,6 @@ import Head from 'next/head'
 import { apiHelpers } from '../lib/fetcher'
 import ProjectCard from '../components/ProjectCard'
 import MultiStepUpload from '../components/MultiStepUpload'
-import Cookies from 'js-cookie'
 import { useSession, signOut } from 'next-auth/react'
 
 interface Project {

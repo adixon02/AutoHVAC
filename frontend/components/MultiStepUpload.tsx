@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/router'
 import { useSession } from 'next-auth/react'
 import { apiHelpers } from '../lib/fetcher'
-import Cookies from 'js-cookie'
 import {
   Step1ProjectSetup,
   Step2BuildingBasics,
@@ -30,9 +29,9 @@ const MultiStepUpload = React.memo(function MultiStepUpload({ isOpen, onClose, i
   const [error, setError] = useState<string | null>(null)
   const [uploadProgress, setUploadProgress] = useState(0)
   
-  // Memoized saved email to prevent unnecessary re-renders
+  // Use session email only - no more cookies
   const savedEmail = useMemo(() => 
-    session?.user?.email || (typeof window !== 'undefined' ? Cookies.get('user_email') || '' : ''),
+    session?.user?.email || '',
     [session?.user?.email]
   )
   
@@ -320,8 +319,6 @@ const MultiStepUpload = React.memo(function MultiStepUpload({ isOpen, onClose, i
         throw new Error('Upload route returned no job_id - API contract violation')
       }
       
-      Cookies.set('user_email', projectData.email, { expires: 30 })
-      
       // Small delay for smooth progress completion
       setTimeout(() => {
         router.push(`/analyzing/${result.job_id}`)
@@ -333,7 +330,6 @@ const MultiStepUpload = React.memo(function MultiStepUpload({ isOpen, onClose, i
       console.error('Upload error:', error)
       
       if (error.name === 'PaymentRequiredError' || error.response?.status === 402) {
-        Cookies.set('user_email', projectData.email, { expires: 30 })
         router.push('/upgrade')
         return
       }
@@ -344,7 +340,6 @@ const MultiStepUpload = React.memo(function MultiStepUpload({ isOpen, onClose, i
           errorDetail.includes('payment') || errorDetail.includes('Payment') ||
           errorDetail.includes('stripe') || errorDetail.includes('Stripe')
         )) {
-          Cookies.set('user_email', projectData.email, { expires: 30 })
           router.push('/upgrade')
           return
         }

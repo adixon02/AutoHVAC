@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/router'
-import Cookies from 'js-cookie'
+import { useSession, signOut } from 'next-auth/react'
 
 interface NavBarProps {
   onGetStarted?: () => void
@@ -10,15 +10,11 @@ interface NavBarProps {
 
 export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarProps) {
   const router = useRouter()
-  const [userEmail, setUserEmail] = useState<string | null>(null)
+  const { data: session } = useSession()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isScrolled, setIsScrolled] = useState(false)
 
   useEffect(() => {
-    // Check for user email in cookies
-    const email = Cookies.get('user_email')
-    setUserEmail(email || null)
-
     // Handle scroll effect
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 10)
@@ -28,15 +24,11 @@ export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarPr
   }, [])
 
   const handleSignOut = () => {
-    Cookies.remove('user_email')
-    setUserEmail(null)
-    router.push('/')
+    signOut({ callbackUrl: '/' })
   }
 
   const handleDashboardClick = () => {
-    if (userEmail) {
-      router.push(`/dashboard?email=${encodeURIComponent(userEmail)}`)
-    }
+    router.push('/dashboard')
   }
 
   return (
@@ -69,7 +61,7 @@ export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarPr
             </div>
 
             {/* User Section */}
-            {userEmail ? (
+            {session?.user?.email ? (
               <div className="flex items-center space-x-3">
                 <button
                   onClick={handleDashboardClick}
@@ -80,7 +72,7 @@ export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarPr
                 <div className="relative group">
                   <button className="flex items-center space-x-2 px-3 py-2 rounded-lg hover:bg-gray-50 transition-all">
                     <div className="w-8 h-8 bg-gradient-to-br from-brand-500 to-brand-600 rounded-full flex items-center justify-center text-white text-xs font-medium shadow-sm">
-                      {userEmail.charAt(0).toUpperCase()}
+                      {session?.user?.email.charAt(0).toUpperCase()}
                     </div>
                     <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -88,7 +80,7 @@ export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarPr
                   </button>
                   <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 border border-gray-100">
                     <div className="px-4 py-2 border-b border-gray-100">
-                      <p className="text-sm font-medium text-gray-900 truncate">{userEmail}</p>
+                      <p className="text-sm font-medium text-gray-900 truncate">{session?.user?.email}</p>
                     </div>
                     <button
                       onClick={handleSignOut}
@@ -147,10 +139,10 @@ export default function NavBar({ onGetStarted, showGetStarted = true }: NavBarPr
               </Link>
 
               {/* User Section */}
-              {userEmail ? (
+              {session?.user?.email ? (
                 <div className="pt-4 border-t border-gray-100">
                   <div className="text-sm text-gray-600 mb-2 truncate">
-                    Signed in as: {userEmail}
+                    Signed in as: {session?.user?.email}
                   </div>
                   <div className="flex flex-col space-y-2">
                     <button
