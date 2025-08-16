@@ -739,15 +739,25 @@ export default function AnalyzingPage() {
                         try {
                           const email = session?.user?.email || userEmail
                           if (!email) {
+                            alert('No email found. Please refresh the page and try again.')
                             console.error('No email available for checkout')
                             return
                           }
+                          
+                          console.log('Starting checkout for email:', email)
                           const response = await apiHelpers.createCheckoutSession(email)
+                          console.log('Checkout response:', response)
+                          
                           if (response.checkout_url) {
+                            console.log('Redirecting to:', response.checkout_url)
                             window.location.href = response.checkout_url
+                          } else {
+                            alert('No checkout URL received. Please try again or contact support.')
+                            console.error('No checkout_url in response:', response)
                           }
                         } catch (error) {
                           console.error('Failed to start checkout:', error)
+                          alert(`Failed to start checkout: ${error.message || error}. Please try again or contact support.`)
                         }
                       }}
                       className="btn-primary flex items-center justify-center px-8 py-4 text-lg"
