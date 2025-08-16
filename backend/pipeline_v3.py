@@ -48,6 +48,7 @@ from domain.core.telemetry import get_telemetry
 # Domain calculations
 from domain.calculations.manual_j_v2 import get_manual_j_calculator
 from domain.calculations.infiltration_aim2 import get_infiltration_calculator, calculate_infiltration_loads
+from domain.mechanical.duct_loss_calculator import calculate_intelligent_duct_losses
 from domain.calculations.parallel_path import get_parallel_path_calculator
 from domain.calculations.zone_loads import get_zone_load_calculator
 from domain.calculations.diversity_factors import get_diversity_calculator
@@ -199,7 +200,7 @@ class PipelineV3:
             logger.info("PHASE 2: THERMAL ZONE MODELING")
             logger.info("="*40)
             
-            building_model = self._build_thermal_zones(extraction_data)
+            building_model = self._build_thermal_zones(extraction_data, user_inputs)
             
             # PHASE 3: CALCULATE ZONE-BASED LOADS (V3's Manual J implementation)
             logger.info("\n" + "="*40)
@@ -373,16 +374,24 @@ class PipelineV3:
             'is_heated': garage_result.is_heated
         }
         
-        # 8. Check for bonus over garage using overlay aligner
-        overlay_result = self.overlay_aligner.detect_bonus_over_garage(
-            spaces,
-            garage_result
-        )
-        bonus_over_garage = overlay_result.bonus_over_garage_detected
+        # 8. Check for bonus over garage using overlay aligner (ONLY if not in professional mode)
+        user_provided_conditioned_sqft = user_inputs and (user_inputs.get('conditioned_sqft') or user_inputs.get('total_sqft'))
         
-        if bonus_over_garage:
-            logger.info("Detected bonus room over garage configuration")
-            warnings.append("Bonus over garage detected - applying special load factors")
+        if user_provided_conditioned_sqft:
+            # PROFESSIONAL MODE: User provided total conditioned area, skip bonus detection
+            logger.info("🏛️ PROFESSIONAL MODE: Skipping bonus over garage detection - user provided total conditioned area")
+            bonus_over_garage = False
+        else:
+            # DISCOVERY MODE: Detect bonus configurations
+            overlay_result = self.overlay_aligner.detect_bonus_over_garage(
+                spaces,
+                garage_result
+            )
+            bonus_over_garage = overlay_result.bonus_over_garage_detected
+            
+            if bonus_over_garage:
+                logger.info("Detected bonus room over garage configuration")
+                warnings.append("Bonus over garage detected - applying special load factors")
         
         # 9. Build thermal zones
         logger.info("Building thermal zones...")
@@ -454,6 +463,48 @@ class PipelineV3:
                 heating_components[key] = heating_components.get(key, 0) + value
             for key, value in zone_components['cooling'].items():
                 cooling_components[key] = cooling_components.get(key, 0) + value
+        
+        # 11.5. Calculate intelligent duct losses (per ACCA Manual J standards)
+        logger.info(f"\n🔧 Calculating intelligent duct losses...")
+        
+        # Get user inputs for duct system configuration
+        user_inputs = extraction_data.get('user_inputs', {})
+        system_type = user_inputs.get('ductType', 'ducted')  # 'ducted' or 'ductless' 
+        duct_location = user_inputs.get('ductLocation', None)  # 'conditioned', 'attic', 'crawlspace', etc.
+        
+        # Get climate and design conditions
+        climate_zone = climate_data.get('climate_zone', '5B')
+        winter_design_temp = climate_data.get('winter_99', 10)
+        summer_design_temp = climate_data.get('summer_1', 95)
+        
+        # Get foundation type for duct location inference if needed
+        foundation_type = getattr(building_model, 'foundation_type', 'crawlspace')
+        
+        # Calculate intelligent duct losses
+        duct_results = calculate_intelligent_duct_losses(
+            system_type=system_type,
+            duct_location=duct_location,
+            climate_zone=climate_zone,
+            foundation_type=foundation_type,
+            winter_design_temp=winter_design_temp,
+            summer_design_temp=summer_design_temp
+        )
+        
+        # Apply duct losses to total loads (per ACCA Manual J)
+        duct_heating_loss = total_heating * (duct_results.heating_factor - 1.0)
+        duct_cooling_loss = total_cooling * (duct_results.cooling_factor - 1.0)
+        
+        total_heating += duct_heating_loss
+        total_cooling += duct_cooling_loss
+        
+        # Add duct losses to components for transparency
+        heating_components['duct_losses'] = duct_heating_loss
+        cooling_components['duct_losses'] = duct_cooling_loss
+        
+        logger.info(f"   System: {system_type}, Location: {duct_location or 'inferred'}")
+        logger.info(f"   Duct factors: {duct_results.heating_factor:.2f}h/{duct_results.cooling_factor:.2f}c ({duct_results.source})")
+        logger.info(f"   Duct losses: {duct_heating_loss:,.0f}h/{duct_cooling_loss:,.0f}c BTU/hr")
+        logger.info(f"   With duct losses: {total_heating:,.0f}h/{total_cooling:,.0f}c BTU/hr")
         
         # 12. Apply diversity factors for cooling
         if building_model.has_bonus_over_garage:
@@ -655,21 +706,72 @@ class PipelineV3:
         
         return extraction_data
     
-    def _build_thermal_zones(self, extraction_data: Dict[str, Any]) -> BuildingThermalModel:
+    def _build_thermal_zones(self, extraction_data: Dict[str, Any], user_inputs: Optional[Dict[str, Any]] = None) -> BuildingThermalModel:
         """
         Phase 2: Build thermal zones from extracted data
         This is where V3's zone-based approach differs from V2
         """
         logger.info("\n2.1 Creating spaces from detected rooms...")
         
-        # Create building model
+        # 🧠 SMART USER INPUT INTEGRATION: Process user inputs FIRST for accurate model creation
+        building_data = extraction_data.get('building_data', {})
+        climate_data = extraction_data.get('climate_data', {})
+        total_sqft = building_data.get('total_sqft', 2599)
+        
+        # CRITICAL FIX: Apply user inputs BEFORE building model creation
+        if user_inputs:
+            # 📏 CONDITIONED SQUARE FOOTAGE: Priority for current living space
+            user_conditioned_sqft = user_inputs.get('conditioned_sqft') or user_inputs.get('total_sqft')
+            
+            if user_conditioned_sqft:
+                user_floor_count = user_inputs.get('floor_count', 1)
+                ai_sqft = total_sqft  # AI extracted value
+                
+                logger.info(f"🏠 CONDITIONED SPACE: user={user_conditioned_sqft} sqft (current living), AI={ai_sqft}, floors={user_floor_count}")
+                
+                # 🏠 BASEMENT SIZING INTELLIGENCE: Calculate equipment sizing for future basement finishing
+                basement_equipment_factor = 1.0  # Default no basement adjustment
+                
+                foundation_type = user_inputs.get('foundation_type')
+                basement_status = user_inputs.get('basement_status')
+                climate_zone = climate_data.get('zone', '4A')
+                
+                if foundation_type == 'basement_with_slab' and basement_status == 'unfinished':
+                    # ACCA Manual J Standard: Size equipment for future basement finishing
+                    # Zone 5B (Spokane): 1.6x multiplier for unfinished basements
+                    if climate_zone.startswith('5'):
+                        basement_equipment_factor = 1.6  # ACCA standard for Zone 5
+                        logger.info(f"📐 ACCA STANDARD SIZING: Zone 5B unfinished basement → 1.6x equipment factor")
+                    elif climate_zone.startswith('6') or climate_zone.startswith('7'):
+                        basement_equipment_factor = 1.7  # Colder zones need more
+                        logger.info(f"📐 ACCA STANDARD SIZING: Zone {climate_zone} unfinished basement → 1.7x equipment factor")
+                    else:
+                        basement_equipment_factor = 1.5  # Warmer zones
+                        logger.info(f"📐 ACCA STANDARD SIZING: Zone {climate_zone} unfinished basement → 1.5x equipment factor")
+                elif foundation_type == 'basement_with_slab' and basement_status == 'finished':
+                    # Basement already included in conditioned_sqft - no adjustment needed
+                    basement_equipment_factor = 1.0
+                    logger.info(f"✅ FINISHED BASEMENT: Already included in conditioned space (1.0x factor)")
+                
+                # Store basement factor for later equipment sizing
+                building_data['basement_equipment_factor'] = basement_equipment_factor
+                
+                # Use conditioned square footage directly - user has specified actual living space
+                building_data['total_sqft'] = user_conditioned_sqft
+                building_data['user_provided_conditioned_sqft'] = True  # Flag to disable bonus zone splitting
+                total_sqft = user_conditioned_sqft  # Update for model creation
+                logger.info(f"📏 CONDITIONED SQFT ACCEPTED: {user_conditioned_sqft} sqft (user-specified living space)")
+                
+                # NOTE: Bonus room detection disabled when using conditioned_sqft to avoid double-counting
+        
+        # Create building model with processed user inputs
         building_model = BuildingThermalModel(
             building_id=f"building_{int(time.time())}",
-            total_conditioned_area_sqft=extraction_data.get('building_data', {}).get('total_sqft', 2599),
-            total_floors=extraction_data.get('building_data', {}).get('floor_count', 2),
-            climate_zone=extraction_data.get('climate_data', {}).get('zone', '4C'),
-            winter_design_temp=extraction_data.get('climate_data', {}).get('winter_99', 15),
-            summer_design_temp=extraction_data.get('climate_data', {}).get('summer_1', 95)
+            total_conditioned_area_sqft=total_sqft,  # Now uses user input if provided
+            total_floors=building_data.get('floor_count', 2),
+            climate_zone=climate_data.get('zone', '4C'),
+            winter_design_temp=climate_data.get('winter_99', 15),
+            summer_design_temp=climate_data.get('summer_1', 95)
         )
         
         # Process each page's room data
@@ -738,9 +840,15 @@ class PipelineV3:
             for z in zones for s in z.spaces
         )
         
+        # Set basement equipment factor for future sizing
+        building_data = extraction_data.get('building_data', {})
+        building_model.basement_equipment_factor = building_data.get('basement_equipment_factor', 1.0)
+        
         logger.info(f"  ✓ Foundation: {building_model.foundation_type}")
         logger.info(f"  ✓ Bonus over garage: {building_model.has_bonus_over_garage}")
         logger.info(f"  ✓ Vaulted spaces: {building_model.has_vaulted_spaces}")
+        if building_model.basement_equipment_factor > 1.0:
+            logger.info(f"  ✓ Basement equipment factor: {building_model.basement_equipment_factor:.2f}")
         
         # Validate model
         logger.info("\n2.4 Validating thermal model...")
@@ -943,10 +1051,17 @@ class PipelineV3:
         
         spaces = []
         
-        # Determine if we have bonus over garage configuration
-        has_bonus = floor_count >= 2 and total_sqft > 2000
+        # Determine if we have multi-story configuration
+        # CRITICAL: Always respect floor_count from user or AI detection
+        # Even if user provides total sqft, we still need proper zone splitting for multi-story
+        is_multi_story = floor_count >= 2
         
-        if has_bonus:
+        if is_multi_story:
+            logger.info(f"    Multi-story building ({floor_count} floors, {total_sqft} sqft) - creating separate zones per floor")
+        else:
+            logger.info(f"    Single-story building ({total_sqft} sqft) - creating unified zone")
+        
+        if is_multi_story:
             # Split into main floor + bonus floor
             # For multi-floor houses, main floor is typically 70-75% of total
             main_floor_sqft = total_sqft * 0.74  # Main floor typically larger
@@ -1158,26 +1273,32 @@ class PipelineV3:
         # INDUSTRY-LEADING GPT VISION AREA CALCULATION
         # If text extraction failed or returned fallback defaults, use GPT Vision
         # Can be disabled via DISABLE_GPT_VISION environment variable
-        use_gpt_vision = os.getenv('DISABLE_GPT_VISION', 'false').lower() != 'true'
+        # 🏛️ PROFESSIONAL MODE: Check if user provided conditioned_sqft FIRST
+        user_provided_conditioned_sqft = user_inputs and (user_inputs.get('conditioned_sqft') or user_inputs.get('total_sqft'))
         
-        if use_gpt_vision and (total_sqft <= 0 or total_sqft in [2000.0, 2599]):  # Common fallback values
-            logger.info("🎯 Text extraction failed - using GPT Vision for SMART area calculation")
-            vision_sqft = self._calculate_area_with_gpt_vision(pdf_path, page_classifications)
-            if vision_sqft > 0:
-                total_sqft = vision_sqft
-                logger.info(f"✅ GPT Vision calculated: {total_sqft:.0f} sqft")
-            else:
-                logger.warning("⚠️ GPT Vision failed - using intelligent fallback")
+        if user_provided_conditioned_sqft:
+            # PROFESSIONAL MODE: User provided area, skip ALL AI area calculation
+            logger.info(f"🏛️ PROFESSIONAL MODE: Using user-provided {user_provided_conditioned_sqft} sqft - skipping ALL AI area calculation")
+            total_sqft = float(user_provided_conditioned_sqft)
+        else:
+            # DISCOVERY MODE: Use AI area calculation
+            use_gpt_vision = os.getenv('DISABLE_GPT_VISION', 'false').lower() != 'true'
+            
+            if use_gpt_vision and (total_sqft <= 0 or total_sqft in [2000.0, 2599]):  # Common fallback values
+                logger.info("🎯 Text extraction failed - using GPT Vision for SMART area calculation")
+                vision_sqft = self._calculate_area_with_gpt_vision(pdf_path, page_classifications)
+                if vision_sqft > 0:
+                    total_sqft = vision_sqft
+                    logger.info(f"✅ GPT Vision calculated: {total_sqft:.0f} sqft")
+                else:
+                    logger.warning("⚠️ GPT Vision failed - using intelligent fallback")
+                    total_sqft = 1850  # Optimized for typical residential blueprints
+            elif not use_gpt_vision and (total_sqft <= 0 or total_sqft in [2000.0, 2599]):
+                logger.info("🚫 GPT Vision disabled - using intelligent fallback for area calculation")
                 total_sqft = 1850  # Optimized for typical residential blueprints
-        elif not use_gpt_vision and (total_sqft <= 0 or total_sqft in [2000.0, 2599]):
-            logger.info("🚫 GPT Vision disabled - using intelligent fallback for area calculation")
-            total_sqft = 1850  # Optimized for typical residential blueprints
         
-        # SMART MULTI-STORY DETECTION: Check for bonus rooms before setting floor count
-        bonus_sqft = self._detect_bonus_areas(extraction_data['text_blocks'])
-        if bonus_sqft > 200:  # Found significant bonus space
-            total_sqft += bonus_sqft
-            logger.info(f"🏠 MULTI-STORY DETECTED: Main {total_sqft - bonus_sqft:.0f} + Bonus {bonus_sqft:.0f} = Total {total_sqft:.0f} sqft")
+        # 🏛️ PROFESSIONAL MODE: Multi-story and bonus area detection disabled when user provides conditioned_sqft
+        # All area discovery logic moved above to professional mode check
         
         # Building characteristics
         building_data = {
@@ -1187,33 +1308,19 @@ class PipelineV3:
             'foundation_type': extraction_data['foundation'].foundation_type
         }
         
-        # 🧠 SMART USER INPUT INTEGRATION: Apply intelligent validation instead of simple override
+        # Set professional mode flags if user provided conditioned_sqft
+        if user_provided_conditioned_sqft:
+            building_data['user_provided_conditioned_sqft'] = True
+            building_data['ai_area_discovery_disabled'] = True
+            logger.info(f"🏛️ PROFESSIONAL MODE: Set flags in building_data - total_sqft={total_sqft}")
+        else:
+            building_data['user_provided_conditioned_sqft'] = False
+            building_data['ai_area_discovery_disabled'] = False
+        
+        # 🏛️ PROFESSIONAL MODE: User input processing moved to beginning of pipeline for consistency
+        
+        # Handle remaining user inputs (sqft processing moved above)
         if user_inputs:
-            # Handle total_sqft with smart multi-story correction
-            if 'total_sqft' in user_inputs:
-                user_sqft = user_inputs['total_sqft']
-                user_floor_count = user_inputs.get('floor_count', 1)
-                ai_sqft = total_sqft  # AI extracted value
-                
-                logger.info(f"🧠 SMART SQFT VALIDATION: user={user_sqft}, AI={ai_sqft}, floors={user_floor_count}")
-                
-                if user_floor_count > 1 and user_sqft > 1200:
-                    # Multi-story building - check for bonus areas
-                    bonus_sqft = self._detect_bonus_areas(extraction_data['text_blocks'])
-                    logger.info(f"🔍 BONUS DETECTION: found {bonus_sqft} sqft")
-                    
-                    if bonus_sqft > 200:  # Found significant bonus space
-                        corrected_sqft = user_sqft + bonus_sqft
-                        building_data['total_sqft'] = corrected_sqft
-                        logger.info(f"✅ SMART CORRECTION: {user_sqft} + {bonus_sqft} = {corrected_sqft} sqft")
-                    else:
-                        building_data['total_sqft'] = user_sqft
-                        logger.info(f"📏 USER INPUT ACCEPTED: {user_sqft} sqft (no bonus found)")
-                else:
-                    building_data['total_sqft'] = user_sqft
-                    logger.info(f"📏 SINGLE-STORY INPUT: {user_sqft} sqft")
-            
-            # Handle other user inputs normally
             for key in ['floor_count', 'year_built', 'foundation_type']:
                 if key in user_inputs:
                     building_data[key] = user_inputs[key]
@@ -1277,30 +1384,35 @@ class PipelineV3:
                 # Look for bonus rooms or additional floors from vision data
                 detected_bonus = vision_data.get('has_bonus_room', False) if vision_data else False
                 
-                # Try to detect bonus area from room analysis
-                bonus_sqft = self._detect_bonus_areas(text_blocks)
-                logger.info(f"🔍 BONUS DETECTION: detected {bonus_sqft} sqft bonus area")
-                
-                if bonus_sqft > 200:  # Found significant bonus space
-                    corrected_sqft = user_sqft + bonus_sqft
-                    info['total_sqft'] = corrected_sqft
-                    logger.info(f"🧠 SMART CORRECTION: User gave {user_sqft} sqft (main floor)")
-                    logger.info(f"   Detected bonus area: {bonus_sqft} sqft → total {corrected_sqft} sqft")
-                    logger.info(f"   AUTO-CORRECTED for multi-story building")
-                elif variance < 0.15:  # No bonus found, variance is small - trust user
+                # CRITICAL: Skip bonus detection if user provided total conditioned_sqft
+                if user_inputs and (user_inputs.get('conditioned_sqft') or user_inputs.get('total_sqft')):
                     info['total_sqft'] = user_sqft
-                    logger.info(f"📏 USER INPUT VALIDATED: {user_sqft} sqft (multi-story, no bonus detected)")
-                elif 0.4 <= ratio <= 0.7:
-                    # Fallback: multiply by floor count if no specific bonus detected
-                    corrected_sqft = user_sqft * user_floor_count
-                    if abs(corrected_sqft - ai_extracted_sqft) < abs(user_sqft - ai_extracted_sqft):
-                        info['total_sqft'] = corrected_sqft
-                        logger.info(f"🧠 FALLBACK CORRECTION: {user_sqft} sqft × {user_floor_count} floors = {corrected_sqft}")
-                    else:
-                        info['total_sqft'] = ai_extracted_sqft
-                        logger.info(f"🧠 AI OVERRIDE: Using AI {ai_extracted_sqft} over corrected {corrected_sqft}")
+                    logger.info(f"📏 USER PROVIDED TOTAL: Using {user_sqft} sqft (no bonus detection)")
                 else:
-                    info['total_sqft'] = user_sqft  # Keep user input if no clear correction
+                    # Try to detect bonus area from room analysis
+                    bonus_sqft = self._detect_bonus_areas(text_blocks)
+                    logger.info(f"🔍 BONUS DETECTION: detected {bonus_sqft} sqft bonus area")
+                    
+                    if bonus_sqft > 200:  # Found significant bonus space
+                        corrected_sqft = user_sqft + bonus_sqft
+                        info['total_sqft'] = corrected_sqft
+                        logger.info(f"🧠 SMART CORRECTION: User gave {user_sqft} sqft (main floor)")
+                        logger.info(f"   Detected bonus area: {bonus_sqft} sqft → total {corrected_sqft} sqft")
+                        logger.info(f"   AUTO-CORRECTED for multi-story building")
+                    elif variance < 0.15:  # No bonus found, variance is small - trust user
+                        info['total_sqft'] = user_sqft
+                        logger.info(f"📏 USER INPUT VALIDATED: {user_sqft} sqft (multi-story, no bonus detected)")
+                    elif 0.4 <= ratio <= 0.7:
+                        # Fallback: multiply by floor count if no specific bonus detected
+                        corrected_sqft = user_sqft * user_floor_count
+                        if abs(corrected_sqft - ai_extracted_sqft) < abs(user_sqft - ai_extracted_sqft):
+                            info['total_sqft'] = corrected_sqft
+                            logger.info(f"🧠 FALLBACK CORRECTION: {user_sqft} sqft × {user_floor_count} floors = {corrected_sqft}")
+                        else:
+                            info['total_sqft'] = ai_extracted_sqft
+                            logger.info(f"🧠 AI OVERRIDE: Using AI {ai_extracted_sqft} over corrected {corrected_sqft}")
+                    else:
+                        info['total_sqft'] = user_sqft  # Keep user input if no clear correction
                     
             elif variance < 0.15:  # Within 15% - likely both correct (single story)
                 info['total_sqft'] = user_sqft  # Trust user input
@@ -1313,26 +1425,31 @@ class PipelineV3:
                 # Check if vision detected additional floors
                 detected_bonus = vision_data.get('has_bonus_room', False) if vision_data else False
                 
-                # Try to detect bonus area from room analysis
-                bonus_sqft = self._detect_bonus_areas(text_blocks)
-                
-                if bonus_sqft > 200:  # Found significant bonus space
-                    corrected_sqft = user_sqft + bonus_sqft
-                    info['total_sqft'] = corrected_sqft
-                    logger.info(f"🧠 SMART CORRECTION: User gave {user_sqft} sqft (main floor)")
-                    logger.info(f"   Detected bonus area: {bonus_sqft} sqft → total {corrected_sqft} sqft")
-                    logger.info(f"   AUTO-CORRECTED for multi-story building")
-                elif user_floor_count > 1 and 0.4 <= ratio <= 0.7:
-                    # Fallback: multiply by floor count if no specific bonus detected
-                    corrected_sqft = user_sqft * user_floor_count
-                    if abs(corrected_sqft - ai_extracted_sqft) < abs(user_sqft - ai_extracted_sqft):
-                        info['total_sqft'] = corrected_sqft
-                        logger.info(f"🧠 FALLBACK CORRECTION: {user_sqft} sqft × {user_floor_count} floors = {corrected_sqft}")
-                    else:
-                        info['total_sqft'] = ai_extracted_sqft
-                        logger.info(f"🧠 AI OVERRIDE: Using AI {ai_extracted_sqft} over corrected {corrected_sqft}")
+                # CRITICAL: Skip bonus detection if user provided total conditioned_sqft
+                if user_inputs and (user_inputs.get('conditioned_sqft') or user_inputs.get('total_sqft')):
+                    info['total_sqft'] = user_sqft
+                    logger.info(f"📏 USER PROVIDED TOTAL: Using {user_sqft} sqft (no bonus detection)")
                 else:
-                    info['total_sqft'] = user_sqft  # Keep user input if no clear correction
+                    # Try to detect bonus area from room analysis
+                    bonus_sqft = self._detect_bonus_areas(text_blocks)
+                    
+                    if bonus_sqft > 200:  # Found significant bonus space
+                        corrected_sqft = user_sqft + bonus_sqft
+                        info['total_sqft'] = corrected_sqft
+                        logger.info(f"🧠 SMART CORRECTION: User gave {user_sqft} sqft (main floor)")
+                        logger.info(f"   Detected bonus area: {bonus_sqft} sqft → total {corrected_sqft} sqft")
+                        logger.info(f"   AUTO-CORRECTED for multi-story building")
+                    elif user_floor_count > 1 and 0.4 <= ratio <= 0.7:
+                        # Fallback: multiply by floor count if no specific bonus detected
+                        corrected_sqft = user_sqft * user_floor_count
+                        if abs(corrected_sqft - ai_extracted_sqft) < abs(user_sqft - ai_extracted_sqft):
+                            info['total_sqft'] = corrected_sqft
+                            logger.info(f"🧠 FALLBACK CORRECTION: {user_sqft} sqft × {user_floor_count} floors = {corrected_sqft}")
+                        else:
+                            info['total_sqft'] = ai_extracted_sqft
+                            logger.info(f"🧠 AI OVERRIDE: Using AI {ai_extracted_sqft} over corrected {corrected_sqft}")
+                    else:
+                        info['total_sqft'] = user_sqft  # Keep user input if no clear correction
                     
             elif user_sqft < ai_extracted_sqft * 0.7:  # User significantly lower - might be partial
                 # User might have given main floor only, AI detected total conditioned
@@ -2109,13 +2226,35 @@ Example: "LIVING 15'x12'=180 + KITCHEN 12'x10'=120 + ... = TOTAL: 1853"
         This implements V3's zone-based approach for proper load calculations
         """
         from datetime import datetime
+        from domain.thermal.foundation_thermal import get_foundation_thermal_factors
         
         logger.info("\n3.1 Calculating loads for each thermal zone...")
+        
+        # 🏗️ WORLD-CLASS FOUNDATION THERMAL MODELING
+        # Calculate foundation-specific thermal factors per ACCA Manual J
+        climate_data = extraction_data.get('climate_data', {})
+        foundation_thermal = get_foundation_thermal_factors(
+            foundation_type=building_model.foundation_type or 'slab_only',
+            climate_zone=climate_data.get('zone', '4A'),
+            winter_design_temp=climate_data.get('winter_99', 15),
+            building_area_sqft=building_model.total_conditioned_area_sqft,
+            building_perimeter_ft=None  # Will be estimated from area
+        )
+        
+        logger.info(f"🏗️ FOUNDATION THERMAL: {foundation_thermal['foundation_type']}")
+        logger.info(f"   Effective R-value: {foundation_thermal['foundation_r_value']:.1f}")
+        logger.info(f"   Thermal conductance: {foundation_thermal['foundation_conductance']:.3f} BTU/hr/°F/sqft")
+        logger.info(f"   Notes: {foundation_thermal['foundation_notes']}")
+        
+        # Store foundation thermal data in building model for zone calculations
+        building_model.foundation_thermal_factors = foundation_thermal
         
         # Initialize results
         total_heating = 0
         total_cooling = 0
         zone_loads = {}
+        heating_components = {}
+        cooling_components = {}
         all_warnings = []
         
         climate_data = extraction_data.get('climate_data', {})
@@ -2134,12 +2273,10 @@ Example: "LIVING 15'x12'=180 + KITCHEN 12'x10'=120 + ... = TOTAL: 1853"
             heating_multiplier = zone.get_infiltration_modifier(is_heating=True)
             zone_heating *= heating_multiplier
             
+            # NOTE: Bonus zone multipliers are already applied INSIDE the zone heating/cooling calculations
+            # Do NOT apply them again here to avoid double-multiplication
             if zone.is_bonus_zone:
-                # Bonus rooms need special handling - TUNED FOR PRODUCTION ACCURACY
-                # Reduced from 30% to 20% based on Example 2 validation (127% → target ~105%)
-                zone_heating *= 1.2  # Reduced heating multiplier for bonus over garage
-                zone_cooling *= 0.8  # Reduced cooling (secondary spaces)
-                logger.info(f"    Applied bonus zone factors: heating +20%, cooling -20%")
+                logger.info(f"    Bonus zone multipliers already applied in zone calculations")
             
             zone_loads[zone.zone_id] = {
                 'heating': zone_heating,
@@ -2165,6 +2302,14 @@ Example: "LIVING 15'x12'=180 + KITCHEN 12'x10'=120 + ... = TOTAL: 1853"
         # Heating: size for simultaneous operation (no diversity)
         design_heating = total_heating
         
+        # 🏠 BASEMENT EQUIPMENT SIZING: Apply future finishing factor
+        basement_equipment_factor = building_model.basement_equipment_factor if hasattr(building_model, 'basement_equipment_factor') else 1.0
+        if basement_equipment_factor > 1.0:
+            original_heating = design_heating
+            design_heating = int(design_heating * basement_equipment_factor)
+            logger.info(f"📐 BASEMENT EQUIPMENT SIZING: {original_heating:,.0f} → {design_heating:,.0f} BTU/hr (factor: {basement_equipment_factor:.2f})")
+            logger.info(f"   Equipment sized for future basement finishing")
+        
         # Cooling: apply diversity based on zone mix
         primary_zones = [z for z in building_model.zones if z.primary_occupancy]
         bonus_zones = [z for z in building_model.zones if z.is_bonus_zone]
@@ -2177,6 +2322,49 @@ Example: "LIVING 15'x12'=180 + KITCHEN 12'x10'=120 + ... = TOTAL: 1853"
             logger.info(f"    Cooling diversity applied: Primary {primary_cooling:,.0f} + 50% bonus {bonus_cooling * 0.5:,.0f}")
         else:
             design_cooling = total_cooling
+        
+        # 🔧 CRITICAL: Apply duct losses BEFORE production accuracy check
+        # This ensures loads are properly sized for actual system configuration
+        logger.info(f"\n3.3.5 Calculating intelligent duct losses...")
+        
+        # Get user inputs for duct system configuration
+        user_inputs = extraction_data.get('user_inputs', {})
+        system_type = user_inputs.get('ductType', 'ducted')  # 'ducted' or 'ductless' 
+        duct_location = user_inputs.get('ductLocation', None)  # 'conditioned', 'attic', 'crawlspace', etc.
+        
+        # Get climate and design conditions
+        climate_zone = climate_data.get('zone', '5B')
+        winter_design_temp = climate_data.get('winter_99', 10)
+        summer_design_temp = climate_data.get('summer_1', 95)
+        
+        # Get foundation type for duct location inference if needed
+        foundation_type = building_model.foundation_type or 'slab_only'
+        
+        # Calculate intelligent duct losses
+        duct_results = calculate_intelligent_duct_losses(
+            system_type=system_type,
+            duct_location=duct_location,
+            climate_zone=climate_zone,
+            foundation_type=foundation_type,
+            winter_design_temp=winter_design_temp,
+            summer_design_temp=summer_design_temp
+        )
+        
+        # Apply duct losses to design loads (per ACCA Manual J)
+        duct_heating_loss = design_heating * (duct_results.heating_factor - 1.0)
+        duct_cooling_loss = design_cooling * (duct_results.cooling_factor - 1.0)
+        
+        design_heating += duct_heating_loss
+        design_cooling += duct_cooling_loss
+        
+        # Add duct losses to components for transparency
+        heating_components['duct_losses'] = duct_heating_loss
+        cooling_components['duct_losses'] = duct_cooling_loss
+        
+        logger.info(f"   System: {system_type}, Location: {duct_location or 'inferred'}")
+        logger.info(f"   Duct factors: {duct_results.heating_factor:.2f}h/{duct_results.cooling_factor:.2f}c ({duct_results.source})")
+        logger.info(f"   Duct losses: {duct_heating_loss:,.0f}h/{duct_cooling_loss:,.0f}c BTU/hr")
+        logger.info(f"   With duct losses: {design_heating:,.0f}h/{design_cooling:,.0f}c BTU/hr")
         
         # Calculate per-sqft loads
         total_area = building_model.total_conditioned_area_sqft
@@ -2490,38 +2678,30 @@ Example: "LIVING 15'x12'=180 + KITCHEN 12'x10'=120 + ... = TOTAL: 1853"
             logger.info(f"\n   Space {i+1}: {space.space_type.value if space.space_type else 'unknown'} - {space.area_sqft:.0f} sqft")
             
             # 1. Envelope conduction losses (walls, windows, doors, roof, floor)
-            envelope_load = self._calculate_envelope_heating_load(space, design_td, climate_data, energy_specs, thermal_intelligence, user_inputs)
+            envelope_load = self._calculate_envelope_heating_load(space, design_td, building_model, climate_data, energy_specs, thermal_intelligence, user_inputs)
             logger.info(f"      Envelope load: {envelope_load:,.0f} BTU/hr ({envelope_load/space.area_sqft:.1f} BTU/hr·sqft)")
             
             # 2. Infiltration load  
             infiltration_load = self._calculate_infiltration_heating_load(space, design_td, climate_data, energy_specs, thermal_intelligence, building_model)
             logger.info(f"      Infiltration load: {infiltration_load:,.0f} BTU/hr ({infiltration_load/space.area_sqft:.1f} BTU/hr·sqft)")
             
-            # 3. Apply zone-specific multipliers for special conditions
-            zone_multiplier = 1.0
-            multiplier_reason = "Standard"
-            if space.is_over_garage:
-                zone_multiplier = 1.2  # ACCA adjustment tuned for production accuracy
-                multiplier_reason = "Bonus over garage (+20%)"
-            elif space.floor_level > 1:
-                zone_multiplier = 1.1  # Upper floor adjustment
-                multiplier_reason = "Upper floor (+10%)"
+            # 3. Calculate total load - NO ARTIFICIAL MULTIPLIERS
+            # The physics-based calculations already account for:
+            # - Bonus rooms have more exposed surfaces (calculated in envelope_load)
+            # - Upper floors have different infiltration (calculated in infiltration_load)
+            # - User provided total conditioned sqft includes ALL spaces
+            # Adding multipliers would be double-counting!
             
             base_load = envelope_load + infiltration_load
-            space_load = base_load * zone_multiplier
+            space_load = base_load  # Use physics-based calculation directly
             
-            logger.info(f"      Base load: {base_load:,.0f} BTU/hr")
-            logger.info(f"      Zone multiplier: {zone_multiplier:.2f} ({multiplier_reason})")
-            logger.info(f"      Final space load: {space_load:,.0f} BTU/hr ({space_load/space.area_sqft:.1f} BTU/hr·sqft)")
+            logger.info(f"      Total space load: {space_load:,.0f} BTU/hr ({space_load/space.area_sqft:.1f} BTU/hr·sqft)")
             
             # Track diagnostics
             space_diagnostics = {
                 'area_sqft': space.area_sqft,
                 'envelope_load': envelope_load,
                 'infiltration_load': infiltration_load,
-                'base_load': base_load,
-                'multiplier': zone_multiplier,
-                'multiplier_reason': multiplier_reason,
                 'final_load': space_load
             }
             zone_diagnostics['spaces'].append(space_diagnostics)
@@ -2601,7 +2781,7 @@ Example: "LIVING 15'x12'=180 + KITCHEN 12'x10'=120 + ... = TOTAL: 1853"
         
         return total_sensible + total_latent
     
-    def _calculate_envelope_heating_load(self, space: Space, design_td: float, climate_data: Dict = None, energy_specs=None, thermal_intelligence=None, user_inputs: Dict = None) -> float:
+    def _calculate_envelope_heating_load(self, space: Space, design_td: float, building_model: 'BuildingThermalModel', climate_data: Dict = None, energy_specs=None, thermal_intelligence=None, user_inputs: Dict = None) -> float:
         """Calculate envelope conduction heating load using climate-specific values"""
         
         # 🪟 WINDOW PERFORMANCE INTEGRATION: User input takes priority
@@ -2690,57 +2870,52 @@ Example: "LIVING 15'x12'=180 + KITCHEN 12'x10'=120 + ... = TOTAL: 1853"
         roof_load = roof_u_value * roof_area * design_td
         
         
-        # ACCA MANUAL J FOUNDATION HEAT LOSS CALCULATION
-        # Foundation acts as "heat sponge" per ACCA guidelines - includes multiple components
-        foundation_load = 0
-        rim_joist_load = 0
-        foundation_wall_load = 0
-        floor_insulation_load = 0
-        foundation_air_leakage = 0
+        # 🏗️ WORLD-CLASS FOUNDATION THERMAL MODELING
+        # Uses ACCA Manual J foundation thermal factors calculated earlier
+        foundation_thermal = getattr(building_model, 'foundation_thermal_factors', {})
         
-        if space.floor_over == BoundaryCondition.GROUND:
-            # Slab-on-Grade: Edge losses dominant per Manual J
-            perimeter = 4 * math.sqrt(floor_area)  # Approximate perimeter
-            slab_edge_u = 0.54  # F-factor for uninsulated slab edge (Manual J Table 4A)
-            foundation_load = slab_edge_u * perimeter * design_td
+        if foundation_thermal and space.floor_level == 1:  # Apply foundation thermal to ground floor only
+            # Use our calculated foundation thermal conductance
+            thermal_conductance = foundation_thermal.get('foundation_conductance', 0.1)
+            foundation_load = thermal_conductance * floor_area * design_td
             
-        elif space.floor_over == BoundaryCondition.CRAWLSPACE:
-            # ENHANCED CRAWLSPACE HEAT LOSS - PRODUCTION VALIDATED
-            # Based on validation testing: need ~10,000+ BTU/hr for accuracy
-            
-            # 1. Floor heat loss through insulation - MORE AGGRESSIVE
-            crawl_temp_factor = 1.0  # Full outdoor temperature exposure in vented crawl
-            floor_insulation_load = floor_u_value * floor_area * (design_td * crawl_temp_factor)
-            
-            # 2. Rim Joist Heat Loss - ENHANCED FOR PRODUCTION ACCURACY
-            # Rim joists are major heat loss component - validation shows undercalculated
-            perimeter = 4 * math.sqrt(floor_area)
-            rim_height = 1.0  # Full height exposure (9" + sill + band)
-            rim_area = perimeter * rim_height
-            rim_u_value = 0.40  # Higher U-value for uninsulated rim assembly
-            rim_joist_load = rim_u_value * rim_area * design_td
-            
-            # 3. Foundation Wall Heat Loss - ENHANCED
-            # Crawlspace walls contribute significant heat loss
-            foundation_wall_area = perimeter * 5.0  # Full 5ft crawl height
-            foundation_u_value = 0.15  # Higher U for uninsulated concrete block
-            foundation_wall_load = foundation_u_value * foundation_wall_area * (design_td * 0.8)  # Less ground moderation
-            
-            # 4. AIR LEAKAGE THROUGH FOUNDATION - TUNED FOR PRODUCTION ACCURACY  
-            # Crawlspaces have some air leakage but not excessive
-            foundation_air_leakage = perimeter * 0.5 * design_td  # Reduced from 2.0 - more reasonable
-            
-            foundation_load = (floor_insulation_load + rim_joist_load + 
-                             foundation_wall_load + foundation_air_leakage)
-            
-        elif space.floor_over == BoundaryCondition.GARAGE:
-            # Floor over garage - similar to conditioned but some temperature difference
-            foundation_load = floor_u_value * floor_area * (design_td * 0.6)  # Garage partially heated
-            
+            # Foundation-specific adjustments based on boundary condition
+            if space.floor_over == BoundaryCondition.CRAWLSPACE:
+                # Crawlspace temperature moderation factor
+                foundation_load *= 0.8  # Crawlspace buffers outdoor temperature
+                foundation_type_note = "Crawlspace with thermal bridging"
+            elif space.floor_over == BoundaryCondition.GROUND:
+                # Slab-on-grade with ground coupling
+                foundation_load *= 1.0  # Full thermal exposure
+                foundation_type_note = "Slab-on-grade with edge losses"
+            elif space.floor_over == BoundaryCondition.GARAGE:
+                # Floor over garage - partial conditioning
+                foundation_load *= 0.6  # Garage partially heated
+                foundation_type_note = "Floor over garage"
+            else:
+                foundation_load = 0  # Over conditioned space
+                foundation_type_note = "Over conditioned space"
+                
         else:
-            foundation_load = 0  # Over conditioned space
+            # Fallback for upper floors or missing foundation thermal data
+            if space.floor_over == BoundaryCondition.GROUND:
+                # Generic slab calculation
+                perimeter = 4 * math.sqrt(floor_area)
+                slab_edge_u = 0.54  # Manual J default
+                foundation_load = slab_edge_u * perimeter * design_td
+                foundation_type_note = "Generic slab calculation"
+            elif space.floor_over == BoundaryCondition.CRAWLSPACE:
+                # Generic crawlspace calculation
+                foundation_load = floor_u_value * floor_area * design_td * 0.8
+                foundation_type_note = "Generic crawlspace calculation"
+            elif space.floor_over == BoundaryCondition.GARAGE:
+                foundation_load = floor_u_value * floor_area * (design_td * 0.6)
+                foundation_type_note = "Floor over garage"
+            else:
+                foundation_load = 0
+                foundation_type_note = "No foundation heat loss"
         
-        # Use foundation_load instead of floor_load for total
+        # Use foundation_load as floor_load for envelope calculations
         floor_load = foundation_load
         
         # DIAGNOSTIC LOGGING - Detailed heating load breakdown with foundation components
@@ -2750,16 +2925,15 @@ Example: "LIVING 15'x12'=180 + KITCHEN 12'x10'=120 + ... = TOTAL: 1853"
         logger.info(f"      Windows:   {window_load:8,.0f} BTU/hr (U={window_u_value:.3f}, A={window_area:.0f}, ΔT={design_td:.1f})")
         logger.info(f"      Roof:      {roof_load:8,.0f} BTU/hr (U={roof_u_value:.3f}, A={roof_area:.0f}, ΔT={design_td:.1f})")
         
-        # Enhanced foundation diagnostics
-        if space.floor_over == BoundaryCondition.CRAWLSPACE and rim_joist_load > 0:
-            logger.info(f"      Foundation Components ({space.floor_over.value}):")
-            logger.info(f"        Floor:        {floor_insulation_load:8,.0f} BTU/hr (insulated floor)")
-            logger.info(f"        Rim Joist:    {rim_joist_load:8,.0f} BTU/hr (uninsulated rim)")
-            logger.info(f"        Walls:        {foundation_wall_load:8,.0f} BTU/hr (below-grade walls)")
-            logger.info(f"        Air Leakage:  {foundation_air_leakage:8,.0f} BTU/hr (foundation interface)")
-            logger.info(f"        Total:        {foundation_load:8,.0f} BTU/hr")
-        else:
-            logger.info(f"      Foundation:{floor_load:8,.0f} BTU/hr ({space.floor_over.value})")
+        # 🏗️ Foundation thermal diagnostics
+        if foundation_load > 0:
+            conductance = foundation_thermal.get('foundation_conductance', 0) if foundation_thermal else 0
+            r_value = foundation_thermal.get('foundation_r_value', 0) if foundation_thermal else 0
+            logger.info(f"      Foundation: {foundation_load:7,.0f} BTU/hr ({foundation_type_note})")
+            if foundation_thermal and space.floor_level == 1:
+                logger.info(f"                  Thermal conductance: {conductance:.3f} BTU/hr/°F/sqft, R-{r_value:.1f}")
+        elif floor_load > 0:
+            logger.info(f"      Foundation: {floor_load:7,.0f} BTU/hr ({space.floor_over.value})")
             
         logger.info(f"      TOTAL ENV: {total_envelope:8,.0f} BTU/hr")
         
@@ -2784,35 +2958,39 @@ Example: "LIVING 15'x12'=180 + KITCHEN 12'x10'=120 + ... = TOTAL: 1853"
             climate_data = {'winter_99': 10, 'design_wind_mph': 15}
         
         # Use AIM-2 model to calculate realistic infiltration
-        # Apply AI construction quality intelligence
-        construction_quality = 'leaky'  # Default fallback
+        # CRITICAL: For NEW CONSTRUCTION, default to tight/very tight per 2021 IECC
+        # New homes must meet 3 ACH50 or better (≈0.20 ACH natural)
+        construction_quality = 'tight'  # Default for NEW CONSTRUCTION
         
         if energy_specs and energy_specs.ach50:
             # Map extracted ACH50 to construction quality categories
-            if energy_specs.ach50 <= 3.0:
-                construction_quality = 'tight'
-            elif energy_specs.ach50 <= 6.0:
-                construction_quality = 'average'
+            # For NEW CONSTRUCTION, even 3.0 ACH50 is code minimum
+            if energy_specs.ach50 <= 2.0:
+                construction_quality = 'very_tight'  # High performance new construction
+            elif energy_specs.ach50 <= 3.0:
+                construction_quality = 'tight'  # Code-compliant new construction
+            elif energy_specs.ach50 <= 5.0:
+                construction_quality = 'average'  # Below code (shouldn't happen in new)
             else:
-                construction_quality = 'leaky'
-            logger.info(f"      Using extracted ACH50: {energy_specs.ach50} (mapped to {construction_quality})")
+                construction_quality = 'leaky'  # Way below code
+            logger.info(f"      Using extracted ACH50: {energy_specs.ach50} (NEW CONSTRUCTION: {construction_quality})")
             
         elif thermal_intelligence:
             # Use AI construction quality assessment
             construction_context = thermal_intelligence.get('construction_method', {})
             ai_quality = construction_context.get('construction_quality', 'average')
             
-            # Map AI quality assessment to infiltration categories
+            # Map AI quality assessment to infiltration categories for NEW CONSTRUCTION
             if ai_quality == 'above_average':
-                construction_quality = 'average'  # Don't go too tight without actual specs
+                construction_quality = 'tight'  # Good new construction
             elif ai_quality == 'below_average':
-                construction_quality = 'leaky'
+                construction_quality = 'average'  # Poor new construction (still must meet code)
             else:
-                construction_quality = 'average'
+                construction_quality = 'tight'  # Default to code-compliant
                 
-            logger.info(f"      Using AI construction quality: {ai_quality} (mapped to {construction_quality})")
+            logger.info(f"      Using AI construction quality: {ai_quality} (NEW CONSTRUCTION: {construction_quality})")
         else:
-            logger.info(f"      Using default construction: {construction_quality}")
+            logger.info(f"      Using default NEW CONSTRUCTION: {construction_quality}")
             
         infiltration_results = calculate_infiltration_loads(
             building_data, 
@@ -2993,15 +3171,17 @@ Example: "LIVING 15'x12'=180 + KITCHEN 12'x10'=120 + ... = TOTAL: 1853"
         # Use AIM-2 model for cooling infiltration
         # Use extracted ACH50 specs if available, otherwise fall back to V2's leaky assumption
         if energy_specs and energy_specs.ach50:
-            # Map extracted ACH50 to construction quality categories
-            if energy_specs.ach50 <= 3.0:
+            # Map extracted ACH50 to construction quality for NEW CONSTRUCTION
+            if energy_specs.ach50 <= 2.0:
+                construction_quality = 'very_tight'
+            elif energy_specs.ach50 <= 3.0:
                 construction_quality = 'tight'
-            elif energy_specs.ach50 <= 6.0:
+            elif energy_specs.ach50 <= 5.0:
                 construction_quality = 'average'
             else:
                 construction_quality = 'leaky'
         else:
-            construction_quality = 'leaky'  # V2 uses leaky for conservative loads
+            construction_quality = 'tight'  # Default to code-compliant new construction
             
         infiltration_results = calculate_infiltration_loads(
             building_data, 

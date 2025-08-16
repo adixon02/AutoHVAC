@@ -51,12 +51,25 @@ async def upload_blueprint(
     openai_api_key: Optional[str] = Form(None),
     # 🎯 ENHANCED USER INPUTS: Strategic fields for maximum load calculation accuracy
     project_label: Optional[str] = Form(None),  # Project name
-    square_footage: Optional[str] = Form(None),  # Most critical for accurate calculations
+    square_footage: Optional[str] = Form(None),  # Most critical for accurate calculations (conditioned space only)
     number_of_stories: Optional[str] = Form(None),  # User confirmation vs AI detection
-    heating_fuel: Optional[str] = Form(None),  # Equipment sizing accuracy
-    duct_config: Optional[str] = Form(None),  # Duct loss calculations
+    
+    # 🏠 FOUNDATION AND BASEMENT INTELLIGENCE: Critical for thermal envelope
+    foundation_type: Optional[str] = Form(None),  # slab_on_grade, crawlspace, basement
+    basement_type: Optional[str] = Form(None),  # full, daylight (only if foundation_type=basement)
+    basement_status: Optional[str] = Form(None),  # finished, unfinished (only if foundation_type=basement)
+    
+    # 🔥 HVAC SYSTEM INTELLIGENCE: Enhanced equipment sizing
+    duct_type: Optional[str] = Form(None),  # ducted, ductless
+    duct_location: Optional[str] = Form(None),  # conditioned, attic, crawlspace (only if duct_type=ducted)
+    heating_fuel: Optional[str] = Form(None),  # gas_propane, heat_pump, dual_fuel
+    
+    # 🏠 BUILDING PERFORMANCE: Thermal envelope optimization
     window_performance: Optional[str] = Form(None),  # Thermal envelope accuracy
     building_orientation: Optional[str] = Form(None),  # Solar gain calculations
+    
+    # 🔄 LEGACY COMPATIBILITY: Kept for backward compatibility
+    duct_config: Optional[str] = Form(None),  # Legacy field
     session: Session = Depends(get_session)
 ):
     """
@@ -144,12 +157,26 @@ async def upload_blueprint(
         
         # 🎯 COLLECT ENHANCED USER INPUTS: Maximum accuracy data for pipeline_v3
         form_inputs = {
+            # Core building characteristics
             "square_footage": square_footage,
-            "number_of_stories": number_of_stories, 
+            "number_of_stories": number_of_stories,
+            
+            # Foundation and basement intelligence
+            "foundation_type": foundation_type,
+            "basement_type": basement_type,
+            "basement_status": basement_status,
+            
+            # HVAC system intelligence
+            "duct_type": duct_type,
+            "duct_location": duct_location,
             "heating_fuel": heating_fuel,
-            "duct_config": duct_config,
+            
+            # Building performance
             "window_performance": window_performance,
-            "building_orientation": building_orientation
+            "building_orientation": building_orientation,
+            
+            # Legacy compatibility
+            "duct_config": duct_config
         }
         
         # Filter out None/empty values - only pass real user inputs
@@ -158,38 +185,112 @@ async def upload_blueprint(
         # 🔄 MAP TO PIPELINE_V3 FORMAT: Convert form fields to pipeline expected names
         user_inputs = {}
         
-        # Core fields that pipeline_v3 directly supports
+        # 📏 CRITICAL: Conditioned square footage (most important for accuracy)
         if "square_footage" in form_inputs:
             try:
-                user_inputs["total_sqft"] = float(form_inputs["square_footage"])
-                logger.info(f"📏 SQUARE FOOTAGE: User provided {user_inputs['total_sqft']:.0f} sqft (critical for accuracy)")
+                user_inputs["conditioned_sqft"] = float(form_inputs["square_footage"])
+                # Also set legacy field for backward compatibility
+                user_inputs["total_sqft"] = user_inputs["conditioned_sqft"]
+                logger.info(f"📏 CONDITIONED SQFT: User provided {user_inputs['conditioned_sqft']:.0f} sqft (current living space)")
             except (ValueError, TypeError):
                 logger.warning(f"⚠️ Invalid square footage: {form_inputs['square_footage']}")
         
+        # 🏠 STORIES: User confirmation vs AI detection
         if "number_of_stories" in form_inputs:
             story_mapping = {"1": 1, "2": 2, "3+": 3}
             user_inputs["floor_count"] = story_mapping.get(form_inputs["number_of_stories"], 2)
             logger.info(f"🏠 STORIES: User confirmed {user_inputs['floor_count']} floors vs AI detection")
         
-        # Future pipeline integration fields (stored for analytics and future use)
-        pipeline_ready_inputs = {}
-        if "heating_fuel" in form_inputs:
-            pipeline_ready_inputs["heating_fuel"] = form_inputs["heating_fuel"]
-        if "duct_config" in form_inputs:
-            pipeline_ready_inputs["duct_config"] = form_inputs["duct_config"]
-        if "window_performance" in form_inputs:
-            pipeline_ready_inputs["window_performance"] = form_inputs["window_performance"]
-        if "building_orientation" in form_inputs:
-            pipeline_ready_inputs["building_orientation"] = form_inputs["building_orientation"]
+        # 🏠 FOUNDATION INTELLIGENCE: Critical for thermal envelope calculations
+        if "foundation_type" in form_inputs:
+            user_inputs["foundation_type"] = form_inputs["foundation_type"]
+            user_inputs["foundationType"] = form_inputs["foundation_type"]  # Also pass camelCase
+            logger.info(f"🏗️ FOUNDATION: {form_inputs['foundation_type']} affects thermal envelope")
+            
+        if "basement_type" in form_inputs:
+            user_inputs["basement_type"] = form_inputs["basement_type"]
+            user_inputs["basementType"] = form_inputs["basement_type"]  # Also pass camelCase
+            logger.info(f"🏠 BASEMENT TYPE: {form_inputs['basement_type']}")
+            
+        if "basement_status" in form_inputs:
+            user_inputs["basement_status"] = form_inputs["basement_status"]
+            user_inputs["basementStatus"] = form_inputs["basement_status"]  # Also pass camelCase
+            if form_inputs["basement_status"] == "unfinished":
+                logger.info(f"📐 SIZING STRATEGY: Unfinished basement - sizing for future finishing")
         
-        # Add to user_inputs for future pipeline integration
-        user_inputs.update(pipeline_ready_inputs)
+        # 🔥 HVAC SYSTEM INTELLIGENCE: Enhanced ductwork mapping
+        # IMPORTANT: Pass BOTH the original fields AND the computed duct_config for maximum compatibility
+        if "duct_type" in form_inputs:
+            # Pass through the original duct_type as-is for pipeline_v3
+            user_inputs["ductType"] = form_inputs["duct_type"]
+            
+            if "duct_location" in form_inputs:
+                # Pass through the original duct_location as-is for pipeline_v3
+                user_inputs["ductLocation"] = form_inputs["duct_location"]
+                
+                # Also create the combined duct_config for backward compatibility
+                duct_type = form_inputs["duct_type"]
+                duct_location = form_inputs["duct_location"]
+                
+                if duct_type == "ducted" and duct_location:
+                    if duct_location == "conditioned":
+                        user_inputs["duct_config"] = "ducted_conditioned"
+                    elif duct_location == "attic":
+                        user_inputs["duct_config"] = "ducted_attic"
+                    elif duct_location == "crawlspace":
+                        user_inputs["duct_config"] = "ducted_crawl"
+                elif duct_type == "ductless":
+                    user_inputs["duct_config"] = "ductless"
+                    
+                logger.info(f"🌀 DUCT SYSTEM: type={duct_type}, location={duct_location} → config={user_inputs.get('duct_config', 'unknown')}")
+        
+        # Legacy duct_config support
+        elif "duct_config" in form_inputs:
+            user_inputs["duct_config"] = form_inputs["duct_config"]
+            # Decompose legacy duct_config into separate fields for pipeline_v3
+            if form_inputs["duct_config"] == "ductless":
+                user_inputs["ductType"] = "ductless"
+                user_inputs["ductLocation"] = None
+            elif form_inputs["duct_config"].startswith("ducted_"):
+                user_inputs["ductType"] = "ducted"
+                location_map = {
+                    "ducted_attic": "attic",
+                    "ducted_crawl": "crawlspace",
+                    "ducted_conditioned": "conditioned"
+                }
+                user_inputs["ductLocation"] = location_map.get(form_inputs["duct_config"], "attic")
+            logger.info(f"🌀 DUCT SYSTEM (legacy): {form_inputs['duct_config']}")
+        
+        # 🔥 HEATING SYSTEM: Equipment sizing intelligence
+        if "heating_fuel" in form_inputs:
+            user_inputs["heating_fuel"] = form_inputs["heating_fuel"]
+            # Also pass in camelCase for consistency with frontend
+            user_inputs["heatingFuel"] = form_inputs["heating_fuel"]
+            logger.info(f"🔥 HEATING: {form_inputs['heating_fuel']} affects equipment recommendations")
+        
+        # 🪟 BUILDING PERFORMANCE: Thermal envelope optimization
+        if "window_performance" in form_inputs:
+            user_inputs["window_performance"] = form_inputs["window_performance"]
+            user_inputs["windowPerformance"] = form_inputs["window_performance"]
+            
+        if "building_orientation" in form_inputs:
+            user_inputs["building_orientation"] = form_inputs["building_orientation"]
+            user_inputs["buildingOrientation"] = form_inputs["building_orientation"]
+        
+        # 🏗️ Pass through all other fields in both snake_case and camelCase
+        if "number_of_stories" in form_inputs:
+            user_inputs["numberOfStories"] = form_inputs["number_of_stories"]
+            
+        if "square_footage" in form_inputs:
+            user_inputs["squareFootage"] = form_inputs["square_footage"]
         
         # Update job with user inputs
         job_storage.update_job(job_id, {"user_inputs": user_inputs})
         
-        logger.info(f"🎯 ACTIVE INPUTS: {[k for k in user_inputs.keys() if k in ['total_sqft', 'floor_count']]} (pipeline integrated)")
-        logger.info(f"📊 FUTURE INPUTS: {list(pipeline_ready_inputs.keys())} (stored for analytics + future integration)")
+        # Log active pipeline integrations
+        active_inputs = [k for k in user_inputs.keys() if k in ['conditioned_sqft', 'total_sqft', 'floor_count', 'foundation_type', 'duct_config', 'heating_fuel']]
+        logger.info(f"🎯 PIPELINE INTEGRATED: {active_inputs}")
+        logger.info(f"📊 TOTAL USER INPUTS: {len(user_inputs)} fields collected for maximum accuracy")
         
         if should_process_immediately:
             # Start processing in background with enhanced user inputs
