@@ -647,7 +647,7 @@ class PipelineV3:
         
         # 1.4 Extract building characteristics (prioritizing floor plan pages)
         logger.info("\n1.4 Extracting building characteristics...")
-        building_data = self._extract_building_characteristics(extraction_data, user_inputs)
+        building_data = self._extract_building_characteristics(extraction_data, user_inputs, pdf_path)
         extraction_data['building_data'] = building_data
         logger.info(f"  ✓ Building: {building_data['total_sqft']:.0f} sqft, "
                    f"{building_data['floor_count']} floors")
@@ -1130,7 +1130,8 @@ class PipelineV3:
     def _extract_building_characteristics(
         self,
         extraction_data: Dict,
-        user_inputs: Optional[Dict]
+        user_inputs: Optional[Dict],
+        pdf_path: str
     ) -> Dict[str, Any]:
         """Extract building characteristics using enhanced text processing"""
         
