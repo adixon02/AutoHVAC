@@ -9,6 +9,26 @@ interface Zone {
   room_type?: string
 }
 
+// Helper function to safely render any data type as string
+const safeRender = (value: any): string => {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number') return value.toString()
+  if (typeof value === 'boolean') return value.toString()
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'object') {
+    // Handle common object patterns gracefully
+    if (Array.isArray(value)) return value.join(', ')
+    if (value.toString && typeof value.toString === 'function' && value.toString() !== '[object Object]') {
+      return value.toString()
+    }
+    // For complex objects, extract meaningful text
+    return Object.entries(value)
+      .map(([key, val]) => `${key}: ${safeRender(val)}`)
+      .join(', ')
+  }
+  return String(value)
+}
+
 interface ResultsPreviewProps {
   result: {
     heating_load_btu_hr: number
@@ -119,7 +139,7 @@ export default function ResultsPreview({ result, userEmail, onCreateAccount, isL
                   </svg>
                   Recommended System Type
                 </h4>
-                <p className="text-blue-800 text-sm">{result.equipment_recommendations.system_type_recommendation}</p>
+                <p className="text-blue-800 text-sm">{safeRender(result.equipment_recommendations.system_type_recommendation)}</p>
               </div>
             )}
 
@@ -132,7 +152,7 @@ export default function ResultsPreview({ result, userEmail, onCreateAccount, isL
                   </svg>
                   Equipment Sizing
                 </h4>
-                <p className="text-blue-800 text-sm">{result.equipment_recommendations.equipment_sizing}</p>
+                <p className="text-blue-800 text-sm">{safeRender(result.equipment_recommendations.equipment_sizing)}</p>
               </div>
             )}
 
@@ -145,7 +165,7 @@ export default function ResultsPreview({ result, userEmail, onCreateAccount, isL
                   </svg>
                   Efficiency Standards
                 </h4>
-                <p className="text-blue-800 text-sm">{result.equipment_recommendations.efficiency_recommendations}</p>
+                <p className="text-blue-800 text-sm">{safeRender(result.equipment_recommendations.efficiency_recommendations)}</p>
               </div>
             )}
 
@@ -159,7 +179,7 @@ export default function ResultsPreview({ result, userEmail, onCreateAccount, isL
                   </svg>
                   Climate Considerations
                 </h4>
-                <p className="text-blue-800 text-sm">{result.equipment_recommendations.regional_factors}</p>
+                <p className="text-blue-800 text-sm">{safeRender(result.equipment_recommendations.regional_factors)}</p>
               </div>
             )}
           </div>
@@ -173,7 +193,7 @@ export default function ResultsPreview({ result, userEmail, onCreateAccount, isL
                 </svg>
                 Installation Considerations
               </h4>
-              <p className="text-blue-800 text-sm">{result.equipment_recommendations.installation_considerations}</p>
+              <p className="text-blue-800 text-sm">{safeRender(result.equipment_recommendations.installation_considerations)}</p>
             </div>
           )}
 
@@ -186,7 +206,7 @@ export default function ResultsPreview({ result, userEmail, onCreateAccount, isL
                 </svg>
                 Cost Considerations
               </h4>
-              <p className="text-blue-800 text-sm">{result.equipment_recommendations.cost_considerations}</p>
+              <p className="text-blue-800 text-sm">{safeRender(result.equipment_recommendations.cost_considerations)}</p>
             </div>
           )}
 
@@ -199,7 +219,7 @@ export default function ResultsPreview({ result, userEmail, onCreateAccount, isL
                 </svg>
                 For HVAC Contractors
               </h4>
-              <p className="text-amber-800 text-sm">{result.equipment_recommendations.contractor_notes}</p>
+              <p className="text-amber-800 text-sm">{safeRender(result.equipment_recommendations.contractor_notes)}</p>
             </div>
           )}
 
