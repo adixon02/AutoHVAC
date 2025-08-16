@@ -3,7 +3,7 @@ import { downloadProjectReport } from '../lib/fetcher'
 
 interface ProjectCardProps {
   project: {
-    id: string
+    job_id: string
     project_label: string
     filename: string
     status: string
@@ -70,8 +70,8 @@ export default function ProjectCard({ project, userEmail, onDownload }: ProjectC
   const handleDownload = async (e: React.MouseEvent) => {
     e.stopPropagation() // Prevent card click when downloading
     try {
-      await downloadProjectReport(project.id, userEmail)
-      onDownload?.(project.id)
+      await downloadProjectReport(project.job_id, userEmail)
+      onDownload?.(project.job_id)
     } catch (error) {
       console.error('Download failed:', error)
       alert('Failed to download report. Please try again.')
@@ -80,7 +80,7 @@ export default function ProjectCard({ project, userEmail, onDownload }: ProjectC
 
   const handleCardClick = () => {
     // Open the analyzing page to view results/status
-    window.open(`/analyzing/${project.id}`, '_blank')
+    window.open(`/analyzing/${project.job_id}`, '_blank')
   }
 
   const formatDate = (dateString: string) => {
@@ -140,7 +140,7 @@ export default function ProjectCard({ project, userEmail, onDownload }: ProjectC
               </svg>
             </div>
             <span className="text-gray-900 font-medium">ID:</span>
-            <span className="ml-1 font-mono text-gray-500">{project.id?.substring(0, 8) || 'N/A'}...</span>
+            <span className="ml-1 font-mono text-gray-500">{project.job_id?.substring(0, 8) || 'N/A'}...</span>
           </div>
           
           <div className="flex items-center text-sm text-gray-600">

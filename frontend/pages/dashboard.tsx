@@ -8,7 +8,7 @@ import MultiStepUpload from '../components/MultiStepUpload'
 import { useSession, signOut } from 'next-auth/react'
 
 interface Project {
-  id: string
+  job_id: string
   project_label: string
   filename: string
   status: string
