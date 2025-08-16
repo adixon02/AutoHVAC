@@ -19,6 +19,15 @@ interface ResultsPreviewProps {
       heating_size_tons?: number
       cooling_size_tons?: number
       system_type?: string
+      // NEW AI-generated comprehensive recommendations
+      system_type_recommendation?: string
+      equipment_sizing?: string
+      efficiency_recommendations?: string
+      installation_considerations?: string
+      cost_considerations?: string
+      regional_factors?: string
+      contractor_notes?: string
+      ai_generated_report?: string
     }
   }
   userEmail?: string | null
